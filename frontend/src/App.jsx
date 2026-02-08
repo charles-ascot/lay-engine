@@ -372,15 +372,26 @@ export default function App() {
             <span style={{ color: "#e5e5e5", marginLeft: 6 }}>LAY ENGINE</span>
           </div>
           <StatusBadge status={state?.status || "—"} />
-          {state?.dry_run && (
-            <div style={{
+          <button
+            onClick={async () => {
+              const newMode = !state?.dry_run;
+              const msg = newMode
+                ? "Switch to DRY RUN mode? (no real bets)"
+                : "Switch to LIVE mode? This will place REAL BETS with REAL MONEY!";
+              if (!window.confirm(msg)) return;
+              await fetch(`${API_BASE}/api/engine/dry-run`, { method: "POST" });
+              await fetchState();
+            }}
+            style={{
               fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 4,
-              background: "#422006", color: "#fbbf24",
+              border: "none", cursor: "pointer",
+              background: state?.dry_run ? "#422006" : "#450a0a",
+              color: state?.dry_run ? "#fbbf24" : "#fca5a5",
               fontFamily: "'JetBrains Mono', monospace",
-            }}>
-              DRY RUN
-            </div>
-          )}
+            }}
+          >
+            {state?.dry_run ? "DRY RUN" : "LIVE"}
+          </button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {state?.balance != null && (

@@ -51,6 +51,7 @@ class LayEngine:
         self.balance: Optional[float] = None
         self.errors: list[dict] = []
         self.day_started: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.dry_run: bool = DRY_RUN  # Start with env default, toggleable at runtime
 
     # ──────────────────────────────────────────────
     #  AUTHENTICATION
@@ -104,7 +105,7 @@ class LayEngine:
     def _run_loop(self):
         """Main engine loop."""
         # Verify session is still valid
-        if not DRY_RUN:
+        if not self.dry_run:
             if not self.client.ensure_session():
                 self.status = "AUTH_FAILED"
                 self._add_error("Session expired and re-authentication failed")
@@ -115,7 +116,7 @@ class LayEngine:
             logger.info(f"Account balance: £{self.balance}")
 
         self.status = "RUNNING"
-        logger.info(f"Engine running (DRY_RUN={DRY_RUN}, POLL={POLL_INTERVAL}s, BET_BEFORE={BET_BEFORE_MINUTES}m)")
+        logger.info(f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s, BET_BEFORE={BET_BEFORE_MINUTES}m)")
 
         while self.running:
             try:
@@ -149,7 +150,7 @@ class LayEngine:
         self.last_scan = now.isoformat()
 
         # Refresh market list
-        if not DRY_RUN:
+        if not self.dry_run:
             self.client.ensure_session()
             self.markets = self.client.get_todays_win_markets()
         else:
@@ -203,7 +204,7 @@ class LayEngine:
         self.processed_markets.add(market_id)
 
         # Step 1: Get current prices
-        if DRY_RUN:
+        if self.dry_run:
             logger.info(f"DRY_RUN: Would fetch prices for {market_id}")
             # Create dummy result for dry run
             result = RuleResult(
@@ -274,7 +275,7 @@ class LayEngine:
             f"[{instruction.rule_applied}]"
         )
 
-        if DRY_RUN:
+        if self.dry_run:
             bet_record = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "dry_run": True,
@@ -345,7 +346,7 @@ class LayEngine:
         return {
             "authenticated": self.is_authenticated,
             "status": self.status,
-            "dry_run": DRY_RUN,
+            "dry_run": self.dry_run,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,

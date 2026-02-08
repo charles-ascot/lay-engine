@@ -143,3 +143,10 @@ def stop_engine():
     """Stop the engine."""
     engine.stop()
     return {"status": engine.status}
+
+
+@app.post("/api/engine/dry-run")
+def toggle_dry_run():
+    """Toggle dry run mode on/off."""
+    engine.dry_run = not engine.dry_run
+    return {"dry_run": engine.dry_run}
