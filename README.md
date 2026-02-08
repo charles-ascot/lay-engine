@@ -37,11 +37,11 @@ Frontend runs on `http://localhost:5173` and proxies `/api` to `localhost:8080`.
 
 ```bash
 # Build and push
-gcloud builds submit --tag gcr.io/YOUR_PROJECT/chimera-lay-engine
+gcloud builds submit --tag gcr.io/chimera-v4/chimera-lay-engine
 
 # Deploy
 gcloud run deploy chimera-lay-engine \
-  --image gcr.io/YOUR_PROJECT/chimera-lay-engine \
+  --image gcr.io/chimera-v4/chimera-lay-engine \
   --region europe-west2 \
   --platform managed \
   --allow-unauthenticated \
