@@ -37,6 +37,7 @@ class BetfairClient:
         self.password = password
         self.session_token: Optional[str] = None
         self.session_expiry: Optional[datetime] = None
+        self.last_login_error: Optional[str] = None
 
     # ──────────────────────────────────────────────
     #  AUTH
@@ -58,12 +59,15 @@ class BetfairClient:
             if data.get("status") == "SUCCESS":
                 self.session_token = data["token"]
                 self.session_expiry = datetime.now(timezone.utc) + timedelta(hours=4)
+                self.last_login_error = None
                 logger.info("Betfair login successful")
                 return True
             else:
-                logger.error(f"Betfair login failed: {data.get('error', 'unknown')}")
+                self.last_login_error = data.get("error", "unknown")
+                logger.error(f"Betfair login failed: {self.last_login_error}")
                 return False
         except Exception as e:
+            self.last_login_error = str(e)
             logger.error(f"Betfair login exception: {e}")
             return False
 

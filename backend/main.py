@@ -62,12 +62,12 @@ class LoginRequest(BaseModel):
 @app.post("/api/login")
 def login(req: LoginRequest):
     """Authenticate with Betfair."""
-    success = engine.login(req.username, req.password)
+    success, error = engine.login(req.username, req.password)
     if success:
         return {"status": "ok", "balance": engine.balance}
     return JSONResponse(
         status_code=401,
-        content={"status": "error", "message": "Invalid Betfair credentials"},
+        content={"status": "error", "message": f"Betfair login failed: {error}"},
     )
 
 

@@ -56,8 +56,8 @@ class LayEngine:
     #  AUTHENTICATION
     # ──────────────────────────────────────────────
 
-    def login(self, username: str, password: str) -> bool:
-        """Validate credentials against Betfair SSO. Returns True on success."""
+    def login(self, username: str, password: str) -> tuple[bool, str]:
+        """Validate credentials against Betfair SSO. Returns (success, error_msg)."""
         self.client = BetfairClient(
             app_key=BETFAIR_APP_KEY,
             username=username,
@@ -65,9 +65,10 @@ class LayEngine:
         )
         if self.client.login():
             self.balance = self.client.get_account_balance()
-            return True
+            return True, ""
+        error = self.client.last_login_error or "unknown"
         self.client = None
-        return False
+        return False, error
 
     def logout(self):
         """Clear credentials and stop engine."""
