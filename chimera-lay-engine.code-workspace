@@ -1,0 +1,41 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "python3",
+    "python.analysis.extraPaths": ["backend"],
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/node_modules": true
+    },
+    "editor.formatOnSave": true,
+    "editor.rulers": [100]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Backend (FastAPI)",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": ["main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"],
+        "cwd": "${workspaceFolder}/backend",
+        "envFile": "${workspaceFolder}/.env",
+        "console": "integratedTerminal"
+      },
+      {
+        "name": "Run Tests",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/test_rules.py",
+        "cwd": "${workspaceFolder}",
+        "console": "integratedTerminal"
+      }
+    ]
+  }
+}
