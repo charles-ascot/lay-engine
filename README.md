@@ -45,7 +45,7 @@ gcloud run deploy chimera-lay-engine \
   --region europe-west2 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "BETFAIR_APP_KEY=HTPjf4PpMGLksswf,BETFAIR_USERNAME=markinsley,BETFAIR_PASSWORD=*********,DRY_RUN=true,FRONTEND_URL=https://layengine.thync.online"
+  --set-env-vars "BETFAIR_APP_KEY=HTPjf4PpMGLksswf,BETFAIR_USERNAME=markinsley,BETFAIR_PASSWORD=***0******,DRY_RUN=true,FRONTEND_URL=https://layengine.thync.online"
 ```
 
 Cloud Run URL: `https://lay-engine-950990732577.europe-west2.run.app`
