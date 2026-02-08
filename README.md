@@ -48,7 +48,7 @@ gcloud run deploy chimera-lay-engine \
   --set-env-vars "BETFAIR_APP_KEY=HTPjf4PpMGLksswf,BETFAIR_USERNAME=markinsley,BETFAIR_PASSWORD=YOUR_PASSWORD,DRY_RUN=true,FRONTEND_URL=https://layengine.thync.online"
 ```
 
-After deploy, copy the Cloud Run URL (e.g. `https://chimera-lay-engine-xxxxx-nod.a.run.app`).
+Cloud Run URL: `https://lay-engine-950990732577.europe-west2.run.app`
 
 ## Deploy Frontend → Cloudflare Pages
 

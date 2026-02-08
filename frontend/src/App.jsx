@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 // In production (Cloudflare Pages), point to Cloud Run backend
 // In local dev, Vite proxy handles /api → localhost:8080
 const API_BASE = import.meta.env.PROD
-  ? "https://layengine-api-xxxxxxxxxx-nod.a.run.app"  // UPDATE after Cloud Run deploy
+  ? "https://lay-engine-950990732577.europe-west2.run.app"
   : "";
 
 // ── Rule descriptions ──
