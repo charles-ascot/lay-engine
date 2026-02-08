@@ -171,10 +171,120 @@ function ResultRow({ result }) {
   );
 }
 
+function LoginScreen({ onLogin, error, loading }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onLogin(username, password);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#050505", color: "#e5e5e5",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center",
+    }}>
+      <div style={{
+        fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em",
+        fontFamily: "'JetBrains Mono', monospace", marginBottom: 8,
+      }}>
+        <span style={{ color: "#525252" }}>CHIMERA</span>
+        <span style={{ color: "#e5e5e5", marginLeft: 8 }}>LAY ENGINE</span>
+      </div>
+      <div style={{
+        fontSize: 12, color: "#525252", marginBottom: 32,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        Betfair Login
+      </div>
+      <form onSubmit={handleSubmit} style={{
+        background: "#0a0a0a", border: "1px solid #1e1e1e", borderRadius: 10,
+        padding: 32, width: 380,
+      }}>
+        {error && (
+          <div style={{
+            padding: "8px 12px", marginBottom: 16, borderRadius: 6,
+            background: "#450a0a", color: "#fca5a5", fontSize: 12,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            {error}
+          </div>
+        )}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{
+            display: "block", fontSize: 11, fontWeight: 600,
+            letterSpacing: "0.05em", textTransform: "uppercase",
+            color: "#525252", marginBottom: 6,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            Username
+          </label>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+            autoFocus
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 6,
+              border: "1px solid #262626", background: "#141414",
+              color: "#e5e5e5", fontSize: 14, outline: "none",
+              fontFamily: "'JetBrains Mono', monospace",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <div style={{ marginBottom: 24 }}>
+          <label style={{
+            display: "block", fontSize: 11, fontWeight: 600,
+            letterSpacing: "0.05em", textTransform: "uppercase",
+            color: "#525252", marginBottom: 6,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            Password
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 6,
+              border: "1px solid #262626", background: "#141414",
+              color: "#e5e5e5", fontSize: 14, outline: "none",
+              fontFamily: "'JetBrains Mono', monospace",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: "100%", padding: "10px 0", borderRadius: 6,
+            border: "none", background: "#052e16", color: "#4ade80",
+            fontSize: 13, fontWeight: 700, letterSpacing: "0.05em",
+            cursor: loading ? "not-allowed" : "pointer",
+            fontFamily: "'JetBrains Mono', monospace",
+            opacity: loading ? 0.5 : 1,
+          }}
+        >
+          {loading ? "AUTHENTICATING..." : "LOGIN"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [state, setState] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginError, setLoginError] = useState(null);
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const fetchState = useCallback(async () => {
     try {
@@ -183,16 +293,42 @@ export default function App() {
       const data = await res.json();
       setState(data);
       setError(null);
+      if (data.authenticated === false) {
+        setIsLoggedIn(false);
+      }
     } catch (e) {
       setError(e.message);
     }
   }, []);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
     fetchState();
     const interval = setInterval(fetchState, 5000);
     return () => clearInterval(interval);
-  }, [fetchState]);
+  }, [fetchState, isLoggedIn]);
+
+  const handleLogin = async (username, password) => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsLoggedIn(true);
+        fetchState();
+      } else {
+        setLoginError(data.message || "Login failed");
+      }
+    } catch (e) {
+      setLoginError("Cannot connect to backend: " + e.message);
+    }
+    setLoginLoading(false);
+  };
 
   const toggleEngine = async () => {
     setLoading(true);
@@ -209,6 +345,16 @@ export default function App() {
 
   const s = state?.summary || {};
   const isRunning = state?.status === "RUNNING";
+
+  if (!isLoggedIn) {
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        error={loginError}
+        loading={loginLoading}
+      />
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#050505", color: "#e5e5e5" }}>
@@ -258,6 +404,21 @@ export default function App() {
             }}
           >
             {loading ? "..." : isRunning ? "■ STOP" : "▶ START"}
+          </button>
+          <button
+            onClick={async () => {
+              await fetch(`${API_BASE}/api/logout`, { method: "POST" });
+              setIsLoggedIn(false);
+              setState(null);
+            }}
+            style={{
+              padding: "8px 16px", borderRadius: 6, border: "1px solid #262626",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              fontFamily: "'JetBrains Mono', monospace",
+              background: "transparent", color: "#525252",
+            }}
+          >
+            LOGOUT
           </button>
         </div>
       </div>

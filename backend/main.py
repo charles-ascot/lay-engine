@@ -17,6 +17,8 @@ if env_path.exists():
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from engine import LayEngine
 
@@ -48,9 +50,33 @@ app.add_middleware(
 engine = LayEngine()
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 # ──────────────────────────────────────────────
 #  API ENDPOINTS
 # ──────────────────────────────────────────────
+
+@app.post("/api/login")
+def login(req: LoginRequest):
+    """Authenticate with Betfair."""
+    success = engine.login(req.username, req.password)
+    if success:
+        return {"status": "ok", "balance": engine.balance}
+    return JSONResponse(
+        status_code=401,
+        content={"status": "error", "message": "Invalid Betfair credentials"},
+    )
+
+
+@app.post("/api/logout")
+def logout():
+    """Clear credentials and stop engine."""
+    engine.logout()
+    return {"status": "ok"}
+
 
 @app.get("/api/health")
 def health():
@@ -103,6 +129,11 @@ def get_rules():
 @app.post("/api/engine/start")
 def start_engine():
     """Start the engine."""
+    if not engine.is_authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Not authenticated. Please login first."},
+        )
     engine.start()
     return {"status": engine.status}
 

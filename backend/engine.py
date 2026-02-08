@@ -19,8 +19,6 @@ logger = logging.getLogger("engine")
 
 # ── Configuration from environment ──
 BETFAIR_APP_KEY = os.environ.get("BETFAIR_APP_KEY", "")
-BETFAIR_USERNAME = os.environ.get("BETFAIR_USERNAME", "")
-BETFAIR_PASSWORD = os.environ.get("BETFAIR_PASSWORD", "")
 
 # How many minutes before race to place the bet
 BET_BEFORE_MINUTES = int(os.environ.get("BET_BEFORE_MINUTES", "2"))
@@ -39,11 +37,7 @@ class LayEngine:
     """
 
     def __init__(self):
-        self.client = BetfairClient(
-            app_key=BETFAIR_APP_KEY,
-            username=BETFAIR_USERNAME,
-            password=BETFAIR_PASSWORD,
-        )
+        self.client: Optional[BetfairClient] = None
         self.running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -59,11 +53,39 @@ class LayEngine:
         self.day_started: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # ──────────────────────────────────────────────
+    #  AUTHENTICATION
+    # ──────────────────────────────────────────────
+
+    def login(self, username: str, password: str) -> bool:
+        """Validate credentials against Betfair SSO. Returns True on success."""
+        self.client = BetfairClient(
+            app_key=BETFAIR_APP_KEY,
+            username=username,
+            password=password,
+        )
+        if self.client.login():
+            self.balance = self.client.get_account_balance()
+            return True
+        self.client = None
+        return False
+
+    def logout(self):
+        """Clear credentials and stop engine."""
+        self.stop()
+        self.client = None
+
+    @property
+    def is_authenticated(self) -> bool:
+        return self.client is not None and self.client.session_token is not None
+
+    # ──────────────────────────────────────────────
     #  ENGINE LIFECYCLE
     # ──────────────────────────────────────────────
 
     def start(self):
         """Start the engine loop in a background thread."""
+        if self.client is None:
+            raise RuntimeError("Cannot start engine: not authenticated")
         if self.running:
             return
         self.running = True
@@ -80,11 +102,11 @@ class LayEngine:
 
     def _run_loop(self):
         """Main engine loop."""
-        # Authenticate
+        # Verify session is still valid
         if not DRY_RUN:
-            if not self.client.login():
+            if not self.client.ensure_session():
                 self.status = "AUTH_FAILED"
-                self._add_error("Authentication failed — check credentials")
+                self._add_error("Session expired and re-authentication failed")
                 self.running = False
                 return
 
@@ -320,6 +342,7 @@ class LayEngine:
         total_liability = sum(b.get("liability", 0) for b in self.bets_placed)
 
         return {
+            "authenticated": self.is_authenticated,
             "status": self.status,
             "dry_run": DRY_RUN,
             "date": self.day_started,
