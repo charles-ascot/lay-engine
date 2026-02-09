@@ -12,7 +12,6 @@ COPY backend/ .
 # Set DRY_RUN=false in Cloud Run env vars to go live.
 ENV DRY_RUN=true
 ENV POLL_INTERVAL=30
-ENV BET_BEFORE_MINUTES=2
 ENV STATE_FILE=/tmp/chimera_engine_state.json
 # BETFAIR_APP_KEY must be set in Cloud Run environment variables
 # FRONTEND_URL must be set in Cloud Run environment variables

@@ -95,5 +95,4 @@ gcloud scheduler jobs create http chimera-keepalive \
 | `FRONTEND_URL` | Cloud Run | `https://layengine.thync.online` | CORS origin |
 | `DRY_RUN` | Cloud Run | `true` | Skip real bet placement |
 | `POLL_INTERVAL` | Cloud Run | `30` | Seconds between scans |
-| `BET_BEFORE_MINUTES` | Cloud Run | `2` | Minutes before race to place bets |
 | `VITE_API_URL` | Cloudflare Pages | — | Backend API URL |

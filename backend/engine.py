@@ -28,9 +28,6 @@ logger = logging.getLogger("engine")
 # ── Configuration from environment ──
 BETFAIR_APP_KEY = os.environ.get("BETFAIR_APP_KEY", "")
 
-# How many minutes before race to place the bet
-BET_BEFORE_MINUTES = int(os.environ.get("BET_BEFORE_MINUTES", "2"))
-
 # Dry run mode (log but don't place real bets)
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 
@@ -195,8 +192,7 @@ class LayEngine:
 
         self.status = "RUNNING"
         logger.info(
-            f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s, "
-            f"BET_BEFORE={BET_BEFORE_MINUTES}m)"
+            f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s)"
         )
 
         scan_count = 0
@@ -270,7 +266,6 @@ class LayEngine:
             except (ValueError, KeyError):
                 continue
 
-            # Only process if within the betting window
             minutes_to_race = (race_time - now).total_seconds() / 60
 
             if minutes_to_race < 0:
@@ -278,11 +273,7 @@ class LayEngine:
                 self.processed_markets.add(market_id)
                 continue
 
-            if minutes_to_race > BET_BEFORE_MINUTES:
-                # Too early — wait
-                continue
-
-            # ── WITHIN BETTING WINDOW → PROCESS ──
+            # ── Process as soon as market is found (pre-off) ──
             logger.info(
                 f"Processing {market['venue']} {market['market_name']} "
                 f"({minutes_to_race:.1f}m to off)"
