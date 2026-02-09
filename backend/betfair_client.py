@@ -192,10 +192,11 @@ class BetfairClient:
     #  PRICE RETRIEVAL
     # ──────────────────────────────────────────────
 
-    def get_market_prices(self, market_id: str) -> list[Runner]:
+    def get_market_prices(self, market_id: str) -> tuple[list["Runner"], bool]:
         """
         Get current best-available-to-lay prices for all runners in a market.
-        Returns Runner objects with prices populated.
+        Returns (runners, is_valid) where is_valid=False if market is
+        closed, suspended, or in-play.
         """
         params = {
             "marketIds": [market_id],
@@ -206,14 +207,21 @@ class BetfairClient:
 
         result = self._api_call("listMarketBook", params)
         if result is None or len(result) == 0:
-            return []
+            return [], False
 
         market = result[0]
 
-        # Check market is still open and not in-play
+        # Check market is still open
         if market.get("status") != "OPEN":
             logger.warning(f"Market {market_id} status: {market.get('status')} — skipping")
-            return []
+            return [], False
+
+        # ── FIX: Check market is NOT in-play ──
+        # Markets can be OPEN + inPlay=True simultaneously.
+        # We only place pre-off bets.
+        if market.get("inPlay", False):
+            logger.warning(f"Market {market_id} is IN-PLAY — skipping (pre-off only)")
+            return [], False
 
         runners = []
         for r in market.get("runners", []):
@@ -231,7 +239,7 @@ class BetfairClient:
 
             runners.append(runner)
 
-        return runners
+        return runners, True
 
     def get_market_book(self, market_id: str) -> Optional[dict]:
         """Get full market book including status and inPlay flag."""
@@ -260,18 +268,25 @@ class BetfairClient:
         """
         Place a single LAY order on Betfair.
         Returns the instruction report from Betfair.
+
+        FIX: Betfair Exchange API expects:
+          - selectionId: integer (long)
+          - handicap: number
+          - size: number (double)
+          - price: number (double)
+        NOT strings. Sending strings causes silent rejection.
         """
         params = {
             "marketId": market_id,
             "instructions": [
                 {
-                    "selectionId": str(selection_id),
-                    "handicap": "0",
+                    "selectionId": int(selection_id),
+                    "handicap": 0,
                     "side": "LAY",
                     "orderType": "LIMIT",
                     "limitOrder": {
-                        "size": str(size),
-                        "price": str(price),
+                        "size": round(float(size), 2),
+                        "price": round(float(price), 2),
                         "persistenceType": "LAPSE",
                     },
                 }

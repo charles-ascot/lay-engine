@@ -3,6 +3,10 @@ CHIMERA Lay Engine — API Server
 =================================
 FastAPI backend for Cloud Run (europe-west2).
 Frontend served from Cloudflare Pages.
+
+FIX LOG:
+  - Added /api/keepalive endpoint for Cloud Run minimum-instances warmup
+  - Engine state now persists across cold starts via disk
 """
 
 import os
@@ -29,7 +33,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-app = FastAPI(title="CHIMERA Lay Engine", version="1.0.0")
+app = FastAPI(title="CHIMERA Lay Engine", version="1.1.0")
 
 # ── CORS: Allow Cloudflare Pages frontend + local dev ──
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://layengine.thync.online")
@@ -81,6 +85,26 @@ def logout():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "engine": engine.status}
+
+
+@app.get("/api/keepalive")
+def keepalive():
+    """
+    Cloud Run warmup endpoint.
+    Use with Cloud Scheduler to ping every 5 minutes and prevent cold starts.
+    e.g.: gcloud scheduler jobs create http chimera-keepalive \
+          --schedule="*/5 6-22 * * 1-6" \
+          --uri="https://lay-engine-950990732577.europe-west2.run.app/api/keepalive" \
+          --http-method=GET --time-zone="Europe/London"
+    """
+    return {
+        "status": "ok",
+        "engine": engine.status,
+        "authenticated": engine.is_authenticated,
+        "dry_run": engine.dry_run,
+        "markets": len(engine.markets),
+        "bets_today": len(engine.bets_placed),
+    }
 
 
 @app.get("/api/state")

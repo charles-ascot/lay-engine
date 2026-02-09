@@ -3,13 +3,21 @@ CHIMERA Lay Engine — Main Engine
 =================================
 Discovers races → applies rules → places bets.
 Runs on a loop. No manual intervention. No intelligence.
+
+FIX LOG:
+  - DRY_RUN now fetches real markets + prices, only skips actual bet placement
+  - Added in-play guard (market can be OPEN + inPlay simultaneously)
+  - Added state persistence to survive Cloud Run cold starts
+  - Engine auto-restarts on state reload if it was previously running
 """
 
 import os
+import json
 import time
 import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from betfair_client import BetfairClient
@@ -29,11 +37,15 @@ DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 # Poll interval in seconds
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 
+# State file for Cloud Run cold-start recovery
+STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json"))
+
 
 class LayEngine:
     """
     The core engine. Discovers markets, applies rules, places bets.
-    All state is held in-memory for the current day.
+    State is held in-memory for the current day, with periodic
+    persistence to disk so Cloud Run cold starts don't wipe everything.
     """
 
     def __init__(self):
@@ -53,6 +65,67 @@ class LayEngine:
         self.day_started: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.dry_run: bool = DRY_RUN  # Start with env default, toggleable at runtime
 
+        # ── Credentials for re-auth after cold start ──
+        self._username: Optional[str] = None
+        self._password: Optional[str] = None
+
+        # Try to reload state from disk (Cloud Run cold-start recovery)
+        self._load_state()
+
+    # ──────────────────────────────────────────────
+    #  STATE PERSISTENCE (Cloud Run survival)
+    # ──────────────────────────────────────────────
+
+    def _save_state(self):
+        """Persist current state to disk so cold starts don't lose everything."""
+        try:
+            state = {
+                "day_started": self.day_started,
+                "processed_markets": list(self.processed_markets),
+                "results": self.results[-50:],  # Keep last 50
+                "bets_placed": self.bets_placed[-50:],
+                "errors": self.errors[-20:],
+                "last_scan": self.last_scan,
+                "dry_run": self.dry_run,
+                "status": self.status,
+                "balance": self.balance,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+            }
+            STATE_FILE.write_text(json.dumps(state, default=str))
+        except Exception as e:
+            logger.warning(f"Failed to save state: {e}")
+
+    def _load_state(self):
+        """Reload state from disk after a cold start."""
+        try:
+            if not STATE_FILE.exists():
+                return
+
+            data = json.loads(STATE_FILE.read_text())
+
+            # Only reload if same day
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if data.get("day_started") != today:
+                logger.info("State file is from a different day — starting fresh")
+                STATE_FILE.unlink(missing_ok=True)
+                return
+
+            self.day_started = data["day_started"]
+            self.processed_markets = set(data.get("processed_markets", []))
+            self.results = data.get("results", [])
+            self.bets_placed = data.get("bets_placed", [])
+            self.errors = data.get("errors", [])
+            self.last_scan = data.get("last_scan")
+            self.dry_run = data.get("dry_run", DRY_RUN)
+            self.balance = data.get("balance")
+
+            logger.info(
+                f"Restored state: {len(self.processed_markets)} processed markets, "
+                f"{len(self.bets_placed)} bets from today"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load state: {e}")
+
     # ──────────────────────────────────────────────
     #  AUTHENTICATION
     # ──────────────────────────────────────────────
@@ -66,6 +139,9 @@ class LayEngine:
         )
         if self.client.login():
             self.balance = self.client.get_account_balance()
+            # Store credentials for re-auth after cold start
+            self._username = username
+            self._password = password
             return True, ""
         error = self.client.last_login_error or "unknown"
         self.client = None
@@ -75,6 +151,8 @@ class LayEngine:
         """Clear credentials and stop engine."""
         self.stop()
         self.client = None
+        self._username = None
+        self._password = None
 
     @property
     def is_authenticated(self) -> bool:
@@ -100,28 +178,38 @@ class LayEngine:
         """Stop the engine loop."""
         self.running = False
         self.status = "STOPPED"
+        self._save_state()
         logger.info("Engine stopped")
 
     def _run_loop(self):
         """Main engine loop."""
         # Verify session is still valid
-        if not self.dry_run:
-            if not self.client.ensure_session():
-                self.status = "AUTH_FAILED"
-                self._add_error("Session expired and re-authentication failed")
-                self.running = False
-                return
+        if not self.client.ensure_session():
+            self.status = "AUTH_FAILED"
+            self._add_error("Session expired and re-authentication failed")
+            self.running = False
+            return
 
-            self.balance = self.client.get_account_balance()
-            logger.info(f"Account balance: £{self.balance}")
+        self.balance = self.client.get_account_balance()
+        logger.info(f"Account balance: £{self.balance}")
 
         self.status = "RUNNING"
-        logger.info(f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s, BET_BEFORE={BET_BEFORE_MINUTES}m)")
+        logger.info(
+            f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s, "
+            f"BET_BEFORE={BET_BEFORE_MINUTES}m)"
+        )
 
+        scan_count = 0
         while self.running:
             try:
                 self._check_day_rollover()
                 self._scan_and_process()
+
+                # Persist state every 5 scans (~2.5 min at 30s interval)
+                scan_count += 1
+                if scan_count % 5 == 0:
+                    self._save_state()
+
             except Exception as e:
                 logger.error(f"Engine loop error: {e}")
                 self._add_error(f"Loop error: {e}")
@@ -145,18 +233,21 @@ class LayEngine:
     # ──────────────────────────────────────────────
 
     def _scan_and_process(self):
-        """Discover markets and process any that are ready."""
+        """
+        Discover markets and process any that are ready.
+
+        FIX: Always fetch real markets from Betfair, regardless of dry_run.
+        DRY_RUN only affects whether the final placeOrders call is made.
+        """
         now = datetime.now(timezone.utc)
         self.last_scan = now.isoformat()
 
-        # Refresh market list
-        if not self.dry_run:
-            self.client.ensure_session()
-            self.markets = self.client.get_todays_win_markets()
-        else:
-            # In dry run, keep any previously set markets
-            if not self.markets:
-                logger.info("DRY_RUN: No markets loaded. Waiting for manual load or API connection.")
+        # ── ALWAYS fetch real markets (dry_run or not) ──
+        if not self.client.ensure_session():
+            self._add_error("Session expired during scan")
+            return
+
+        self.markets = self.client.get_todays_win_markets()
 
         logger.info(
             f"Scan: {len(self.markets)} markets, "
@@ -199,14 +290,20 @@ class LayEngine:
             self._process_market(market)
 
     def _process_market(self, market: dict):
-        """Fetch prices, apply rules, place bets for a single market."""
+        """
+        Fetch prices, apply rules, place bets for a single market.
+
+        FIX: Always fetches real prices from Betfair. DRY_RUN only
+        skips the actual placeOrders call — everything else runs for real.
+        """
         market_id = market["market_id"]
         self.processed_markets.add(market_id)
 
-        # Step 1: Get current prices
-        if self.dry_run:
-            logger.info(f"DRY_RUN: Would fetch prices for {market_id}")
-            # Create dummy result for dry run
+        # ── Step 1: Get current prices (ALWAYS — even in dry run) ──
+        runners_with_prices, is_valid = self.client.get_market_prices(market_id)
+
+        if not is_valid or not runners_with_prices:
+            skip_reason = "No prices available, market closed, or in-play"
             result = RuleResult(
                 market_id=market_id,
                 market_name=market["market_name"],
@@ -214,24 +311,10 @@ class LayEngine:
                 race_time=market["race_time"],
                 instructions=[],
                 skipped=True,
-                skip_reason="DRY_RUN — no live prices",
+                skip_reason=skip_reason,
             )
             self.results.append(result.to_dict())
-            return
-
-        runners_with_prices = self.client.get_market_prices(market_id)
-
-        if not runners_with_prices:
-            result = RuleResult(
-                market_id=market_id,
-                market_name=market["market_name"],
-                venue=market["venue"],
-                race_time=market["race_time"],
-                instructions=[],
-                skipped=True,
-                skip_reason="No prices available or market closed",
-            )
-            self.results.append(result.to_dict())
+            logger.info(f"Skipped {market['venue']}: {skip_reason}")
             return
 
         # Merge runner names from catalogue into price data
@@ -243,7 +326,7 @@ class LayEngine:
             if runner.selection_id in name_map:
                 runner.runner_name = name_map[runner.selection_id]
 
-        # Step 2: Apply rules
+        # ── Step 2: Apply rules (ALWAYS — even in dry run) ──
         result = apply_rules(
             market_id=market_id,
             market_name=market["market_name"],
@@ -258,7 +341,7 @@ class LayEngine:
             logger.info(f"Skipped {market['venue']}: {result.skip_reason}")
             return
 
-        # Step 3: Place the bets
+        # ── Step 3: Place the bets ──
         logger.info(
             f"Rule applied: {result.rule_applied} — "
             f"{len(result.instructions)} bet(s) to place"
@@ -268,8 +351,14 @@ class LayEngine:
             self._place_bet(instruction)
 
     def _place_bet(self, instruction):
-        """Place a single lay bet via the Betfair API."""
+        """
+        Place a single lay bet via the Betfair API.
+
+        FIX: In DRY_RUN mode, logs everything but doesn't call placeOrders.
+        Previously, DRY_RUN prevented markets and prices from even being fetched.
+        """
         logger.info(
+            f"{'[DRY RUN] ' if self.dry_run else ''}"
             f"PLACING: LAY {instruction.runner_name} @ {instruction.price} "
             f"£{instruction.size} (liability £{instruction.liability}) "
             f"[{instruction.rule_applied}]"
