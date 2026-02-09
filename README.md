@@ -6,7 +6,7 @@ Automated lay betting engine for Betfair UK/IE horse racing.
 
 ### Bug 1: DRY_RUN killed all market fetching
 **Before:** When `DRY_RUN=true`, `_scan_and_process()` returned immediately without fetching markets or prices. Engine was braindead.
-**After:** `DRY_RUN` only skips the final `placeOrders` API call. Markets are discovered, prices fetched, rules evaluated, and everything logged — the only thing that doesn't happen is real money leaving the account.
+**After:** `DRY_RUN` only skips the final `placeOrders` API call. Markets are discovered, prices fetched, rules evaluated, and everything logged — the only thing that doesn't happen is real money leaving the account..
 
 ### Bug 2: Betfair API type mismatches (silent failures)
 **Before:** `selectionId`, `size`, `price`, `handicap` were sent as **strings**. Betfair expects **numbers**. This caused silent rejection — no error, just `FAILURE`.
