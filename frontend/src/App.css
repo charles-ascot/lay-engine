@@ -121,6 +121,7 @@ header {
 .btn-danger { background: var(--danger); }
 .btn-success { background: var(--success); color: #000; }
 .btn-warning { background: var(--warning); color: #000; }
+.btn-secondary { background: #6b7280; }
 .btn-sm {
   padding: 4px 12px;
   font-size: 12px;

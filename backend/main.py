@@ -174,3 +174,10 @@ def toggle_dry_run():
     """Toggle dry run mode on/off."""
     engine.dry_run = not engine.dry_run
     return {"dry_run": engine.dry_run}
+
+
+@app.post("/api/engine/reset-bets")
+def reset_bets():
+    """Clear all dry run bets and processed markets so the engine can re-process."""
+    engine.reset_bets()
+    return {"status": "ok"}

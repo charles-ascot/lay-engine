@@ -443,6 +443,14 @@ class LayEngine:
             "errors": self.errors[-10:],
         }
 
+    def reset_bets(self):
+        """Clear all processed markets, bets, and results so the engine can re-process."""
+        self.processed_markets.clear()
+        self.bets_placed.clear()
+        self.results.clear()
+        self._save_state()
+        logger.info("Bets and processed markets cleared — all markets will be re-processed")
+
     def _add_error(self, msg: str):
         self.errors.append({
             "timestamp": datetime.now(timezone.utc).isoformat(),

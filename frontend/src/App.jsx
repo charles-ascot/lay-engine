@@ -114,6 +114,11 @@ function Dashboard() {
     await api('/api/engine/dry-run', { method: 'POST' })
     fetchState()
   }
+  const handleResetBets = async () => {
+    if (!confirm('Clear all bets and re-process all markets?')) return
+    await api('/api/engine/reset-bets', { method: 'POST' })
+    fetchState()
+  }
   const handleLogout = async () => {
     await api('/api/logout', { method: 'POST' })
     window.location.reload()
@@ -154,6 +159,9 @@ function Dashboard() {
           onClick={handleToggleDryRun}
         >
           {state.dry_run ? '🧪 Dry Run ON → Go Live' : '🔴 LIVE → Switch to Dry Run'}
+        </button>
+        <button className="btn btn-secondary" onClick={handleResetBets}>
+          Clear Bets & Re-process
         </button>
         <div className="stats-row">
           <span>Markets: <strong>{s.total_markets || 0}</strong></span>
