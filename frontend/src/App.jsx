@@ -249,6 +249,7 @@ function BetsTab({ bets }) {
         <thead>
           <tr>
             <th>Time</th>
+            <th>Market ID</th>
             <th>Runner</th>
             <th>Odds</th>
             <th>Stake</th>
@@ -261,6 +262,7 @@ function BetsTab({ bets }) {
           {bets.map((b, i) => (
             <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
               <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+              <td title={b.market_id}>...{b.market_id?.slice(-8)}</td>
               <td>{b.runner_name}</td>
               <td>{b.price?.toFixed(2)}</td>
               <td>£{b.size?.toFixed(2)}</td>

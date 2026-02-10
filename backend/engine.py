@@ -55,6 +55,7 @@ class LayEngine:
         self.results: list[dict] = []                # Rule evaluations
         self.bets_placed: list[dict] = []            # Confirmed bet placements
         self.processed_markets: set[str] = set()     # Markets already processed
+        self.processed_runners: set[tuple] = set()   # (runner_name, race_time) dedup
         self.last_scan: Optional[str] = None
         self.status: str = "STOPPED"
         self.balance: Optional[float] = None
@@ -79,6 +80,7 @@ class LayEngine:
             state = {
                 "day_started": self.day_started,
                 "processed_markets": list(self.processed_markets),
+                "processed_runners": list(self.processed_runners),
                 "results": self.results[-200:],  # Keep last 200
                 "bets_placed": self.bets_placed[-200:],
                 "errors": self.errors[-50:],
@@ -109,6 +111,9 @@ class LayEngine:
 
             self.day_started = data["day_started"]
             self.processed_markets = set(data.get("processed_markets", []))
+            self.processed_runners = set(
+                tuple(x) for x in data.get("processed_runners", [])
+            )
             self.results = data.get("results", [])
             self.bets_placed = data.get("bets_placed", [])
             self.errors = data.get("errors", [])
@@ -221,6 +226,7 @@ class LayEngine:
             self.results = []
             self.bets_placed = []
             self.processed_markets = set()
+            self.processed_runners = set()
             self.errors = []
             self.day_started = today
 
@@ -339,7 +345,15 @@ class LayEngine:
         )
 
         for instruction in result.instructions:
+            runner_key = (instruction.runner_name, market["race_time"])
+            if runner_key in self.processed_runners:
+                logger.info(
+                    f"SKIPPED DUPLICATE: {instruction.runner_name} "
+                    f"already bet on for race {market['race_time']}"
+                )
+                continue
             self._place_bet(instruction)
+            self.processed_runners.add(runner_key)
 
     def _place_bet(self, instruction):
         """
@@ -446,6 +460,7 @@ class LayEngine:
     def reset_bets(self):
         """Clear all processed markets, bets, and results so the engine can re-process."""
         self.processed_markets.clear()
+        self.processed_runners.clear()
         self.bets_placed.clear()
         self.results.clear()
         self._save_state()
