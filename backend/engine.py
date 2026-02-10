@@ -79,9 +79,9 @@ class LayEngine:
             state = {
                 "day_started": self.day_started,
                 "processed_markets": list(self.processed_markets),
-                "results": self.results[-50:],  # Keep last 50
-                "bets_placed": self.bets_placed[-50:],
-                "errors": self.errors[-20:],
+                "results": self.results[-200:],  # Keep last 200
+                "bets_placed": self.bets_placed[-200:],
+                "errors": self.errors[-50:],
                 "last_scan": self.last_scan,
                 "dry_run": self.dry_run,
                 "status": self.status,
@@ -438,8 +438,8 @@ class LayEngine:
                 "total_liability": round(total_liability, 2),
             },
             "upcoming": upcoming[:10],
-            "recent_bets": list(reversed(self.bets_placed[-20:])),
-            "recent_results": list(reversed(self.results[-20:])),
+            "recent_bets": list(reversed(self.bets_placed)),
+            "recent_results": list(reversed(self.results)),
             "errors": self.errors[-10:],
         }
 
