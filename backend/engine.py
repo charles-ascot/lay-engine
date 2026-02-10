@@ -371,9 +371,9 @@ class LayEngine:
 
         if self.dry_run:
             bet_record = {
+                **instruction.to_dict(),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "dry_run": True,
-                **instruction.to_dict(),
                 "betfair_response": {"status": "DRY_RUN"},
             }
             self.bets_placed.append(bet_record)
@@ -387,9 +387,9 @@ class LayEngine:
         )
 
         bet_record = {
+            **instruction.to_dict(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "dry_run": False,
-            **instruction.to_dict(),
             "betfair_response": response,
         }
         self.bets_placed.append(bet_record)
