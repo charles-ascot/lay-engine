@@ -56,6 +56,7 @@ class LayEngine:
         self.bets_placed: list[dict] = []            # Confirmed bet placements
         self.processed_markets: set[str] = set()     # Markets already processed
         self.processed_runners: set[tuple] = set()   # (runner_name, race_time) dedup
+        self.processed_selections: set[tuple] = set() # (selection_id, market_id) dedup
         self.last_scan: Optional[str] = None
         self.status: str = "STOPPED"
         self.balance: Optional[float] = None
@@ -81,6 +82,7 @@ class LayEngine:
                 "day_started": self.day_started,
                 "processed_markets": list(self.processed_markets),
                 "processed_runners": list(self.processed_runners),
+                "processed_selections": list(self.processed_selections),
                 "results": self.results[-200:],  # Keep last 200
                 "bets_placed": self.bets_placed[-200:],
                 "errors": self.errors[-50:],
@@ -113,6 +115,9 @@ class LayEngine:
             self.processed_markets = set(data.get("processed_markets", []))
             self.processed_runners = set(
                 tuple(x) for x in data.get("processed_runners", [])
+            )
+            self.processed_selections = set(
+                tuple(x) for x in data.get("processed_selections", [])
             )
             self.results = data.get("results", [])
             self.bets_placed = data.get("bets_placed", [])
@@ -227,6 +232,7 @@ class LayEngine:
             self.bets_placed = []
             self.processed_markets = set()
             self.processed_runners = set()
+            self.processed_selections = set()
             self.errors = []
             self.day_started = today
 
@@ -345,23 +351,39 @@ class LayEngine:
         )
 
         for instruction in result.instructions:
+            # ── DEDUP: Triple-check using runner name, selection ID, and market ID ──
             runner_key = (instruction.runner_name, market["race_time"])
+            selection_key = (instruction.selection_id, market_id)
+
             if runner_key in self.processed_runners:
                 logger.info(
-                    f"SKIPPED DUPLICATE: {instruction.runner_name} "
+                    f"SKIPPED DUPLICATE (runner_key): {instruction.runner_name} "
                     f"already bet on for race {market['race_time']}"
                 )
                 continue
-            self._place_bet(instruction)
-            self.processed_runners.add(runner_key)
 
-    def _place_bet(self, instruction):
+            if selection_key in self.processed_selections:
+                logger.info(
+                    f"SKIPPED DUPLICATE (selection_key): selectionId={instruction.selection_id} "
+                    f"already bet on in market {market_id}"
+                )
+                continue
+
+            self._place_bet(instruction, market)
+            self.processed_runners.add(runner_key)
+            self.processed_selections.add(selection_key)
+
+    def _place_bet(self, instruction, market: dict):
         """
         Place a single lay bet via the Betfair API.
 
-        FIX: In DRY_RUN mode, logs everything but doesn't call placeOrders.
-        Previously, DRY_RUN prevented markets and prices from even being fetched.
+        FIX v2.1:
+        - Accepts market dict for venue/discipline metadata on bet records
+        - placed_at timestamp generated at actual placement moment
+        - In DRY_RUN mode, logs everything but doesn't call placeOrders
         """
+        placed_at = datetime.now(timezone.utc).isoformat()
+
         logger.info(
             f"{'[DRY RUN] ' if self.dry_run else ''}"
             f"PLACING: LAY {instruction.runner_name} @ {instruction.price} "
@@ -369,10 +391,22 @@ class LayEngine:
             f"[{instruction.rule_applied}]"
         )
 
+        # ── Metadata from market context ──
+        from rules import detect_discipline
+        discipline = detect_discipline(market.get("market_name", ""))
+        bet_metadata = {
+            "venue": market.get("venue", "Unknown"),
+            "discipline": discipline,
+            "race_time": market.get("race_time", ""),
+            "market_name": market.get("market_name", ""),
+        }
+
         if self.dry_run:
             bet_record = {
                 **instruction.to_dict(),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                **bet_metadata,
+                "placed_at": placed_at,
+                "timestamp": placed_at,  # Keep for backward compat
                 "dry_run": True,
                 "betfair_response": {"status": "DRY_RUN"},
             }
@@ -388,7 +422,9 @@ class LayEngine:
 
         bet_record = {
             **instruction.to_dict(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **bet_metadata,
+            "placed_at": placed_at,
+            "timestamp": placed_at,  # Keep for backward compat
             "dry_run": False,
             "betfair_response": response,
         }
@@ -461,6 +497,7 @@ class LayEngine:
         """Clear all processed markets, bets, and results so the engine can re-process."""
         self.processed_markets.clear()
         self.processed_runners.clear()
+        self.processed_selections.clear()
         self.bets_placed.clear()
         self.results.clear()
         self._save_state()
