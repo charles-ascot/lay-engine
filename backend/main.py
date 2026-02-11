@@ -33,7 +33,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-app = FastAPI(title="CHIMERA Lay Engine", version="2.1.0")
+app = FastAPI(title="CHIMERA Lay Engine", version="1.1.0")
 
 # ── CORS: Allow Cloudflare Pages frontend + local dev ──
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://layengine.thync.online")
@@ -115,70 +115,38 @@ def get_state():
 
 @app.get("/api/rules")
 def get_rules():
-    """Return the active rule set including filters."""
-    import rules as r
+    """Return the active rule set."""
     return {
         "strategy": "UK_IE_Favourite_Lay",
-        "version": "2.1",
+        "version": "2.0",
         "timing": "pre_off",
         "markets": {
             "event_type": "7 (Horse Racing)",
             "countries": ["GB", "IE"],
             "market_type": "WIN",
         },
-        "filters": {
-            "jumps_only": r.JUMPS_ONLY,
-            "min_odds": r.MIN_ODDS,
-        },
         "rules": [
             {
                 "id": "RULE_1",
                 "condition": "Favourite odds < 2.0",
-                "action": "LAY favourite @ 3",
-                "note": "Skipped when MIN_ODDS=2.0",
+                "action": "LAY favourite @ £3",
             },
             {
                 "id": "RULE_2",
-                "condition": "Favourite odds 2.0-5.0",
-                "action": "LAY favourite @ 2",
+                "condition": "Favourite odds 2.0 – 5.0",
+                "action": "LAY favourite @ £2",
             },
             {
                 "id": "RULE_3A",
                 "condition": "Favourite odds > 5.0 AND gap to 2nd favourite < 2",
-                "action": "LAY favourite @ 1 + LAY 2nd favourite @ 1",
+                "action": "LAY favourite @ £1 + LAY 2nd favourite @ £1",
             },
             {
                 "id": "RULE_3B",
-                "condition": "Favourite odds > 5.0 AND gap to 2nd favourite >= 2",
-                "action": "LAY favourite @ 1",
+                "condition": "Favourite odds > 5.0 AND gap to 2nd favourite ≥ 2",
+                "action": "LAY favourite @ £1",
             },
         ],
-    }
-
-
-@app.post("/api/filters/jumps-only")
-def toggle_jumps_only():
-    """Toggle the jumps-only filter on/off."""
-    import rules as r
-    r.JUMPS_ONLY = not r.JUMPS_ONLY
-    return {"jumps_only": r.JUMPS_ONLY}
-
-
-@app.post("/api/filters/min-odds")
-def set_min_odds(value: float = 0.0):
-    """Set the minimum odds floor (0 = disabled)."""
-    import rules as r
-    r.MIN_ODDS = max(0.0, value)
-    return {"min_odds": r.MIN_ODDS}
-
-
-@app.get("/api/filters")
-def get_filters():
-    """Return current filter settings."""
-    import rules as r
-    return {
-        "jumps_only": r.JUMPS_ONLY,
-        "min_odds": r.MIN_ODDS,
     }
 
 

@@ -10,24 +10,11 @@ RULES:
   4. If favourite odds > 5.0:
      a. If gap to 2nd favourite < 2 → £1 lay on fav + £1 lay on 2nd fav
      b. If gap to 2nd favourite ≥ 2 → £1 lay on favourite only
-
-FILTERS (v2.1 — 11 Feb 2026):
-  - JUMPS_ONLY: When True, skip all flat racing markets
-  - MIN_ODDS: Minimum favourite odds to consider (default 2.0)
-
-CHANGE LOG:
-  v2.0  Initial rules (9 Feb 2026)
-  v2.1  Added jumps-only filter + minimum odds floor (11 Feb 2026)
-        Based on 2-day live testing: jumps 79% strike vs flat 54%
 """
 
 from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
-import re
-import logging
-
-logger = logging.getLogger("rules")
 
 
 @dataclass
@@ -94,7 +81,6 @@ class RuleResult:
     skipped: bool = False
     skip_reason: str = ""
     rule_applied: str = ""
-    discipline: str = ""  # "JUMPS" or "FLAT" — detected from market_name
     evaluated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
     def to_dict(self) -> dict:
@@ -117,45 +103,10 @@ class RuleResult:
             "skipped": self.skipped,
             "skip_reason": self.skip_reason,
             "rule_applied": self.rule_applied,
-            "discipline": self.discipline,
             "evaluated_at": self.evaluated_at,
             "total_stake": sum(i.size for i in self.instructions),
             "total_liability": sum(i.liability for i in self.instructions),
         }
-
-
-# ── FILTER CONFIGURATION (toggleable at runtime via engine) ──
-JUMPS_ONLY = True       # Default ON — skip flat racing
-MIN_ODDS = 2.0          # Default 2.0 — skip favourites shorter than this
-
-# ── Jumps racing keywords in Betfair market names ──
-# Hrd/Hrdl = Hurdle, Chs = Chase, NHF/INHF = National Hunt Flat
-JUMPS_KEYWORDS = re.compile(
-    r'\b(Hrd|Hrdl|Hurdle|Chs|Chase|Steeple|NHF|INHF|NH\b)',
-    re.IGNORECASE
-)
-
-
-def detect_discipline(market_name: str) -> str:
-    """
-    Determine if a race is Jumps or Flat from the Betfair market name.
-
-    Betfair market names follow the pattern:
-      "GB / Venue Date / Time Distance Type"
-
-    Examples:
-      "2m4f Hcap Hrd"  → Jumps (Hurdle)
-      "2m3f Hcap Chs"  → Jumps (Chase)
-      "1m7f INHF"      → Jumps (Irish NH Flat)
-      "7f Hcap"        → Flat
-      "1m Class Stks"  → Flat
-      "2m Mdn Hrd"     → Jumps (Hurdle)
-
-    Returns "JUMPS" or "FLAT".
-    """
-    if JUMPS_KEYWORDS.search(market_name):
-        return "JUMPS"
-    return "FLAT"
 
 
 def identify_favourites(runners: list[Runner]) -> tuple[Optional[Runner], Optional[Runner]]:
@@ -205,16 +156,6 @@ def apply_rules(
         instructions=[],
     )
 
-    # ── Step 0: Detect discipline (Jumps vs Flat) ──
-    result.discipline = detect_discipline(market_name)
-
-    # ── FILTER: Jumps only ──
-    if JUMPS_ONLY and result.discipline == "FLAT":
-        result.skipped = True
-        result.skip_reason = f"FILTER: Flat racing excluded (market: {market_name})"
-        logger.info(f"Filtered out FLAT race: {venue} {market_name}")
-        return result
-
     # Step 1: Identify favourite and second favourite
     fav, second_fav = identify_favourites(runners)
     result.favourite = fav
@@ -226,16 +167,6 @@ def apply_rules(
         return result
 
     odds = fav.best_available_to_lay
-
-    # ── FILTER: Minimum odds floor ──
-    if MIN_ODDS > 0 and odds < MIN_ODDS:
-        result.skipped = True
-        result.skip_reason = (
-            f"FILTER: Fav odds {odds} below minimum {MIN_ODDS} "
-            f"({fav.runner_name} at {venue})"
-        )
-        logger.info(f"Filtered out sub-{MIN_ODDS} favourite: {fav.runner_name} @ {odds}")
-        return result
 
     # ─── RULE 1: Favourite odds < 2.0 → £3 lay ───
     if odds < 2.0:
