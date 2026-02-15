@@ -9,6 +9,53 @@ function api(path, opts = {}) {
   }).then(r => r.json())
 }
 
+// ── Excel Download Utility ──
+function downloadTableAsExcel(tableId, filename) {
+  const table = document.getElementById(tableId)
+  if (!table) return
+
+  const html = table.outerHTML
+    .replace(/ class="[^"]*"/g, '')
+    .replace(/ style="[^"]*"/g, '')
+    .replace(/ title="[^"]*"/g, '')
+
+  const blob = new Blob(
+    [
+      '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+      'xmlns:x="urn:schemas-microsoft-com:office:excel" ' +
+      'xmlns="http://www.w3.org/TR/REC-html40">' +
+      '<head><meta charset="utf-8">' +
+      '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>' +
+      '<x:ExcelWorksheet><x:Name>Sheet1</x:Name>' +
+      '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>' +
+      '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+      '</head><body>' + html + '</body></html>'
+    ],
+    { type: 'application/vnd.ms-excel' }
+  )
+
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}.xls`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ── Snapshot Button ──
+function SnapshotButton({ tableId, filename }) {
+  return (
+    <button
+      className="btn btn-snapshot"
+      onClick={() => downloadTableAsExcel(tableId, filename || 'chimera_export')}
+    >
+      Snapshot
+    </button>
+  )
+}
+
 // ── Status Badge ──
 function Badge({ status }) {
   const colors = {
@@ -84,7 +131,7 @@ function LoginPanel({ onLogin }) {
 // ── Dashboard ──
 function Dashboard() {
   const [state, setState] = useState(null)
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState('history')
   const intervalRef = useRef(null)
 
   const fetchState = useCallback(async () => {
@@ -179,7 +226,7 @@ function Dashboard() {
 
       {/* ── Tabs ── */}
       <nav className="tabs">
-        {['overview', 'bets', 'rules', 'errors'].map(t => (
+        {['history', 'bets', 'rules', 'errors'].map(t => (
           <button
             key={t}
             className={tab === t ? 'active' : ''}
@@ -192,7 +239,7 @@ function Dashboard() {
 
       {/* ── Tab Content ── */}
       <div className="tab-content">
-        {tab === 'overview' && <OverviewTab state={state} />}
+        {tab === 'history' && <HistoryTab />}
         {tab === 'bets' && <BetsTab bets={state.recent_bets} />}
         {tab === 'rules' && <RulesTab results={state.recent_results} />}
         {tab === 'errors' && <ErrorsTab errors={state.errors} />}
@@ -201,33 +248,147 @@ function Dashboard() {
   )
 }
 
-// ── Overview Tab ──
-function OverviewTab({ state }) {
-  const upcoming = state.upcoming || []
+// ── History Tab ──
+function HistoryTab() {
+  const [sessions, setSessions] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api('/api/sessions')
+      .then(data => {
+        setSessions(data.sessions || [])
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedId) { setDetail(null); return }
+    api(`/api/sessions/${selectedId}`)
+      .then(data => setDetail(data))
+      .catch(() => setDetail(null))
+  }, [selectedId])
+
+  if (loading) return <p className="empty">Loading sessions...</p>
+
+  // ── Detail View ──
+  if (detail) {
+    const bets = detail.bets || []
+    const sm = detail.summary || {}
+    return (
+      <div>
+        <div className="session-detail-header">
+          <button className="btn btn-secondary btn-back" onClick={() => setSelectedId(null)}>
+            ← Back
+          </button>
+          <h2>
+            <span className={`badge ${detail.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
+              {detail.mode}
+            </span>
+            {' '}{detail.date}{' '}
+            {new Date(detail.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {detail.stop_time && (
+              <> – {new Date(detail.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
+            )}
+          </h2>
+          <SnapshotButton tableId="session-bets-table" filename={`session_${detail.session_id}`} />
+        </div>
+        <div className="session-stats">
+          <span>Bets: <strong>{sm.total_bets || 0}</strong></span>
+          <span>Staked: <strong>£{(sm.total_stake || 0).toFixed(2)}</strong></span>
+          <span>Liability: <strong>£{(sm.total_liability || 0).toFixed(2)}</strong></span>
+          <span>Markets: <strong>{sm.markets_processed || 0}</strong></span>
+          <span className={`badge badge-${detail.status.toLowerCase()}`}>{detail.status}</span>
+        </div>
+        <div className="session-detail-scroll">
+          {bets.length === 0 ? (
+            <p className="empty">No bets in this session.</p>
+          ) : (
+            <table id="session-bets-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Market ID</th>
+                  <th>Runner</th>
+                  <th>Odds</th>
+                  <th>Stake</th>
+                  <th>Liability</th>
+                  <th>Rule</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bets.map((b, i) => (
+                  <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
+                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+                    <td title={b.market_id}>...{b.market_id?.slice(-8)}</td>
+                    <td>{b.runner_name}</td>
+                    <td>{b.price?.toFixed(2)}</td>
+                    <td>£{b.size?.toFixed(2)}</td>
+                    <td>£{b.liability?.toFixed(2)}</td>
+                    <td><code>{b.rule_applied}</code></td>
+                    <td>
+                      <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
+                        {b.dry_run ? '🧪 DRY' : b.betfair_response?.status || '?'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── List View ──
   return (
     <div>
-      <h2>Upcoming Races</h2>
-      {upcoming.length === 0 ? (
-        <p className="empty">No upcoming races in the betting window.</p>
+      <h2>Session History</h2>
+      {sessions.length === 0 ? (
+        <p className="empty">No sessions recorded yet. Start the engine to create one.</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Venue</th>
-              <th>Race</th>
-              <th>Time</th>
-              <th>Mins to Off</th>
-              <th>Runners</th>
+              <th>Mode</th>
+              <th>Date</th>
+              <th>Start</th>
+              <th>Stop</th>
+              <th>Bets</th>
+              <th>Stake</th>
+              <th>Liability</th>
+              <th>Status</th>
             </tr>
           </thead>
           <tbody>
-            {upcoming.map((m, i) => (
-              <tr key={i}>
-                <td>{m.venue}</td>
-                <td>{m.market_name}</td>
-                <td>{new Date(m.race_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                <td>{m.minutes_to_off?.toFixed(1)}</td>
-                <td>{m.runners?.length || '?'}</td>
+            {sessions.map(s => (
+              <tr
+                key={s.session_id}
+                className="session-row"
+                onClick={() => setSelectedId(s.session_id)}
+              >
+                <td>
+                  <span className={`badge ${s.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
+                    {s.mode}
+                  </span>
+                </td>
+                <td>{s.date}</td>
+                <td>{new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                <td>{s.stop_time
+                  ? new Date(s.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : '---'}</td>
+                <td>{s.summary?.total_bets || 0}</td>
+                <td>£{(s.summary?.total_stake || 0).toFixed(2)}</td>
+                <td>£{(s.summary?.total_liability || 0).toFixed(2)}</td>
+                <td>
+                  <span className={`badge badge-${s.status.toLowerCase()}`}>
+                    {s.status}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -242,10 +403,14 @@ function BetsTab({ bets }) {
   if (!bets || bets.length === 0) {
     return <p className="empty">No bets placed yet today.</p>
   }
+  const fname = `chimera_bets_${new Date().toISOString().slice(0, 10)}`
   return (
     <div>
-      <h2>Recent Bets</h2>
-      <table>
+      <div className="tab-toolbar">
+        <h2>Recent Bets</h2>
+        <SnapshotButton tableId="bets-table" filename={fname} />
+      </div>
+      <table id="bets-table">
         <thead>
           <tr>
             <th>Time</th>
@@ -277,6 +442,9 @@ function BetsTab({ bets }) {
           ))}
         </tbody>
       </table>
+      <div className="tab-toolbar bottom">
+        <SnapshotButton tableId="bets-table" filename={fname} />
+      </div>
     </div>
   )
 }
@@ -286,10 +454,14 @@ function RulesTab({ results }) {
   if (!results || results.length === 0) {
     return <p className="empty">No markets evaluated yet.</p>
   }
+  const fname = `chimera_rules_${new Date().toISOString().slice(0, 10)}`
   return (
     <div>
-      <h2>Rule Evaluations</h2>
-      <table>
+      <div className="tab-toolbar">
+        <h2>Rule Evaluations</h2>
+        <SnapshotButton tableId="rules-table" filename={fname} />
+      </div>
+      <table id="rules-table">
         <thead>
           <tr>
             <th>Venue</th>
@@ -322,6 +494,9 @@ function RulesTab({ results }) {
           ))}
         </tbody>
       </table>
+      <div className="tab-toolbar bottom">
+        <SnapshotButton tableId="rules-table" filename={fname} />
+      </div>
     </div>
   )
 }

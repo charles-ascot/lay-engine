@@ -181,3 +181,21 @@ def reset_bets():
     """Clear all dry run bets and processed markets so the engine can re-process."""
     engine.reset_bets()
     return {"status": "ok"}
+
+
+@app.get("/api/sessions")
+def get_sessions():
+    """List all sessions (summaries only, most recent first)."""
+    return {"sessions": engine.get_sessions()}
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session_detail(session_id: str):
+    """Full session detail including all bets and results."""
+    detail = engine.get_session_detail(session_id)
+    if detail is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": "Session not found"},
+        )
+    return detail

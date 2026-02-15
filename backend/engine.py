@@ -37,6 +37,9 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 # State file for Cloud Run cold-start recovery
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json"))
 
+# Session history file (persists across days, separate from daily state)
+SESSIONS_FILE = Path(os.environ.get("SESSIONS_FILE", "/tmp/chimera_sessions.json"))
+
 
 class LayEngine:
     """
@@ -67,8 +70,14 @@ class LayEngine:
         self._username: Optional[str] = None
         self._password: Optional[str] = None
 
+        # ── Session tracking ──
+        self.sessions: list[dict] = []
+        self.current_session: Optional[dict] = None
+        self._session_bets_start_index: int = 0
+
         # Try to reload state from disk (Cloud Run cold-start recovery)
         self._load_state()
+        self._load_sessions()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -91,6 +100,18 @@ class LayEngine:
                 "saved_at": datetime.now(timezone.utc).isoformat(),
             }
             STATE_FILE.write_text(json.dumps(state, default=str))
+
+            # Update current session's running snapshot
+            if self.current_session:
+                session_bets = self.bets_placed[self._session_bets_start_index:]
+                self.current_session["bets"] = session_bets
+                self.current_session["_last_saved"] = datetime.now(timezone.utc).isoformat()
+                self.current_session["summary"]["total_bets"] = len(session_bets)
+                self.current_session["summary"]["total_stake"] = round(
+                    sum(b.get("size", 0) for b in session_bets), 2)
+                self.current_session["summary"]["total_liability"] = round(
+                    sum(b.get("liability", 0) for b in session_bets), 2)
+                self._save_sessions()
         except Exception as e:
             logger.warning(f"Failed to save state: {e}")
 
@@ -127,6 +148,60 @@ class LayEngine:
             )
         except Exception as e:
             logger.warning(f"Failed to load state: {e}")
+
+    # ──────────────────────────────────────────────
+    #  SESSION PERSISTENCE
+    # ──────────────────────────────────────────────
+
+    def _load_sessions(self):
+        """Load session history from disk."""
+        try:
+            if not SESSIONS_FILE.exists():
+                return
+            self.sessions = json.loads(SESSIONS_FILE.read_text())
+            # If last session was RUNNING, it crashed (e.g. Cloud Run restart)
+            if self.sessions and self.sessions[-1].get("status") == "RUNNING":
+                crashed = self.sessions[-1]
+                crashed["status"] = "CRASHED"
+                crashed["stop_time"] = crashed.get(
+                    "_last_saved", datetime.now(timezone.utc).isoformat()
+                )
+                self._save_sessions()
+            logger.info(f"Loaded {len(self.sessions)} historical sessions")
+        except Exception as e:
+            logger.warning(f"Failed to load sessions: {e}")
+            self.sessions = []
+
+    def _save_sessions(self):
+        """Persist session history to disk."""
+        try:
+            SESSIONS_FILE.write_text(json.dumps(self.sessions, default=str))
+        except Exception as e:
+            logger.warning(f"Failed to save sessions: {e}")
+
+    def _finalize_session(self, status: str):
+        """Snapshot bets/results into the session and close it."""
+        now = datetime.now(timezone.utc)
+        session_bets = self.bets_placed[self._session_bets_start_index:]
+        start_iso = self.current_session["start_time"]
+        session_results = [
+            r for r in self.results
+            if r.get("evaluated_at", "") >= start_iso
+        ]
+        self.current_session["stop_time"] = now.isoformat()
+        self.current_session["status"] = status
+        self.current_session["bets"] = session_bets
+        self.current_session["results"] = session_results
+        self.current_session["summary"] = {
+            "total_bets": len(session_bets),
+            "total_stake": round(sum(b.get("size", 0) for b in session_bets), 2),
+            "total_liability": round(sum(b.get("liability", 0) for b in session_bets), 2),
+            "markets_processed": len(set(
+                r.get("market_id") for r in session_results if not r.get("skipped")
+            )),
+        }
+        self.current_session = None
+        self._save_sessions()
 
     # ──────────────────────────────────────────────
     #  AUTHENTICATION
@@ -172,6 +247,30 @@ class LayEngine:
             return
         self.running = True
         self.status = "STARTING"
+
+        # ── Create new session ──
+        now = datetime.now(timezone.utc)
+        session_id = f"ses_{now.strftime('%Y%m%d_%H%M%S')}"
+        self.current_session = {
+            "session_id": session_id,
+            "mode": "DRY_RUN" if self.dry_run else "LIVE",
+            "date": now.strftime("%Y-%m-%d"),
+            "start_time": now.isoformat(),
+            "stop_time": None,
+            "status": "RUNNING",
+            "bets": [],
+            "results": [],
+            "summary": {
+                "total_bets": 0,
+                "total_stake": 0,
+                "total_liability": 0,
+                "markets_processed": 0,
+            },
+        }
+        self._session_bets_start_index = len(self.bets_placed)
+        self.sessions.append(self.current_session)
+        self._save_sessions()
+
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         logger.info("Engine started")
@@ -180,6 +279,8 @@ class LayEngine:
         """Stop the engine loop."""
         self.running = False
         self.status = "STOPPED"
+        if self.current_session:
+            self._finalize_session("COMPLETED")
         self._save_state()
         logger.info("Engine stopped")
 
@@ -190,6 +291,8 @@ class LayEngine:
             self.status = "AUTH_FAILED"
             self._add_error("Session expired and re-authentication failed")
             self.running = False
+            if self.current_session:
+                self._finalize_session("CRASHED")
             return
 
         self.balance = self.client.get_account_balance()
@@ -229,6 +332,7 @@ class LayEngine:
             self.processed_runners = set()
             self.errors = []
             self.day_started = today
+            self._session_bets_start_index = 0
 
     # ──────────────────────────────────────────────
     #  CORE LOGIC
@@ -463,8 +567,31 @@ class LayEngine:
         self.processed_runners.clear()
         self.bets_placed.clear()
         self.results.clear()
+        self._session_bets_start_index = 0
         self._save_state()
         logger.info("Bets and processed markets cleared — all markets will be re-processed")
+
+    def get_sessions(self) -> list[dict]:
+        """Return all session summaries (no bets) in reverse chronological order."""
+        summaries = []
+        for s in reversed(self.sessions):
+            summaries.append({
+                "session_id": s["session_id"],
+                "mode": s["mode"],
+                "date": s["date"],
+                "start_time": s["start_time"],
+                "stop_time": s["stop_time"],
+                "status": s["status"],
+                "summary": s["summary"],
+            })
+        return summaries
+
+    def get_session_detail(self, session_id: str) -> Optional[dict]:
+        """Return full session detail including all bets and results."""
+        for s in self.sessions:
+            if s["session_id"] == session_id:
+                return {k: v for k, v in s.items() if not k.startswith("_")}
+        return None
 
     def _add_error(self, msg: str):
         self.errors.append({

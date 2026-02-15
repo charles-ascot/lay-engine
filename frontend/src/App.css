@@ -223,9 +223,82 @@ h2 {
   color: var(--text);
 }
 
+/* ── Session History ── */
+.session-row { cursor: pointer; }
+.session-row:hover td { background: rgba(59, 130, 246, 0.08); }
+
+.session-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.session-detail-header h2 {
+  margin-bottom: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-stats {
+  display: flex;
+  gap: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.session-stats strong { color: var(--text); }
+
+.session-detail-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.btn-back {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+/* ── Session & Status Badges ── */
+.badge-completed { background: var(--success); color: #fff; }
+.badge-running { background: var(--primary); color: #fff; }
+.badge-crashed { background: var(--danger); color: #fff; }
+.badge-live { background: var(--danger); color: #fff; }
+
+/* ── Snapshot Button ── */
+.btn-snapshot {
+  background: var(--accent);
+  color: #fff;
+  padding: 6px 16px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.btn-snapshot:hover { opacity: 0.85; }
+
+/* ── Tab Toolbar (h2 + button row) ── */
+.tab-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.tab-toolbar h2 { margin-bottom: 0; }
+.tab-toolbar.bottom {
+  margin-top: 12px;
+  margin-bottom: 0;
+  justify-content: flex-end;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .stats-row { flex-wrap: wrap; gap: 10px; }
   .controls { flex-direction: column; align-items: stretch; }
   .stats-row { margin-left: 0; }
+  .session-detail-header { flex-direction: column; align-items: flex-start; }
+  .tab-toolbar { flex-direction: column; align-items: flex-start; gap: 8px; }
 }
