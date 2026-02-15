@@ -280,6 +280,58 @@ h2 {
 }
 .btn-snapshot:hover { opacity: 0.85; }
 
+/* ── Analysis Button & Panel ── */
+.btn-analysis {
+  background: var(--primary);
+  color: #fff;
+  padding: 6px 16px;
+  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-analysis:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-analysis:hover:not(:disabled) { opacity: 0.85; }
+
+.analysis-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.analysis-panel.analysis-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--primary);
+  font-size: 14px;
+}
+.analysis-points {
+  list-style: none;
+  padding: 0;
+}
+.analysis-points li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.6;
+  color: var(--text);
+}
+.analysis-points li:last-child { border-bottom: none; }
+.analysis-loading {
+  color: var(--muted);
+  text-align: center;
+  padding: 12px;
+}
+
 /* ── Tab Toolbar (h2 + button row) ── */
 .tab-toolbar {
   display: flex;

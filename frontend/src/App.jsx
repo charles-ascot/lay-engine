@@ -254,6 +254,10 @@ function HistoryTab() {
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [analysis, setAnalysis] = useState(null)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [analysisError, setAnalysisError] = useState('')
+  const [analysisDate, setAnalysisDate] = useState(null)
 
   useEffect(() => {
     api('/api/sessions')
@@ -270,6 +274,27 @@ function HistoryTab() {
       .then(data => setDetail(data))
       .catch(() => setDetail(null))
   }, [selectedId])
+
+  const runAnalysis = async (date) => {
+    setAnalysisLoading(true)
+    setAnalysisError('')
+    setAnalysis(null)
+    setAnalysisDate(date)
+    try {
+      const res = await api('/api/sessions/analyse', {
+        method: 'POST',
+        body: JSON.stringify({ date }),
+      })
+      if (res.points) {
+        setAnalysis(res.points)
+      } else {
+        setAnalysisError(res.message || 'Analysis failed')
+      }
+    } catch (e) {
+      setAnalysisError('Failed to connect to analysis service')
+    }
+    setAnalysisLoading(false)
+  }
 
   if (loading) return <p className="empty">Loading sessions...</p>
 
@@ -344,10 +369,50 @@ function HistoryTab() {
     )
   }
 
+  // Get unique dates from sessions for analysis buttons
+  const dates = [...new Set(sessions.map(s => s.date))]
+
   // ── List View ──
   return (
     <div>
-      <h2>Session History</h2>
+      <div className="tab-toolbar">
+        <h2>Session History</h2>
+        {dates.length > 0 && (
+          <button
+            className="btn btn-analysis"
+            disabled={analysisLoading}
+            onClick={() => runAnalysis(dates[0])}
+          >
+            {analysisLoading ? 'Analysing...' : `Analysis ${dates[0]}`}
+          </button>
+        )}
+      </div>
+
+      {/* ── Analysis Panel ── */}
+      {analysisLoading && (
+        <div className="analysis-panel">
+          <div className="analysis-loading">Running AI analysis on {analysisDate}...</div>
+        </div>
+      )}
+      {analysisError && (
+        <div className="analysis-panel analysis-error">
+          <strong>Analysis failed:</strong> {analysisError}
+        </div>
+      )}
+      {analysis && (
+        <div className="analysis-panel">
+          <div className="analysis-header">
+            <strong>AI Analysis — {analysisDate}</strong>
+            <button className="btn-sm" onClick={() => setAnalysis(null)}>Dismiss</button>
+          </div>
+          <ul className="analysis-points">
+            {analysis.map((point, i) => (
+              <li key={i}>{point}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {sessions.length === 0 ? (
         <p className="empty">No sessions recorded yet. Start the engine to create one.</p>
       ) : (

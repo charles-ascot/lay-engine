@@ -10,6 +10,7 @@ FIX LOG:
 """
 
 import os
+import json
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
@@ -25,6 +26,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from engine import LayEngine
+
+# ── Anthropic client (lazy — only created when analysis is requested) ──
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_anthropic_client = None
+
+def get_anthropic():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
 
 # ── Logging ──
 logging.basicConfig(
@@ -199,3 +211,112 @@ def get_session_detail(session_id: str):
             content={"status": "error", "message": "Session not found"},
         )
     return detail
+
+
+class AnalyseRequest(BaseModel):
+    date: str  # YYYY-MM-DD
+
+
+@app.post("/api/sessions/analyse")
+def analyse_sessions(req: AnalyseRequest):
+    """AI-powered analysis of all sessions for a given date."""
+    if not ANTHROPIC_API_KEY:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
+        )
+
+    # Gather all sessions for the requested date
+    day_sessions = [
+        s for s in engine.sessions if s.get("date") == req.date
+    ]
+    if not day_sessions:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": f"No sessions found for {req.date}"},
+        )
+
+    # Build a compact data summary for the prompt
+    session_data = []
+    for s in day_sessions:
+        session_data.append({
+            "session_id": s["session_id"],
+            "mode": s["mode"],
+            "start_time": s.get("start_time"),
+            "stop_time": s.get("stop_time"),
+            "status": s.get("status"),
+            "summary": s.get("summary", {}),
+            "bets": [
+                {
+                    "runner": b.get("runner_name"),
+                    "odds": b.get("price"),
+                    "stake": b.get("size"),
+                    "liability": b.get("liability"),
+                    "rule": b.get("rule_applied"),
+                    "status": b.get("betfair_response", {}).get("status"),
+                    "time": b.get("timestamp"),
+                    "dry_run": b.get("dry_run"),
+                }
+                for b in s.get("bets", [])
+            ],
+            "results": [
+                {
+                    "venue": r.get("venue"),
+                    "race": r.get("market_name"),
+                    "fav": r.get("favourite", {}).get("name") if r.get("favourite") else None,
+                    "fav_odds": r.get("favourite", {}).get("odds") if r.get("favourite") else None,
+                    "second_fav": r.get("second_favourite", {}).get("name") if r.get("second_favourite") else None,
+                    "second_fav_odds": r.get("second_favourite", {}).get("odds") if r.get("second_favourite") else None,
+                    "rule": r.get("rule_applied"),
+                    "skipped": r.get("skipped"),
+                    "skip_reason": r.get("skip_reason"),
+                }
+                for r in s.get("results", [])
+            ],
+        })
+
+    prompt = f"""You are an expert horse racing betting analyst. Analyse the following lay betting session data from {req.date}.
+
+The CHIMERA Lay Engine uses these rules on UK/IE horse racing WIN markets:
+- RULE 1: Favourite odds < 2.0 → £3 lay on favourite
+- RULE 2: Favourite odds 2.0–5.0 → £2 lay on favourite
+- RULE 3A: Favourite odds > 5.0 AND gap to 2nd fav < 2 → £1 lay fav + £1 lay 2nd fav
+- RULE 3B: Favourite odds > 5.0 AND gap to 2nd fav >= 2 → £1 lay fav only
+
+SESSION DATA:
+{json.dumps(session_data, indent=2, default=str)}
+
+Provide exactly 6-10 concise bullet points covering:
+- Odds drift patterns (are favourites drifting or shortening?)
+- Rule distribution (which rules triggered most/least?)
+- Risk exposure (total liability vs stake ratio)
+- Venue/race patterns (any concentrations?)
+- Session timing observations
+- Any anomalies or notable patterns
+- Actionable suggestions for rule tuning
+
+Format each point as a single line starting with a bullet (•). Be specific with numbers. No headers, no preamble — just the bullet points."""
+
+    try:
+        client = get_anthropic()
+        message = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        analysis_text = message.content[0].text
+        points = [
+            line.strip().lstrip("•").lstrip("- ").strip()
+            for line in analysis_text.strip().split("\n")
+            if line.strip() and (line.strip().startswith("•") or line.strip().startswith("-"))
+        ]
+        # Fallback: if parsing strips everything, return raw lines
+        if not points:
+            points = [line.strip() for line in analysis_text.strip().split("\n") if line.strip()]
+        return {"date": req.date, "points": points[:10]}
+    except Exception as e:
+        logger.error(f"Analysis failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Analysis failed: {str(e)}"},
+        )
