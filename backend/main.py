@@ -27,16 +27,8 @@ from pydantic import BaseModel
 
 from engine import LayEngine
 
-# ── Anthropic client (lazy — only created when analysis is requested) ──
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-_anthropic_client = None
-
-def get_anthropic():
-    global _anthropic_client
-    if _anthropic_client is None:
-        import anthropic
-        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    return _anthropic_client
+# ── Gemini API key (used for AI analysis) ──
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # ── Logging ──
 logging.basicConfig(
@@ -220,10 +212,10 @@ class AnalyseRequest(BaseModel):
 @app.post("/api/sessions/analyse")
 def analyse_sessions(req: AnalyseRequest):
     """AI-powered analysis of all sessions for a given date."""
-    if not ANTHROPIC_API_KEY:
+    if not GEMINI_API_KEY:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
+            content={"status": "error", "message": "GEMINI_API_KEY not configured"},
         )
 
     # Gather all sessions for the requested date
@@ -298,13 +290,15 @@ Provide exactly 6-10 concise bullet points covering:
 Format each point as a single line starting with a bullet (•). Be specific with numbers. No headers, no preamble — just the bullet points."""
 
     try:
-        client = get_anthropic()
-        message = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
+        import requests as http_requests
+        resp = http_requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=30,
         )
-        analysis_text = message.content[0].text
+        resp.raise_for_status()
+        data = resp.json()
+        analysis_text = data["candidates"][0]["content"]["parts"][0]["text"]
         points = [
             line.strip().lstrip("•").lstrip("- ").strip()
             for line in analysis_text.strip().split("\n")
@@ -315,7 +309,7 @@ Format each point as a single line starting with a bullet (•). Be specific wit
             points = [line.strip() for line in analysis_text.strip().split("\n") if line.strip()]
         return {"date": req.date, "points": points[:10]}
     except Exception as e:
-        logger.error(f"Analysis failed: {e}")
+        logging.error(f"Analysis failed: {e}")
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": f"Analysis failed: {str(e)}"},
