@@ -40,6 +40,43 @@ STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json")
 # Session history file (persists across days, separate from daily state)
 SESSIONS_FILE = Path(os.environ.get("SESSIONS_FILE", "/tmp/chimera_sessions.json"))
 
+# ── GCS persistence (survives container restarts) ──
+GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
+_gcs_client = None
+
+def _get_gcs_client():
+    global _gcs_client
+    if _gcs_client is None and GCS_BUCKET:
+        from google.cloud import storage
+        _gcs_client = storage.Client()
+    return _gcs_client
+
+def _gcs_write(blob_name: str, data: str):
+    """Write a string to GCS. Falls back silently on error."""
+    try:
+        client = _get_gcs_client()
+        if not client:
+            return
+        bucket = client.bucket(GCS_BUCKET)
+        bucket.blob(blob_name).upload_from_string(data, content_type="application/json")
+    except Exception as e:
+        logger.warning(f"GCS write failed for {blob_name}: {e}")
+
+def _gcs_read(blob_name: str) -> Optional[str]:
+    """Read a string from GCS. Returns None if not found or on error."""
+    try:
+        client = _get_gcs_client()
+        if not client:
+            return None
+        bucket = client.bucket(GCS_BUCKET)
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            return None
+        return blob.download_as_text()
+    except Exception as e:
+        logger.warning(f"GCS read failed for {blob_name}: {e}")
+        return None
+
 
 class LayEngine:
     """
@@ -84,7 +121,7 @@ class LayEngine:
     # ──────────────────────────────────────────────
 
     def _save_state(self):
-        """Persist current state to disk so cold starts don't lose everything."""
+        """Persist current state to disk + GCS so cold starts don't lose everything."""
         try:
             state = {
                 "day_started": self.day_started,
@@ -99,7 +136,9 @@ class LayEngine:
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
             }
-            STATE_FILE.write_text(json.dumps(state, default=str))
+            state_json = json.dumps(state, default=str)
+            STATE_FILE.write_text(state_json)
+            _gcs_write("chimera_engine_state.json", state_json)
 
             # Update current session's running snapshot
             if self.current_session:
@@ -116,12 +155,15 @@ class LayEngine:
             logger.warning(f"Failed to save state: {e}")
 
     def _load_state(self):
-        """Reload state from disk after a cold start."""
+        """Reload state from GCS (preferred) or disk after a cold start."""
         try:
-            if not STATE_FILE.exists():
+            raw = _gcs_read("chimera_engine_state.json")
+            if raw:
+                data = json.loads(raw)
+            elif STATE_FILE.exists():
+                data = json.loads(STATE_FILE.read_text())
+            else:
                 return
-
-            data = json.loads(STATE_FILE.read_text())
 
             # Only reload if same day
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -154,11 +196,15 @@ class LayEngine:
     # ──────────────────────────────────────────────
 
     def _load_sessions(self):
-        """Load session history from disk."""
+        """Load session history from GCS (preferred) or disk."""
         try:
-            if not SESSIONS_FILE.exists():
+            raw = _gcs_read("chimera_sessions.json")
+            if raw:
+                self.sessions = json.loads(raw)
+            elif SESSIONS_FILE.exists():
+                self.sessions = json.loads(SESSIONS_FILE.read_text())
+            else:
                 return
-            self.sessions = json.loads(SESSIONS_FILE.read_text())
             # If last session was RUNNING, it crashed (e.g. Cloud Run restart)
             if self.sessions and self.sessions[-1].get("status") == "RUNNING":
                 crashed = self.sessions[-1]
@@ -173,9 +219,11 @@ class LayEngine:
             self.sessions = []
 
     def _save_sessions(self):
-        """Persist session history to disk."""
+        """Persist session history to disk + GCS."""
         try:
-            SESSIONS_FILE.write_text(json.dumps(self.sessions, default=str))
+            sessions_json = json.dumps(self.sessions, default=str)
+            SESSIONS_FILE.write_text(sessions_json)
+            _gcs_write("chimera_sessions.json", sessions_json)
         except Exception as e:
             logger.warning(f"Failed to save sessions: {e}")
 
