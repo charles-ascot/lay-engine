@@ -310,7 +310,9 @@ Format each point as a single line starting with a bullet (•). Be specific wit
         return {"date": req.date, "points": points[:10]}
     except Exception as e:
         logging.error(f"Analysis failed: {e}")
+        # Sanitize error message to never leak API key
+        safe_msg = str(e).replace(GEMINI_API_KEY, "***") if GEMINI_API_KEY else str(e)
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": f"Analysis failed: {str(e)}"},
+            content={"status": "error", "message": f"Analysis failed: {safe_msg}"},
         )
