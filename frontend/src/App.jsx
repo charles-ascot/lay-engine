@@ -71,6 +71,10 @@ function Badge({ status }) {
   )
 }
 
+// ── Country Labels ──
+const COUNTRY_LABELS = { GB: '🇬🇧 GB', IE: '🇮🇪 IE', ZA: '🇿🇦 ZA', FR: '🇫🇷 FR' }
+const ALL_COUNTRIES = ['GB', 'IE', 'ZA', 'FR']
+
 // ── Login Panel ──
 function LoginPanel({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -128,11 +132,199 @@ function LoginPanel({ onLogin }) {
   )
 }
 
+// ── Chat Drawer ──
+function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [speakEnabled, setSpeakEnabled] = useState(true)
+  const [date] = useState(initialDate || null)
+  const messagesEndRef = useRef(null)
+  const recognitionRef = useRef(null)
+  const inputRef = useRef(null)
+  const initialSentRef = useRef(false)
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Auto-send initial analysis message when opened with initialMessage
+  useEffect(() => {
+    if (isOpen && initialMessage && !initialSentRef.current) {
+      initialSentRef.current = true
+      sendMessage(initialMessage)
+    }
+  }, [isOpen, initialMessage])
+
+  // Reset initialSentRef when drawer closes
+  useEffect(() => {
+    if (!isOpen) initialSentRef.current = false
+  }, [isOpen])
+
+  // Focus input when drawer opens
+  useEffect(() => {
+    if (isOpen && !initialMessage) inputRef.current?.focus()
+  }, [isOpen])
+
+  const sendMessage = async (text) => {
+    if (!text.trim() || loading) return
+    const userMsg = { role: 'user', content: text.trim() }
+    const updatedMessages = [...messages, userMsg]
+    setMessages(updatedMessages)
+    setInput('')
+    setLoading(true)
+
+    try {
+      const res = await api('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          message: text.trim(),
+          history: messages,
+          date: date,
+        }),
+      })
+      if (res.reply) {
+        const assistantMsg = { role: 'assistant', content: res.reply }
+        setMessages([...updatedMessages, assistantMsg])
+
+        // Text-to-speech
+        if (speakEnabled && 'speechSynthesis' in window) {
+          window.speechSynthesis.cancel()
+          const utterance = new SpeechSynthesisUtterance(res.reply)
+          utterance.rate = 1.1
+          utterance.pitch = 1.0
+          window.speechSynthesis.speak(utterance)
+        }
+      } else {
+        setMessages([...updatedMessages, {
+          role: 'assistant',
+          content: `Error: ${res.message || 'Unknown error'}`
+        }])
+      }
+    } catch (e) {
+      setMessages([...updatedMessages, {
+        role: 'assistant',
+        content: 'Failed to connect to the analysis service.'
+      }])
+    }
+    setLoading(false)
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    sendMessage(input)
+  }
+
+  // ── Speech Recognition (STT) ──
+  const toggleListening = () => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      return
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Speech recognition not supported in this browser.')
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = 'en-GB'
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript
+      sendMessage(transcript)
+    }
+    recognition.onerror = () => setListening(false)
+    recognition.onend = () => setListening(false)
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setListening(true)
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="chat-overlay" onClick={onClose}>
+      <div className="chat-drawer" onClick={e => e.stopPropagation()}>
+        <div className="chat-header">
+          <h3>CHIMERA AI{date ? ` — ${date}` : ''}</h3>
+          <div className="chat-header-actions">
+            <button
+              className={`btn-sm ${speakEnabled ? 'btn-sm-active' : ''}`}
+              onClick={() => {
+                setSpeakEnabled(!speakEnabled)
+                if (speakEnabled) window.speechSynthesis?.cancel()
+              }}
+              title={speakEnabled ? 'Mute voice' : 'Enable voice'}
+            >
+              {speakEnabled ? '🔊' : '🔇'}
+            </button>
+            <button className="btn-sm" onClick={() => {
+              setMessages([])
+              window.speechSynthesis?.cancel()
+            }}>Clear</button>
+            <button className="btn-sm" onClick={onClose}>✕</button>
+          </div>
+        </div>
+
+        <div className="chat-messages">
+          {messages.length === 0 && !loading && (
+            <p className="empty">Ask anything about your betting sessions.</p>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={`chat-msg chat-msg-${m.role}`}>
+              <div className="chat-msg-content">{m.content}</div>
+            </div>
+          ))}
+          {loading && (
+            <div className="chat-msg chat-msg-assistant">
+              <div className="chat-msg-content chat-loading">Thinking...</div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form className="chat-input-row" onSubmit={handleSubmit}>
+          <button
+            type="button"
+            className={`btn-mic ${listening ? 'listening' : ''}`}
+            onClick={toggleListening}
+            title={listening ? 'Stop listening' : 'Speak'}
+          >
+            {listening ? '⏹' : '🎤'}
+          </button>
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="Ask about your sessions..."
+            disabled={loading}
+          />
+          <button type="submit" className="btn btn-primary btn-send" disabled={loading || !input.trim()}>
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Dashboard ──
 function Dashboard() {
   const [state, setState] = useState(null)
   const [tab, setTab] = useState('history')
   const intervalRef = useRef(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatInitialDate, setChatInitialDate] = useState(null)
+  const [chatInitialMessage, setChatInitialMessage] = useState(null)
 
   const fetchState = useCallback(async () => {
     try {
@@ -166,9 +358,32 @@ function Dashboard() {
     await api('/api/engine/reset-bets', { method: 'POST' })
     fetchState()
   }
+  const handleToggleCountry = async (country) => {
+    const current = state.countries || ['GB', 'IE']
+    const updated = current.includes(country)
+      ? current.filter(c => c !== country)
+      : [...current, country]
+    if (updated.length === 0) return
+    await api('/api/engine/countries', {
+      method: 'POST',
+      body: JSON.stringify({ countries: updated }),
+    })
+    fetchState()
+  }
   const handleLogout = async () => {
     await api('/api/logout', { method: 'POST' })
     window.location.reload()
+  }
+
+  const openChat = (date = null, initialMessage = null) => {
+    setChatInitialDate(date)
+    setChatInitialMessage(initialMessage)
+    setChatOpen(true)
+  }
+  const closeChat = () => {
+    setChatOpen(false)
+    setChatInitialMessage(null)
+    window.speechSynthesis?.cancel()
   }
 
   if (!state) return <div className="loading">Loading engine state...</div>
@@ -210,12 +425,27 @@ function Dashboard() {
         <button className="btn btn-secondary" onClick={handleResetBets}>
           Clear Bets & Re-process
         </button>
+        <button className="btn btn-chat" onClick={() => openChat()}>
+          🤖 AI Chat
+        </button>
         <div className="stats-row">
           <span>Markets: <strong>{s.total_markets || 0}</strong></span>
           <span>Processed: <strong>{s.processed || 0}</strong></span>
           <span>Bets: <strong>{s.bets_placed || 0}</strong></span>
           <span>Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
           <span>Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
+        </div>
+        <div className="country-toggles">
+          <span className="country-label">Markets:</span>
+          {ALL_COUNTRIES.map(c => (
+            <button
+              key={c}
+              className={`btn-country ${(state.countries || ['GB', 'IE']).includes(c) ? 'active' : ''}`}
+              onClick={() => handleToggleCountry(c)}
+            >
+              {COUNTRY_LABELS[c]}
+            </button>
+          ))}
         </div>
         {state.last_scan && (
           <p className="last-scan">
@@ -239,25 +469,29 @@ function Dashboard() {
 
       {/* ── Tab Content ── */}
       <div className="tab-content">
-        {tab === 'history' && <HistoryTab />}
+        {tab === 'history' && <HistoryTab openChat={openChat} />}
         {tab === 'bets' && <BetsTab bets={state.recent_bets} />}
         {tab === 'rules' && <RulesTab results={state.recent_results} />}
         {tab === 'errors' && <ErrorsTab errors={state.errors} />}
       </div>
+
+      {/* ── Chat Drawer ── */}
+      <ChatDrawer
+        isOpen={chatOpen}
+        onClose={closeChat}
+        initialDate={chatInitialDate}
+        initialMessage={chatInitialMessage}
+      />
     </div>
   )
 }
 
 // ── History Tab ──
-function HistoryTab() {
+function HistoryTab({ openChat }) {
   const [sessions, setSessions] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [analysis, setAnalysis] = useState(null)
-  const [analysisLoading, setAnalysisLoading] = useState(false)
-  const [analysisError, setAnalysisError] = useState('')
-  const [analysisDate, setAnalysisDate] = useState(null)
 
   useEffect(() => {
     api('/api/sessions')
@@ -274,27 +508,6 @@ function HistoryTab() {
       .then(data => setDetail(data))
       .catch(() => setDetail(null))
   }, [selectedId])
-
-  const runAnalysis = async (date) => {
-    setAnalysisLoading(true)
-    setAnalysisError('')
-    setAnalysis(null)
-    setAnalysisDate(date)
-    try {
-      const res = await api('/api/sessions/analyse', {
-        method: 'POST',
-        body: JSON.stringify({ date }),
-      })
-      if (res.points) {
-        setAnalysis(res.points)
-      } else {
-        setAnalysisError(res.message || 'Analysis failed')
-      }
-    } catch (e) {
-      setAnalysisError('Failed to connect to analysis service')
-    }
-    setAnalysisLoading(false)
-  }
 
   if (loading) return <p className="empty">Loading sessions...</p>
 
@@ -380,38 +593,15 @@ function HistoryTab() {
         {dates.length > 0 && (
           <button
             className="btn btn-analysis"
-            disabled={analysisLoading}
-            onClick={() => runAnalysis(dates[0])}
+            onClick={() => openChat(
+              dates[0],
+              `Provide a comprehensive analysis of today's session data (${dates[0]}). Cover odds drift patterns, rule distribution, risk exposure, venue patterns, timing observations, anomalies, and actionable suggestions for rule tuning. Format as 6-10 concise bullet points with specific numbers.`
+            )}
           >
-            {analysisLoading ? 'Analysing...' : `Analysis ${dates[0]}`}
+            Analysis {dates[0]}
           </button>
         )}
       </div>
-
-      {/* ── Analysis Panel ── */}
-      {analysisLoading && (
-        <div className="analysis-panel">
-          <div className="analysis-loading">Running AI analysis on {analysisDate}...</div>
-        </div>
-      )}
-      {analysisError && (
-        <div className="analysis-panel analysis-error">
-          <strong>Analysis failed:</strong> {analysisError}
-        </div>
-      )}
-      {analysis && (
-        <div className="analysis-panel">
-          <div className="analysis-header">
-            <strong>AI Analysis — {analysisDate}</strong>
-            <button className="btn-sm" onClick={() => setAnalysis(null)}>Dismiss</button>
-          </div>
-          <ul className="analysis-points">
-            {analysis.map((point, i) => (
-              <li key={i}>{point}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {sessions.length === 0 ? (
         <p className="empty">No sessions recorded yet. Start the engine to create one.</p>

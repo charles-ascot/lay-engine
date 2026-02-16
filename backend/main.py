@@ -70,6 +70,18 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class CountriesRequest(BaseModel):
+    countries: list[str]
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
+    date: str | None = None
+
 
 # ──────────────────────────────────────────────
 #  API ENDPOINTS
@@ -134,7 +146,7 @@ def get_rules():
         "timing": "pre_off",
         "markets": {
             "event_type": "7 (Horse Racing)",
-            "countries": ["GB", "IE"],
+            "countries": engine.countries,
             "market_type": "WIN",
         },
         "rules": [
@@ -188,6 +200,21 @@ def toggle_dry_run():
     return {"dry_run": engine.dry_run}
 
 
+@app.post("/api/engine/countries")
+def set_countries(req: CountriesRequest):
+    """Update the market countries filter."""
+    valid = {"GB", "IE", "ZA", "FR"}
+    filtered = [c for c in req.countries if c in valid]
+    if not filtered:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "At least one valid country required"},
+        )
+    engine.countries = filtered
+    engine._save_state()
+    return {"countries": engine.countries}
+
+
 @app.post("/api/engine/reset-bets")
 def reset_bets():
     """Clear all dry run bets and processed markets so the engine can re-process."""
@@ -217,31 +244,14 @@ class AnalyseRequest(BaseModel):
     date: str  # YYYY-MM-DD
 
 
-@app.post("/api/sessions/analyse")
-def analyse_sessions(req: AnalyseRequest):
-    """AI-powered analysis of all sessions for a given date."""
-    if not ANTHROPIC_API_KEY:
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
-        )
-
-    # Gather all sessions for the requested date
-    day_sessions = [
-        s for s in engine.sessions if s.get("date") == req.date
-    ]
-    if not day_sessions:
-        return JSONResponse(
-            status_code=404,
-            content={"status": "error", "message": f"No sessions found for {req.date}"},
-        )
-
-    # Build a compact data summary for the prompt
-    session_data = []
-    for s in day_sessions:
-        session_data.append({
+def _compact_session_data(sessions: list[dict]) -> list[dict]:
+    """Build compact session summaries for AI prompts."""
+    data = []
+    for s in sessions:
+        data.append({
             "session_id": s["session_id"],
             "mode": s["mode"],
+            "date": s.get("date"),
             "start_time": s.get("start_time"),
             "stop_time": s.get("stop_time"),
             "status": s.get("status"),
@@ -274,14 +284,39 @@ def analyse_sessions(req: AnalyseRequest):
                 for r in s.get("results", [])
             ],
         })
+    return data
+
+
+RULES_DESCRIPTION = """The CHIMERA Lay Engine uses these rules on horse racing WIN markets:
+- RULE 1: Favourite odds < 2.0 -> £3 lay on favourite
+- RULE 2: Favourite odds 2.0-5.0 -> £2 lay on favourite
+- RULE 3A: Favourite odds > 5.0 AND gap to 2nd fav < 2 -> £1 lay fav + £1 lay 2nd fav
+- RULE 3B: Favourite odds > 5.0 AND gap to 2nd fav >= 2 -> £1 lay fav only"""
+
+
+@app.post("/api/sessions/analyse")
+def analyse_sessions(req: AnalyseRequest):
+    """AI-powered analysis of all sessions for a given date."""
+    if not ANTHROPIC_API_KEY:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
+        )
+
+    day_sessions = [
+        s for s in engine.sessions if s.get("date") == req.date
+    ]
+    if not day_sessions:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": f"No sessions found for {req.date}"},
+        )
+
+    session_data = _compact_session_data(day_sessions)
 
     prompt = f"""You are an expert horse racing betting analyst. Analyse the following lay betting session data from {req.date}.
 
-The CHIMERA Lay Engine uses these rules on UK/IE horse racing WIN markets:
-- RULE 1: Favourite odds < 2.0 → £3 lay on favourite
-- RULE 2: Favourite odds 2.0–5.0 → £2 lay on favourite
-- RULE 3A: Favourite odds > 5.0 AND gap to 2nd fav < 2 → £1 lay fav + £1 lay 2nd fav
-- RULE 3B: Favourite odds > 5.0 AND gap to 2nd fav >= 2 → £1 lay fav only
+{RULES_DESCRIPTION}
 
 SESSION DATA:
 {json.dumps(session_data, indent=2, default=str)}
@@ -310,7 +345,6 @@ Format each point as a single line starting with a bullet (•). Be specific wit
             for line in analysis_text.strip().split("\n")
             if line.strip() and (line.strip().startswith("•") or line.strip().startswith("-"))
         ]
-        # Fallback: if parsing strips everything, return raw lines
         if not points:
             points = [line.strip() for line in analysis_text.strip().split("\n") if line.strip()]
         return {"date": req.date, "points": points[:10]}
@@ -319,4 +353,54 @@ Format each point as a single line starting with a bullet (•). Be specific wit
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": f"Analysis failed: {str(e)}"},
+        )
+
+
+@app.post("/api/chat")
+def chat(req: ChatRequest):
+    """Interactive chat with AI about session data."""
+    if not ANTHROPIC_API_KEY:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
+        )
+
+    # Build session context
+    if req.date:
+        context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
+    else:
+        context_sessions = engine.sessions[-10:]
+
+    session_data = _compact_session_data(context_sessions)
+
+    system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
+You have access to session data from the CHIMERA Lay Engine.
+
+{RULES_DESCRIPTION}
+
+Active countries: {', '.join(engine.countries)}
+
+SESSION DATA:
+{json.dumps(session_data, indent=2, default=str)}
+
+Answer questions about this data concisely. Be specific with numbers.
+If asked for analysis, provide actionable insights. Keep responses conversational but data-driven."""
+
+    messages = [{"role": h.role, "content": h.content} for h in req.history]
+    messages.append({"role": "user", "content": req.message})
+
+    try:
+        client = get_anthropic()
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages,
+        )
+        return {"reply": response.content[0].text}
+    except Exception as e:
+        logging.error(f"Chat failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Chat failed: {str(e)}"},
         )

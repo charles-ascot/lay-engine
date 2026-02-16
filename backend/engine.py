@@ -102,6 +102,7 @@ class LayEngine:
         self.errors: list[dict] = []
         self.day_started: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.dry_run: bool = DRY_RUN  # Start with env default, toggleable at runtime
+        self.countries: list[str] = ["GB", "IE"]  # Configurable at runtime
 
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
@@ -132,6 +133,7 @@ class LayEngine:
                 "errors": self.errors[-50:],
                 "last_scan": self.last_scan,
                 "dry_run": self.dry_run,
+                "countries": self.countries,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -182,6 +184,7 @@ class LayEngine:
             self.errors = data.get("errors", [])
             self.last_scan = data.get("last_scan")
             self.dry_run = data.get("dry_run", DRY_RUN)
+            self.countries = data.get("countries", ["GB", "IE"])
             self.balance = data.get("balance")
 
             logger.info(
@@ -401,7 +404,7 @@ class LayEngine:
             self._add_error("Session expired during scan")
             return
 
-        self.markets = self.client.get_todays_win_markets()
+        self.markets = self.client.get_todays_win_markets(countries=self.countries)
 
         logger.info(
             f"Scan: {len(self.markets)} markets, "
@@ -593,6 +596,7 @@ class LayEngine:
             "authenticated": self.is_authenticated,
             "status": self.status,
             "dry_run": self.dry_run,
+            "countries": self.countries,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,

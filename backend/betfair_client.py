@@ -136,18 +136,19 @@ class BetfairClient:
     #  MARKET DISCOVERY
     # ──────────────────────────────────────────────
 
-    def get_todays_win_markets(self) -> list[dict]:
+    def get_todays_win_markets(self, countries: list[str] | None = None) -> list[dict]:
         """
-        Get all UK/IE horse racing WIN markets for today.
+        Get horse racing WIN markets for today.
         Returns list of market catalogue entries.
         """
+        countries = countries or ["GB", "IE"]
         now = datetime.now(timezone.utc)
         end_of_day = now.replace(hour=23, minute=59, second=59)
 
         params = {
             "filter": {
                 "eventTypeIds": [EVENT_TYPE_HORSE_RACING],
-                "marketCountries": ["GB", "IE"],
+                "marketCountries": countries,
                 "marketTypeCodes": ["WIN"],
                 "marketStartTime": {
                     "from": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -185,7 +186,7 @@ class BetfairClient:
                 ],
             })
 
-        logger.info(f"Found {len(markets)} UK/IE WIN markets")
+        logger.info(f"Found {len(markets)} {'/'.join(countries)} WIN markets")
         return markets
 
     # ──────────────────────────────────────────────
