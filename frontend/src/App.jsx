@@ -618,7 +618,7 @@ function HistoryTab({ openChat }) {
               <thead>
                 <tr>
                   <th>Time</th>
-                  <th>Venue</th>
+                  <th>Country</th>
                   <th>Runner</th>
                   <th>Odds</th>
                   <th>Stake</th>
@@ -631,7 +631,7 @@ function HistoryTab({ openChat }) {
                 {bets.map((b, i) => (
                   <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
                     <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                    <td>{b.venue || '—'}</td>
+                    <td>{b.country || '—'}</td>
                     <td>{b.runner_name}</td>
                     <td>{b.price?.toFixed(2)}</td>
                     <td>£{b.size?.toFixed(2)}</td>
@@ -739,7 +739,7 @@ function BetsTab({ bets }) {
         <thead>
           <tr>
             <th>Time</th>
-            <th>Venue</th>
+            <th>Country</th>
             <th>Runner</th>
             <th>Odds</th>
             <th>Stake</th>
@@ -752,7 +752,7 @@ function BetsTab({ bets }) {
           {bets.map((b, i) => (
             <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
               <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-              <td>{b.venue || '—'}</td>
+              <td>{b.country || '—'}</td>
               <td>{b.runner_name}</td>
               <td>{b.price?.toFixed(2)}</td>
               <td>£{b.size?.toFixed(2)}</td>

@@ -174,6 +174,7 @@ class BetfairClient:
                 "market_id": m["marketId"],
                 "market_name": m.get("marketName", ""),
                 "venue": m.get("event", {}).get("venue", "Unknown"),
+                "country": m.get("event", {}).get("countryCode", ""),
                 "race_time": m.get("marketStartTime", ""),
                 "runners": [
                     {
