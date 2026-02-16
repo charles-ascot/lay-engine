@@ -10,8 +10,10 @@ FIX LOG:
 """
 
 import os
+import io
 import json
 import logging
+import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -20,9 +22,9 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from engine import LayEngine
@@ -37,6 +39,17 @@ def get_anthropic():
         import anthropic
         _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     return _anthropic_client
+
+# ── OpenAI client (lazy — for Whisper STT + TTS) ──
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+_openai_client = None
+
+def get_openai():
+    global _openai_client
+    if _openai_client is None:
+        import openai
+        _openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
 
 # ── Logging ──
 logging.basicConfig(
@@ -403,4 +416,83 @@ If asked for analysis, provide actionable insights. Keep responses conversationa
         return JSONResponse(
             status_code=500,
             content={"status": "error", "message": f"Chat failed: {str(e)}"},
+        )
+
+
+# ──────────────────────────────────────────────
+#  AUDIO: Whisper STT + OpenAI TTS
+# ──────────────────────────────────────────────
+
+@app.post("/api/audio/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe audio using OpenAI Whisper."""
+    if not OPENAI_API_KEY:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "OPENAI_API_KEY not configured"},
+        )
+    try:
+        # Write uploaded audio to a temp file (Whisper API needs a file-like object with a name)
+        suffix = ".webm"
+        if file.content_type and "wav" in file.content_type:
+            suffix = ".wav"
+        elif file.content_type and "mp4" in file.content_type:
+            suffix = ".mp4"
+
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        client = get_openai()
+        with open(tmp_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="en",
+            )
+
+        os.unlink(tmp_path)
+        return {"text": transcript.text}
+    except Exception as e:
+        logging.error(f"Transcription failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Transcription failed: {str(e)}"},
+        )
+
+
+@app.post("/api/audio/speak")
+def text_to_speech(req: dict):
+    """Convert text to speech using OpenAI TTS."""
+    if not OPENAI_API_KEY:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "OPENAI_API_KEY not configured"},
+        )
+    text = req.get("text", "")
+    if not text:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "No text provided"},
+        )
+    try:
+        client = get_openai()
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=text[:4096],  # TTS has a 4096 char limit
+            response_format="mp3",
+        )
+        audio_bytes = response.content
+        return StreamingResponse(
+            io.BytesIO(audio_bytes),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=speech.mp3"},
+        )
+    except Exception as e:
+        logging.error(f"TTS failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"TTS failed: {str(e)}"},
         )

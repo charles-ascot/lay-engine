@@ -507,10 +507,10 @@ class LayEngine:
                     f"already bet on for race {market['race_time']}"
                 )
                 continue
-            self._place_bet(instruction)
+            self._place_bet(instruction, venue=market["venue"])
             self.processed_runners.add(runner_key)
 
-    def _place_bet(self, instruction):
+    def _place_bet(self, instruction, venue: str = ""):
         """
         Place a single lay bet via the Betfair API.
 
@@ -527,6 +527,7 @@ class LayEngine:
         if self.dry_run:
             bet_record = {
                 **instruction.to_dict(),
+                "venue": venue,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "dry_run": True,
                 "betfair_response": {"status": "DRY_RUN"},
@@ -543,6 +544,7 @@ class LayEngine:
 
         bet_record = {
             **instruction.to_dict(),
+            "venue": venue,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "dry_run": False,
             "betfair_response": response,

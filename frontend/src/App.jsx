@@ -141,9 +141,11 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   const [speakEnabled, setSpeakEnabled] = useState(true)
   const [date] = useState(initialDate || null)
   const messagesEndRef = useRef(null)
-  const recognitionRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
   const inputRef = useRef(null)
   const initialSentRef = useRef(false)
+  const currentAudioRef = useRef(null)
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -168,6 +170,57 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
     if (isOpen && !initialMessage) inputRef.current?.focus()
   }, [isOpen])
 
+  // Stop audio on unmount/close
+  useEffect(() => {
+    if (!isOpen && currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
+    }
+  }, [isOpen])
+
+  const speakText = async (text) => {
+    if (!speakEnabled) return
+    // Stop any currently playing audio
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current = null
+    }
+    try {
+      const res = await fetch(`${API}/api/audio/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!res.ok) {
+        // Fallback to browser TTS if OpenAI TTS fails
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel()
+          const utterance = new SpeechSynthesisUtterance(text)
+          utterance.rate = 1.1
+          window.speechSynthesis.speak(utterance)
+        }
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      currentAudioRef.current = audio
+      audio.onended = () => {
+        URL.revokeObjectURL(url)
+        currentAudioRef.current = null
+      }
+      audio.play()
+    } catch (e) {
+      // Fallback to browser TTS
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.rate = 1.1
+        window.speechSynthesis.speak(utterance)
+      }
+    }
+  }
+
   const sendMessage = async (text) => {
     if (!text.trim() || loading) return
     const userMsg = { role: 'user', content: text.trim() }
@@ -188,15 +241,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
       if (res.reply) {
         const assistantMsg = { role: 'assistant', content: res.reply }
         setMessages([...updatedMessages, assistantMsg])
-
-        // Text-to-speech
-        if (speakEnabled && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel()
-          const utterance = new SpeechSynthesisUtterance(res.reply)
-          utterance.rate = 1.1
-          utterance.pitch = 1.0
-          window.speechSynthesis.speak(utterance)
-        }
+        speakText(res.reply)
       } else {
         setMessages([...updatedMessages, {
           role: 'assistant',
@@ -217,35 +262,55 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
     sendMessage(input)
   }
 
-  // ── Speech Recognition (STT) ──
-  const toggleListening = () => {
+  // ── Speech Recognition via OpenAI Whisper ──
+  const toggleListening = async () => {
     if (listening) {
-      recognitionRef.current?.stop()
+      // Stop recording
+      mediaRecorderRef.current?.stop()
       setListening(false)
       return
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      alert('Speech recognition not supported in this browser.')
-      return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach(t => t.stop())
+
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (blob.size < 100) return // Too short, ignore
+
+        setLoading(true)
+        try {
+          const formData = new FormData()
+          formData.append('file', blob, 'recording.webm')
+          const res = await fetch(`${API}/api/audio/transcribe`, {
+            method: 'POST',
+            body: formData,
+          })
+          const data = await res.json()
+          if (data.text && data.text.trim()) {
+            sendMessage(data.text.trim())
+          }
+        } catch (e) {
+          console.error('Transcription failed:', e)
+          setLoading(false)
+        }
+      }
+
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+      setListening(true)
+    } catch (e) {
+      alert('Microphone access denied or not available.')
     }
-
-    const recognition = new SpeechRecognition()
-    recognition.continuous = false
-    recognition.interimResults = false
-    recognition.lang = 'en-GB'
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript
-      sendMessage(transcript)
-    }
-    recognition.onerror = () => setListening(false)
-    recognition.onend = () => setListening(false)
-
-    recognitionRef.current = recognition
-    recognition.start()
-    setListening(true)
   }
 
   if (!isOpen) return null
@@ -260,7 +325,11 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
               className={`btn-sm ${speakEnabled ? 'btn-sm-active' : ''}`}
               onClick={() => {
                 setSpeakEnabled(!speakEnabled)
-                if (speakEnabled) window.speechSynthesis?.cancel()
+                if (speakEnabled) {
+                  currentAudioRef.current?.pause()
+                  currentAudioRef.current = null
+                  window.speechSynthesis?.cancel()
+                }
               }}
               title={speakEnabled ? 'Mute voice' : 'Enable voice'}
             >
@@ -268,6 +337,8 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
             </button>
             <button className="btn-sm" onClick={() => {
               setMessages([])
+              currentAudioRef.current?.pause()
+              currentAudioRef.current = null
               window.speechSynthesis?.cancel()
             }}>Clear</button>
             <button className="btn-sm" onClick={onClose}>✕</button>
@@ -383,7 +454,6 @@ function Dashboard() {
   const closeChat = () => {
     setChatOpen(false)
     setChatInitialMessage(null)
-    window.speechSynthesis?.cancel()
   }
 
   if (!state) return <div className="loading">Loading engine state...</div>
@@ -548,7 +618,7 @@ function HistoryTab({ openChat }) {
               <thead>
                 <tr>
                   <th>Time</th>
-                  <th>Market ID</th>
+                  <th>Venue</th>
                   <th>Runner</th>
                   <th>Odds</th>
                   <th>Stake</th>
@@ -561,7 +631,7 @@ function HistoryTab({ openChat }) {
                 {bets.map((b, i) => (
                   <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
                     <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                    <td title={b.market_id}>...{b.market_id?.slice(-8)}</td>
+                    <td>{b.venue || '—'}</td>
                     <td>{b.runner_name}</td>
                     <td>{b.price?.toFixed(2)}</td>
                     <td>£{b.size?.toFixed(2)}</td>
@@ -669,7 +739,7 @@ function BetsTab({ bets }) {
         <thead>
           <tr>
             <th>Time</th>
-            <th>Market ID</th>
+            <th>Venue</th>
             <th>Runner</th>
             <th>Odds</th>
             <th>Stake</th>
@@ -682,7 +752,7 @@ function BetsTab({ bets }) {
           {bets.map((b, i) => (
             <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
               <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-              <td title={b.market_id}>...{b.market_id?.slice(-8)}</td>
+              <td>{b.venue || '—'}</td>
               <td>{b.runner_name}</td>
               <td>{b.price?.toFixed(2)}</td>
               <td>£{b.size?.toFixed(2)}</td>

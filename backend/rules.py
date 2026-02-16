@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 
+# Maximum lay odds — skip markets where the favourite exceeds this.
+# Odds like 560.00 indicate an illiquid market with no real trading.
+MAX_LAY_ODDS = 50.0
+
 
 @dataclass
 class Runner:
@@ -167,6 +171,12 @@ def apply_rules(
         return result
 
     odds = fav.best_available_to_lay
+
+    # ─── Guard: Skip illiquid markets with absurd odds ───
+    if odds > MAX_LAY_ODDS:
+        result.skipped = True
+        result.skip_reason = f"Favourite odds {odds} exceed max threshold ({MAX_LAY_ODDS})"
+        return result
 
     # ─── RULE 1: Favourite odds < 2.0 → £3 lay ───
     if odds < 2.0:
