@@ -44,6 +44,9 @@ SESSIONS_FILE = Path(os.environ.get("SESSIONS_FILE", "/tmp/chimera_sessions.json
 # API keys file
 API_KEYS_FILE = Path(os.environ.get("API_KEYS_FILE", "/tmp/chimera_api_keys.json"))
 
+# Reports file
+REPORTS_FILE = Path(os.environ.get("REPORTS_FILE", "/tmp/chimera_reports.json"))
+
 # ── GCS persistence (survives container restarts) ──
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
 _gcs_client = None
@@ -120,10 +123,14 @@ class LayEngine:
         # ── API keys ──
         self.api_keys: list[dict] = []
 
+        # ── Reports ──
+        self.reports: list[dict] = []
+
         # Try to reload state from disk (Cloud Run cold-start recovery)
         self._load_state()
         self._load_sessions()
         self._load_api_keys()
+        self._load_reports()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -251,6 +258,9 @@ class LayEngine:
         self.current_session["status"] = status
         self.current_session["bets"] = session_bets
         self.current_session["results"] = session_results
+        countries = sorted(set(
+            b.get("country") for b in session_bets if b.get("country")
+        ))
         self.current_session["summary"] = {
             "total_bets": len(session_bets),
             "total_stake": round(sum(b.get("size", 0) for b in session_bets), 2),
@@ -258,6 +268,7 @@ class LayEngine:
             "markets_processed": len(set(
                 r.get("market_id") for r in session_results if not r.get("skipped")
             )),
+            "countries": countries,
         }
         self.current_session = None
         self._save_sessions()
@@ -289,6 +300,30 @@ class LayEngine:
             _gcs_write("chimera_api_keys.json", keys_json)
         except Exception as e:
             logger.warning(f"Failed to save API keys: {e}")
+
+    def _load_reports(self):
+        """Load reports from GCS (preferred) or disk."""
+        try:
+            raw = _gcs_read("chimera_reports.json")
+            if raw:
+                self.reports = json.loads(raw)
+            elif REPORTS_FILE.exists():
+                self.reports = json.loads(REPORTS_FILE.read_text())
+            else:
+                self.reports = []
+            logger.info(f"Loaded {len(self.reports)} reports")
+        except Exception as e:
+            logger.warning(f"Failed to load reports: {e}")
+            self.reports = []
+
+    def _save_reports(self):
+        """Persist reports to disk + GCS."""
+        try:
+            reports_json = json.dumps(self.reports, default=str)
+            REPORTS_FILE.write_text(reports_json)
+            _gcs_write("chimera_reports.json", reports_json)
+        except Exception as e:
+            logger.warning(f"Failed to save reports: {e}")
 
     def generate_api_key(self, label: str = "") -> dict:
         """Generate a new API key. Returns the full key (only shown once)."""
@@ -714,6 +749,13 @@ class LayEngine:
         """Return all session summaries (no bets) in reverse chronological order."""
         summaries = []
         for s in reversed(self.sessions):
+            summary = s.get("summary", {})
+            # Derive countries from bets if not in summary (backward compat)
+            countries = summary.get("countries")
+            if not countries:
+                countries = sorted(set(
+                    b.get("country") for b in s.get("bets", []) if b.get("country")
+                ))
             summaries.append({
                 "session_id": s["session_id"],
                 "mode": s["mode"],
@@ -721,7 +763,8 @@ class LayEngine:
                 "start_time": s["start_time"],
                 "stop_time": s["stop_time"],
                 "status": s["status"],
-                "summary": s["summary"],
+                "summary": summary,
+                "countries": countries,
             })
         return summaries
 

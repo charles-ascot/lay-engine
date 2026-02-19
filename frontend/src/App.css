@@ -832,6 +832,374 @@ h2 {
   background: rgba(0, 212, 255, 0.5);
 }
 
+/* ── History Tab — Grouped by Date ── */
+.history-grouped {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.history-date-group {
+  background: rgba(10, 15, 30, 0.3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.history-date-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: rgba(0, 212, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.history-date-label {
+  font-family: 'Lexend', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.history-date-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+.history-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border-subtle);
+}
+.history-session-card {
+  padding: 14px 20px;
+  background: var(--surface-solid);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.history-session-card:hover {
+  background: rgba(0, 212, 255, 0.06);
+}
+.session-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.session-card-time {
+  font-family: 'Lexend', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.session-card-details {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.session-card-details strong {
+  color: var(--primary);
+  font-family: 'Lexend', sans-serif;
+}
+.session-card-countries {
+  font-size: 13px;
+}
+
+/* ── Reports Tab ── */
+.report-controls {
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+}
+.report-date-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.report-date-row label {
+  font-family: 'Lexend', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.report-date-row input[type="date"] {
+  padding: 10px 14px;
+  background: rgba(20, 30, 50, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'Poppins', sans-serif;
+  transition: all 0.3s ease;
+}
+.report-date-row input[type="date"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.2);
+}
+.report-date-row input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+.report-sessions-panel h3 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.report-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.report-session-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(10, 15, 30, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+}
+.report-session-item:hover {
+  border-color: var(--primary);
+  background: rgba(0, 212, 255, 0.04);
+}
+.report-session-item input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+}
+.report-session-time {
+  font-family: 'Lexend', sans-serif;
+  font-weight: 600;
+  color: var(--text);
+}
+.report-session-stats {
+  color: var(--muted);
+  font-size: 12px;
+}
+.report-session-countries {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.btn-report {
+  background: linear-gradient(135deg, #00D4FF 0%, #9D4EDD 100%);
+  color: #fff;
+  padding: 12px 28px;
+  font-size: 13px;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Lexend', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 16px rgba(0, 212, 255, 0.3);
+}
+.btn-report:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 212, 255, 0.4);
+}
+.btn-report:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Template Selection */
+.report-template-select {
+  background: rgba(10, 15, 30, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.report-template-select h3 {
+  margin-bottom: 12px;
+}
+.report-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.report-template-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(20, 30, 50, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.report-template-item:hover {
+  border-color: var(--primary);
+}
+.report-template-item input[type="radio"] {
+  accent-color: var(--primary);
+  margin-top: 3px;
+}
+.report-template-item strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.template-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.report-template-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* Report List */
+.report-list-section {
+  margin-top: 8px;
+}
+.report-list-section h3 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+}
+.report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.report-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+.report-card:hover {
+  border-color: var(--border);
+}
+.report-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.report-card-info strong {
+  font-size: 14px;
+  color: var(--text);
+}
+.report-card-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.report-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-sm-view {
+  padding: 6px 16px;
+  font-size: 11px;
+  font-family: 'Lexend', sans-serif;
+  font-weight: 600;
+  background: linear-gradient(135deg, #00D4FF 0%, #0099FF 100%);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.btn-sm-view:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+/* Report Viewer */
+.report-viewer {
+  background: rgba(10, 15, 30, 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 32px 40px;
+  line-height: 1.8;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.report-viewer h1 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+.report-viewer h2 {
+  font-size: 16px;
+  margin-top: 24px;
+  text-shadow: none;
+}
+.report-viewer h3 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+.report-viewer p {
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+.report-viewer table {
+  margin: 12px 0;
+  font-size: 12px;
+}
+.report-viewer ul {
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+.report-viewer li {
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.report-viewer hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 20px 0;
+}
+.report-viewer em {
+  color: var(--muted);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .stats-row { flex-wrap: wrap; gap: 10px; }
@@ -848,6 +1216,10 @@ h2 {
   }
   .header-left h1 { font-size: 16px; }
   .dashboard { padding: 12px; }
+  .session-card-details { flex-wrap: wrap; gap: 8px; }
+  .report-session-item { flex-wrap: wrap; }
+  .report-card { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .report-viewer { padding: 20px; }
 }
 
 @media (max-width: 480px) {

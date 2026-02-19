@@ -526,7 +526,7 @@ function Dashboard() {
 
       {/* ── Tabs ── */}
       <nav className="tabs">
-        {['history', 'bets', 'rules', 'errors', 'api'].map(t => (
+        {['history', 'reports', 'bets', 'rules', 'errors', 'api'].map(t => (
           <button
             key={t}
             className={tab === t ? 'active' : ''}
@@ -540,6 +540,7 @@ function Dashboard() {
       {/* ── Tab Content ── */}
       <div className="tab-content">
         {tab === 'history' && <HistoryTab openChat={openChat} />}
+        {tab === 'reports' && <ReportsTab />}
         {tab === 'bets' && <BetsTab bets={state.recent_bets} />}
         {tab === 'rules' && <RulesTab results={state.recent_results} />}
         {tab === 'errors' && <ErrorsTab errors={state.errors} />}
@@ -653,23 +654,38 @@ function HistoryTab({ openChat }) {
     )
   }
 
-  // Get unique dates from sessions for analysis buttons
-  const dates = [...new Set(sessions.map(s => s.date))]
+  // Group sessions by date
+  const grouped = {}
+  sessions.forEach(s => {
+    if (!grouped[s.date]) grouped[s.date] = []
+    grouped[s.date].push(s)
+  })
+  const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+
+  const formatDateHeader = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00')
+    return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  }
+
+  const getSessionCountries = (s) => {
+    const countries = s.countries || s.summary?.countries || []
+    return countries.map(c => COUNTRY_LABELS[c] || c).join(' ')
+  }
 
   // ── List View ──
   return (
     <div>
       <div className="tab-toolbar">
         <h2>Session History</h2>
-        {dates.length > 0 && (
+        {sortedDates.length > 0 && (
           <button
             className="btn btn-analysis"
             onClick={() => openChat(
-              dates[0],
-              `Provide a comprehensive analysis of today's session data (${dates[0]}). Cover odds drift patterns, rule distribution, risk exposure, venue patterns, timing observations, anomalies, and actionable suggestions for rule tuning. Format as 6-10 concise bullet points with specific numbers.`
+              sortedDates[0],
+              `Provide a comprehensive analysis of today's session data (${sortedDates[0]}). Cover odds drift patterns, rule distribution, risk exposure, venue patterns, timing observations, anomalies, and actionable suggestions for rule tuning. Format as 6-10 concise bullet points with specific numbers.`
             )}
           >
-            Analysis {dates[0]}
+            Analysis {sortedDates[0]}
           </button>
         )}
       </div>
@@ -677,48 +693,44 @@ function HistoryTab({ openChat }) {
       {sessions.length === 0 ? (
         <p className="empty">No sessions recorded yet. Start the engine to create one.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Mode</th>
-              <th>Date</th>
-              <th>Start</th>
-              <th>Stop</th>
-              <th>Bets</th>
-              <th>Stake</th>
-              <th>Liability</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map(s => (
-              <tr
-                key={s.session_id}
-                className="session-row"
-                onClick={() => setSelectedId(s.session_id)}
-              >
-                <td>
-                  <span className={`badge ${s.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
-                    {s.mode}
-                  </span>
-                </td>
-                <td>{s.date}</td>
-                <td>{new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                <td>{s.stop_time
-                  ? new Date(s.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                  : '---'}</td>
-                <td>{s.summary?.total_bets || 0}</td>
-                <td>£{(s.summary?.total_stake || 0).toFixed(2)}</td>
-                <td>£{(s.summary?.total_liability || 0).toFixed(2)}</td>
-                <td>
-                  <span className={`badge badge-${s.status.toLowerCase()}`}>
-                    {s.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="history-grouped">
+          {sortedDates.map(date => (
+            <div key={date} className="history-date-group">
+              <div className="history-date-header">
+                <span className="history-date-label">{formatDateHeader(date)}</span>
+                <span className="history-date-count">{grouped[date].length} session{grouped[date].length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="history-session-list">
+                {grouped[date].map(s => (
+                  <div
+                    key={s.session_id}
+                    className="history-session-card"
+                    onClick={() => setSelectedId(s.session_id)}
+                  >
+                    <div className="session-card-top">
+                      <span className={`badge ${s.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
+                        {s.mode === 'LIVE' ? 'LIVE BET' : 'DRY RUN'}
+                      </span>
+                      <span className="session-card-time">
+                        {new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {s.stop_time
+                          ? ` – ${new Date(s.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          : ' – running'}
+                      </span>
+                      <span className={`badge badge-${s.status.toLowerCase()}`}>{s.status}</span>
+                    </div>
+                    <div className="session-card-details">
+                      <span className="session-card-countries">{getSessionCountries(s) || '—'}</span>
+                      <span>Bets: <strong>{s.summary?.total_bets || 0}</strong></span>
+                      <span>Staked: <strong>£{(s.summary?.total_stake || 0).toFixed(2)}</strong></span>
+                      <span>Liability: <strong>£{(s.summary?.total_liability || 0).toFixed(2)}</strong></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -970,6 +982,306 @@ function ApiKeysTab() {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Reports Tab ──
+function ReportsTab() {
+  const [selectedDate, setSelectedDate] = useState('')
+  const [daySessions, setDaySessions] = useState([])
+  const [selectedSessionIds, setSelectedSessionIds] = useState([])
+  const [templates, setTemplates] = useState([])
+  const [selectedTemplate, setSelectedTemplate] = useState('daily_performance')
+  const [reports, setReports] = useState([])
+  const [viewingReport, setViewingReport] = useState(null)
+  const [generating, setGenerating] = useState(false)
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [showTemplateSelect, setShowTemplateSelect] = useState(false)
+  const reportContentRef = useRef(null)
+
+  // Load templates + reports on mount
+  useEffect(() => {
+    api('/api/reports/templates').then(data => setTemplates(data.templates || []))
+    fetchReports()
+  }, [])
+
+  const fetchReports = () => {
+    api('/api/reports').then(data => setReports(data.reports || []))
+  }
+
+  // Fetch sessions for selected date
+  useEffect(() => {
+    if (!selectedDate) { setDaySessions([]); return }
+    setLoadingSessions(true)
+    api('/api/sessions')
+      .then(data => {
+        const filtered = (data.sessions || []).filter(s => s.date === selectedDate)
+        setDaySessions(filtered)
+        setSelectedSessionIds(filtered.map(s => s.session_id))
+        setLoadingSessions(false)
+      })
+      .catch(() => setLoadingSessions(false))
+  }, [selectedDate])
+
+  const toggleSession = (sid) => {
+    setSelectedSessionIds(prev =>
+      prev.includes(sid) ? prev.filter(id => id !== sid) : [...prev, sid]
+    )
+  }
+
+  const handleGenerateReport = () => {
+    setShowTemplateSelect(true)
+  }
+
+  const handleConfirmGenerate = async () => {
+    if (selectedSessionIds.length === 0) return
+    setGenerating(true)
+    setShowTemplateSelect(false)
+    try {
+      const res = await api('/api/reports/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: selectedDate,
+          session_ids: selectedSessionIds,
+          template: selectedTemplate,
+        }),
+      })
+      if (res.report_id) {
+        fetchReports()
+        setViewingReport(res)
+      }
+    } catch (e) {
+      console.error('Report generation failed:', e)
+    }
+    setGenerating(false)
+  }
+
+  const handleViewReport = async (reportId) => {
+    const res = await api(`/api/reports/${reportId}`)
+    if (res.content) setViewingReport(res)
+  }
+
+  const handleDeleteReport = async (reportId) => {
+    if (!confirm('Delete this report?')) return
+    await api(`/api/reports/${reportId}`, { method: 'DELETE' })
+    fetchReports()
+    if (viewingReport?.report_id === reportId) setViewingReport(null)
+  }
+
+  const handleDownloadPDF = () => {
+    if (!reportContentRef.current) return
+    const content = reportContentRef.current.innerHTML
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head>
+<title>${viewingReport?.title || 'CHIMERA Report'}</title>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.7; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; color: #0a0f1e; }
+  h2 { font-size: 18px; color: #0a0f1e; margin-top: 28px; }
+  h3 { font-size: 15px; color: #333; margin-top: 24px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th { background: #0a0f1e; color: #fff; padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+  tr:nth-child(even) td { background: #f8f9fa; }
+  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+  em { color: #666; }
+  strong { color: #0a0f1e; }
+  @media print { body { padding: 20px; } }
+</style>
+</head><body>${content}</body></html>`)
+    printWindow.document.close()
+    setTimeout(() => { printWindow.print() }, 500)
+  }
+
+  // Simple markdown to HTML converter
+  const renderMarkdown = (md) => {
+    if (!md) return ''
+    let html = md
+      // Headers
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      // Bold & italic
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      // Code
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      // Horizontal rule
+      .replace(/^---$/gm, '<hr/>')
+      // Bullet lists
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+    // Tables
+    html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, (match, headerRow, bodyRows) => {
+      const headers = headerRow.split('|').map(h => h.trim()).filter(Boolean)
+      const rows = bodyRows.trim().split('\n').map(row =>
+        row.split('|').map(c => c.trim()).filter(Boolean)
+      )
+      let table = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>'
+      rows.forEach(r => {
+        table += '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>'
+      })
+      table += '</tbody></table>'
+      return table
+    })
+    // Paragraphs (lines not already wrapped)
+    html = html.replace(/^(?!<[hultdor])((?!<).+)$/gm, '<p>$1</p>')
+    return html
+  }
+
+  // ── Report Viewer ──
+  if (viewingReport) {
+    return (
+      <div>
+        <div className="tab-toolbar">
+          <button className="btn btn-secondary btn-back" onClick={() => setViewingReport(null)}>
+            ← Back to Reports
+          </button>
+          <h2>{viewingReport.title}</h2>
+          <button className="btn btn-primary" onClick={handleDownloadPDF}>
+            Download / Print PDF
+          </button>
+        </div>
+        <div className="report-viewer" ref={reportContentRef}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(viewingReport.content) }}
+        />
+      </div>
+    )
+  }
+
+  // Get available dates from all sessions (for the date picker)
+  const today = new Date().toISOString().slice(0, 10)
+
+  return (
+    <div>
+      <h2>Reports</h2>
+
+      {/* ── Date & Session Selector ── */}
+      <div className="report-controls">
+        <div className="report-date-row">
+          <label>Select Date:</label>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => setSelectedDate(e.target.value)}
+            max={today}
+          />
+        </div>
+
+        {selectedDate && (
+          <div className="report-sessions-panel">
+            <h3>Sessions for {selectedDate}</h3>
+            {loadingSessions ? (
+              <p className="empty">Loading sessions...</p>
+            ) : daySessions.length === 0 ? (
+              <p className="empty">No sessions found for this date.</p>
+            ) : (
+              <>
+                <div className="report-session-list">
+                  {daySessions.map(s => (
+                    <label key={s.session_id} className="report-session-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedSessionIds.includes(s.session_id)}
+                        onChange={() => toggleSession(s.session_id)}
+                      />
+                      <span className={`badge ${s.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
+                        {s.mode === 'LIVE' ? 'LIVE BET' : 'DRY RUN'}
+                      </span>
+                      <span className="report-session-time">
+                        {new Date(s.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {s.stop_time
+                          ? ` – ${new Date(s.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          : ' – running'}
+                      </span>
+                      <span className="report-session-stats">
+                        {s.summary?.total_bets || 0} bets · £{(s.summary?.total_stake || 0).toFixed(2)}
+                      </span>
+                      <span className="report-session-countries">
+                        {(s.countries || s.summary?.countries || []).map(c => COUNTRY_LABELS[c] || c).join(' ')}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Template selection overlay */}
+                {showTemplateSelect && (
+                  <div className="report-template-select">
+                    <h3>Choose Template</h3>
+                    <div className="report-template-list">
+                      {templates.map(t => (
+                        <label key={t.id} className="report-template-item">
+                          <input
+                            type="radio"
+                            name="template"
+                            value={t.id}
+                            checked={selectedTemplate === t.id}
+                            onChange={() => setSelectedTemplate(t.id)}
+                          />
+                          <div>
+                            <strong>{t.name}</strong>
+                            <span className="template-desc">{t.description}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="report-template-actions">
+                      <button className="btn btn-secondary" onClick={() => setShowTemplateSelect(false)}>Cancel</button>
+                      <button className="btn btn-primary" onClick={handleConfirmGenerate}
+                        disabled={selectedSessionIds.length === 0}>
+                        Generate Report
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  className="btn btn-report"
+                  onClick={handleGenerateReport}
+                  disabled={generating || selectedSessionIds.length === 0}
+                >
+                  {generating ? 'Generating Report...' : 'Daily Report'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Report List ── */}
+      <div className="report-list-section">
+        <h3>Generated Reports</h3>
+        {reports.length === 0 ? (
+          <p className="empty">No reports generated yet. Select a date and sessions above to create one.</p>
+        ) : (
+          <div className="report-list">
+            {reports.map(r => (
+              <div key={r.report_id} className="report-card">
+                <div className="report-card-info">
+                  <strong>{r.title}</strong>
+                  <span className="report-card-meta">
+                    {r.template_name} · {new Date(r.created_at).toLocaleString()} · {r.session_ids?.length || 0} session{(r.session_ids?.length || 0) !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="report-card-actions">
+                  <button className="btn btn-sm-view" onClick={() => handleViewReport(r.report_id)}>
+                    View
+                  </button>
+                  <button className="btn-sm btn-danger-sm" onClick={() => handleDeleteReport(r.report_id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
