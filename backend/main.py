@@ -22,7 +22,7 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Header, Depends, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -94,6 +94,29 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
     date: str | None = None
+
+class GenerateKeyRequest(BaseModel):
+    label: str = ""
+
+
+# ──────────────────────────────────────────────
+#  API KEY AUTHENTICATION
+# ──────────────────────────────────────────────
+
+def require_api_key(x_api_key: str = Header(None), api_key: str = Query(None)):
+    """Dependency that validates an API key from header or query param."""
+    key = x_api_key or api_key
+    if not key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide X-API-Key header or ?api_key= query param.",
+        )
+    if not engine.validate_api_key(key):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key.",
+        )
+    return key
 
 
 # ──────────────────────────────────────────────
@@ -496,3 +519,190 @@ def text_to_speech(req: dict):
             status_code=500,
             content={"status": "error", "message": f"TTS failed: {str(e)}"},
         )
+
+
+# ──────────────────────────────────────────────
+#  API KEY MANAGEMENT (requires Betfair login)
+# ──────────────────────────────────────────────
+
+@app.post("/api/keys/generate")
+def generate_api_key(req: GenerateKeyRequest):
+    """Generate a new API key. Must be logged in."""
+    if not engine.is_authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Login required to manage API keys"},
+        )
+    key_record = engine.generate_api_key(req.label)
+    return {
+        "status": "ok",
+        "key": key_record["key"],
+        "key_id": key_record["key_id"],
+        "label": key_record["label"],
+        "message": "Save this key — it won't be shown again.",
+    }
+
+
+@app.get("/api/keys")
+def list_api_keys():
+    """List all API keys (masked)."""
+    if not engine.is_authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Login required to manage API keys"},
+        )
+    return {"keys": engine.list_api_keys()}
+
+
+@app.delete("/api/keys/{key_id}")
+def revoke_api_key(key_id: str):
+    """Revoke an API key."""
+    if not engine.is_authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Login required to manage API keys"},
+        )
+    if engine.revoke_api_key(key_id):
+        return {"status": "ok", "message": "Key revoked"}
+    return JSONResponse(
+        status_code=404,
+        content={"status": "error", "message": "Key not found"},
+    )
+
+
+# ──────────────────────────────────────────────
+#  DATA API (requires API key)
+# ──────────────────────────────────────────────
+
+@app.get("/api/data/sessions")
+def data_sessions(
+    date: str = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    mode: str = Query(None, description="Filter by mode (LIVE or DRY_RUN)"),
+    _key: str = Depends(require_api_key),
+):
+    """All sessions with full detail. Optionally filter by date or mode."""
+    sessions = engine.sessions
+    if date:
+        sessions = [s for s in sessions if s.get("date") == date]
+    if mode:
+        sessions = [s for s in sessions if s.get("mode") == mode.upper()]
+    # Strip internal fields
+    return {
+        "count": len(sessions),
+        "sessions": [
+            {k: v for k, v in s.items() if not k.startswith("_")}
+            for s in reversed(sessions)
+        ],
+    }
+
+
+@app.get("/api/data/sessions/{session_id}")
+def data_session_detail(session_id: str, _key: str = Depends(require_api_key)):
+    """Full session detail including all bets and results."""
+    detail = engine.get_session_detail(session_id)
+    if detail is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": "Session not found"},
+        )
+    return detail
+
+
+@app.get("/api/data/bets")
+def data_bets(
+    date: str = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    mode: str = Query(None, description="Filter by mode (LIVE or DRY_RUN)"),
+    _key: str = Depends(require_api_key),
+):
+    """All bets across all sessions. Optionally filter by date or mode."""
+    bets = []
+    for s in engine.sessions:
+        if date and s.get("date") != date:
+            continue
+        if mode and s.get("mode") != mode.upper():
+            continue
+        for b in s.get("bets", []):
+            bet = dict(b)
+            bet["session_id"] = s["session_id"]
+            bet["session_mode"] = s["mode"]
+            bet["session_date"] = s["date"]
+            bets.append(bet)
+    return {"count": len(bets), "bets": list(reversed(bets))}
+
+
+@app.get("/api/data/results")
+def data_results(
+    date: str = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    _key: str = Depends(require_api_key),
+):
+    """All rule evaluation results across all sessions."""
+    results = []
+    for s in engine.sessions:
+        if date and s.get("date") != date:
+            continue
+        for r in s.get("results", []):
+            result = dict(r)
+            result["session_id"] = s["session_id"]
+            result["session_date"] = s["date"]
+            results.append(result)
+    return {"count": len(results), "results": list(reversed(results))}
+
+
+@app.get("/api/data/state")
+def data_state(_key: str = Depends(require_api_key)):
+    """Current engine state (same as dashboard)."""
+    return engine.get_state()
+
+
+@app.get("/api/data/rules")
+def data_rules(_key: str = Depends(require_api_key)):
+    """Active rule definitions."""
+    return get_rules()
+
+
+@app.get("/api/data/summary")
+def data_summary(
+    date: str = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    _key: str = Depends(require_api_key),
+):
+    """Aggregated statistics across all sessions."""
+    sessions = engine.sessions
+    if date:
+        sessions = [s for s in sessions if s.get("date") == date]
+
+    all_bets = []
+    for s in sessions:
+        all_bets.extend(s.get("bets", []))
+
+    total_stake = sum(b.get("size", 0) for b in all_bets)
+    total_liability = sum(b.get("liability", 0) for b in all_bets)
+
+    # Count by rule
+    rule_counts = {}
+    for b in all_bets:
+        rule = b.get("rule_applied", "unknown")
+        rule_counts[rule] = rule_counts.get(rule, 0) + 1
+
+    # Count by date
+    date_counts = {}
+    for s in sessions:
+        d = s.get("date", "unknown")
+        date_counts[d] = date_counts.get(d, 0) + len(s.get("bets", []))
+
+    # Unique dates
+    dates = sorted(set(s.get("date") for s in sessions if s.get("date")))
+
+    return {
+        "total_sessions": len(sessions),
+        "total_bets": len(all_bets),
+        "total_stake": round(total_stake, 2),
+        "total_liability": round(total_liability, 2),
+        "live_bets": sum(1 for b in all_bets if not b.get("dry_run")),
+        "dry_run_bets": sum(1 for b in all_bets if b.get("dry_run")),
+        "bets_by_rule": rule_counts,
+        "bets_by_date": date_counts,
+        "dates_active": dates,
+        "engine_status": engine.status,
+        "engine_mode": "DRY_RUN" if engine.dry_run else "LIVE",
+        "countries": engine.countries,
+    }

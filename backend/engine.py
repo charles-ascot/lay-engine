@@ -14,6 +14,7 @@ FIX LOG:
 import os
 import json
 import time
+import secrets
 import logging
 import threading
 from datetime import datetime, timezone
@@ -39,6 +40,9 @@ STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json")
 
 # Session history file (persists across days, separate from daily state)
 SESSIONS_FILE = Path(os.environ.get("SESSIONS_FILE", "/tmp/chimera_sessions.json"))
+
+# API keys file
+API_KEYS_FILE = Path(os.environ.get("API_KEYS_FILE", "/tmp/chimera_api_keys.json"))
 
 # ── GCS persistence (survives container restarts) ──
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
@@ -113,9 +117,13 @@ class LayEngine:
         self.current_session: Optional[dict] = None
         self._session_bets_start_index: int = 0
 
+        # ── API keys ──
+        self.api_keys: list[dict] = []
+
         # Try to reload state from disk (Cloud Run cold-start recovery)
         self._load_state()
         self._load_sessions()
+        self._load_api_keys()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -253,6 +261,81 @@ class LayEngine:
         }
         self.current_session = None
         self._save_sessions()
+
+    # ──────────────────────────────────────────────
+    #  API KEY MANAGEMENT
+    # ──────────────────────────────────────────────
+
+    def _load_api_keys(self):
+        """Load API keys from GCS (preferred) or disk."""
+        try:
+            raw = _gcs_read("chimera_api_keys.json")
+            if raw:
+                self.api_keys = json.loads(raw)
+            elif API_KEYS_FILE.exists():
+                self.api_keys = json.loads(API_KEYS_FILE.read_text())
+            else:
+                self.api_keys = []
+            logger.info(f"Loaded {len(self.api_keys)} API keys")
+        except Exception as e:
+            logger.warning(f"Failed to load API keys: {e}")
+            self.api_keys = []
+
+    def _save_api_keys(self):
+        """Persist API keys to disk + GCS."""
+        try:
+            keys_json = json.dumps(self.api_keys, default=str)
+            API_KEYS_FILE.write_text(keys_json)
+            _gcs_write("chimera_api_keys.json", keys_json)
+        except Exception as e:
+            logger.warning(f"Failed to save API keys: {e}")
+
+    def generate_api_key(self, label: str = "") -> dict:
+        """Generate a new API key. Returns the full key (only shown once)."""
+        key = f"chm_{secrets.token_hex(24)}"
+        key_record = {
+            "key_id": secrets.token_hex(8),
+            "key_hash": secrets.token_hex(4),  # Short suffix for display
+            "key": key,
+            "label": label or "Untitled",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_used": None,
+        }
+        self.api_keys.append(key_record)
+        self._save_api_keys()
+        logger.info(f"Generated API key: {key_record['key_id']} ({label})")
+        return key_record
+
+    def list_api_keys(self) -> list[dict]:
+        """Return all keys with the actual key masked."""
+        return [
+            {
+                "key_id": k["key_id"],
+                "label": k["label"],
+                "key_preview": k["key"][:8] + "..." + k["key"][-4:],
+                "created_at": k["created_at"],
+                "last_used": k["last_used"],
+            }
+            for k in self.api_keys
+        ]
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        """Revoke an API key by its ID. Returns True if found and removed."""
+        before = len(self.api_keys)
+        self.api_keys = [k for k in self.api_keys if k["key_id"] != key_id]
+        if len(self.api_keys) < before:
+            self._save_api_keys()
+            logger.info(f"Revoked API key: {key_id}")
+            return True
+        return False
+
+    def validate_api_key(self, key: str) -> bool:
+        """Check if a key is valid. Updates last_used timestamp."""
+        for k in self.api_keys:
+            if k["key"] == key:
+                k["last_used"] = datetime.now(timezone.utc).isoformat()
+                return True
+        return False
 
     # ──────────────────────────────────────────────
     #  AUTHENTICATION

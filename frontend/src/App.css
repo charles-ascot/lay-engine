@@ -718,6 +718,109 @@ h2 {
   50% { opacity: 0.6; }
 }
 
+/* ── API Keys Tab ── */
+.api-description {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+.api-description code {
+  background: rgba(0, 212, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--primary);
+}
+.api-key-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.api-key-form input {
+  flex: 1;
+  max-width: 300px;
+  padding: 10px 14px;
+  background: rgba(20, 30, 50, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'Poppins', sans-serif;
+}
+.api-key-form input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.2);
+}
+.new-key-box {
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+.new-key-box p { font-size: 13px; margin-bottom: 10px; color: var(--success); }
+.key-display {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.key-display code {
+  flex: 1;
+  padding: 10px 14px;
+  background: rgba(10, 15, 30, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--primary);
+  word-break: break-all;
+}
+.api-endpoints {
+  margin-bottom: 24px;
+}
+.api-endpoints h3 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.api-endpoints code {
+  background: rgba(0, 212, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+.api-keys-list h3 {
+  font-family: 'Lexend', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.btn-danger-sm {
+  background: rgba(255, 107, 107, 0.2);
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'Lexend', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.btn-danger-sm:hover {
+  background: rgba(255, 107, 107, 0.3);
+  border-color: var(--danger);
+}
+
 /* ── Custom Scrollbar ── */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -526,13 +526,13 @@ function Dashboard() {
 
       {/* ── Tabs ── */}
       <nav className="tabs">
-        {['history', 'bets', 'rules', 'errors'].map(t => (
+        {['history', 'bets', 'rules', 'errors', 'api'].map(t => (
           <button
             key={t}
             className={tab === t ? 'active' : ''}
             onClick={() => setTab(t)}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'api' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </nav>
@@ -543,6 +543,7 @@ function Dashboard() {
         {tab === 'bets' && <BetsTab bets={state.recent_bets} />}
         {tab === 'rules' && <RulesTab results={state.recent_results} />}
         {tab === 'errors' && <ErrorsTab errors={state.errors} />}
+        {tab === 'api' && <ApiKeysTab />}
       </div>
 
       {/* ── Chat Drawer ── */}
@@ -844,6 +845,131 @@ function ErrorsTab({ errors }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── API Keys Tab ──
+function ApiKeysTab() {
+  const [keys, setKeys] = useState([])
+  const [label, setLabel] = useState('')
+  const [newKey, setNewKey] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+
+  const fetchKeys = () => {
+    api('/api/keys')
+      .then(data => { setKeys(data.keys || []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchKeys() }, [])
+
+  const handleGenerate = async (e) => {
+    e.preventDefault()
+    const res = await api('/api/keys/generate', {
+      method: 'POST',
+      body: JSON.stringify({ label: label || 'Agent key' }),
+    })
+    if (res.key) {
+      setNewKey(res.key)
+      setLabel('')
+      setCopied(false)
+      fetchKeys()
+    }
+  }
+
+  const handleRevoke = async (keyId) => {
+    if (!confirm('Revoke this API key? Any agent using it will lose access.')) return
+    await api(`/api/keys/${keyId}`, { method: 'DELETE' })
+    fetchKeys()
+  }
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(newKey)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (loading) return <p className="empty">Loading API keys...</p>
+
+  return (
+    <div>
+      <h2>API Keys</h2>
+      <p className="api-description">
+        Generate API keys for external agents to access your session data.
+        Use the <code>X-API-Key</code> header or <code>?api_key=</code> query param.
+      </p>
+
+      {/* Generate form */}
+      <form className="api-key-form" onSubmit={handleGenerate}>
+        <input
+          type="text"
+          placeholder="Key label (e.g. Report Agent)"
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+        />
+        <button type="submit" className="btn btn-primary">Generate Key</button>
+      </form>
+
+      {/* New key display */}
+      {newKey && (
+        <div className="new-key-box">
+          <p><strong>New API key created — copy it now, it won't be shown again:</strong></p>
+          <div className="key-display">
+            <code>{newKey}</code>
+            <button className="btn btn-secondary" onClick={handleCopy}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Endpoints reference */}
+      <div className="api-endpoints">
+        <h3>Data Endpoints</h3>
+        <table>
+          <thead>
+            <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>GET</td><td><code>/api/data/sessions</code></td><td>All sessions (filter: ?date=, ?mode=)</td></tr>
+            <tr><td>GET</td><td><code>/api/data/sessions/:id</code></td><td>Single session detail</td></tr>
+            <tr><td>GET</td><td><code>/api/data/bets</code></td><td>All bets (filter: ?date=, ?mode=)</td></tr>
+            <tr><td>GET</td><td><code>/api/data/results</code></td><td>All rule evaluations (filter: ?date=)</td></tr>
+            <tr><td>GET</td><td><code>/api/data/state</code></td><td>Current engine state</td></tr>
+            <tr><td>GET</td><td><code>/api/data/rules</code></td><td>Active rule definitions</td></tr>
+            <tr><td>GET</td><td><code>/api/data/summary</code></td><td>Aggregated statistics (filter: ?date=)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Existing keys */}
+      {keys.length > 0 && (
+        <div className="api-keys-list">
+          <h3>Active Keys</h3>
+          <table>
+            <thead>
+              <tr><th>Label</th><th>Key</th><th>Created</th><th>Last Used</th><th></th></tr>
+            </thead>
+            <tbody>
+              {keys.map(k => (
+                <tr key={k.key_id}>
+                  <td>{k.label}</td>
+                  <td><code>{k.key_preview}</code></td>
+                  <td>{new Date(k.created_at).toLocaleDateString()}</td>
+                  <td>{k.last_used ? new Date(k.last_used).toLocaleString() : 'Never'}</td>
+                  <td>
+                    <button className="btn-sm btn-danger-sm" onClick={() => handleRevoke(k.key_id)}>
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
