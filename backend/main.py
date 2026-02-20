@@ -167,6 +167,65 @@ def keepalive():
     }
 
 
+@app.get("/api/markets")
+def get_markets():
+    """Return all discovered markets for today (for the Market tab selector)."""
+    if not engine.client or not engine.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    from datetime import datetime as dt, timezone as tz
+
+    markets = engine.markets
+    upcoming = []
+    now = dt.now(tz.utc)
+
+    for m in markets:
+        try:
+            race_time_str = m.get("race_time", "")
+            race_time = dt.fromisoformat(race_time_str.replace("Z", "+00:00"))
+            minutes_to_off = (race_time - now).total_seconds() / 60
+            upcoming.append({
+                **m,
+                "minutes_to_off": round(minutes_to_off, 1),
+                "status": "IN_PLAY" if minutes_to_off < 0 else "PRE_OFF",
+            })
+        except (ValueError, KeyError):
+            pass
+
+    upcoming.sort(key=lambda x: x.get("race_time", ""))
+    return {"markets": upcoming}
+
+
+@app.get("/api/markets/{market_id}/book")
+def get_market_book_full(market_id: str):
+    """Return full market book with 3-level back/lay depth for a specific market."""
+    if not engine.client or not engine.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    book = engine.client.get_market_book_full(market_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="Market not found or closed")
+
+    # Enrich runner names from catalogue data
+    for m in engine.markets:
+        if m["market_id"] == market_id:
+            name_map = {r["selection_id"]: r["runner_name"] for r in m.get("runners", [])}
+            sort_map = {r["selection_id"]: r.get("sort_priority", 99) for r in m.get("runners", [])}
+            for runner in book["runners"]:
+                sid = runner["selection_id"]
+                runner["runner_name"] = name_map.get(sid, f"Selection {sid}")
+                runner["sort_priority"] = sort_map.get(sid, 99)
+            # Sort by cloth number (sort_priority)
+            book["runners"].sort(key=lambda r: r.get("sort_priority", 99))
+            book["venue"] = m.get("venue", "")
+            book["market_name"] = m.get("market_name", "")
+            book["race_time"] = m.get("race_time", "")
+            book["country"] = m.get("country", "")
+            break
+
+    return book
+
+
 @app.get("/api/state")
 def get_state():
     """Full engine state for the dashboard."""

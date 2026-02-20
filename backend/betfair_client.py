@@ -256,6 +256,47 @@ class BetfairClient:
             return result[0]
         return None
 
+    def get_market_book_full(self, market_id: str) -> Optional[dict]:
+        """Get full market book with 3-level back/lay depth for display.
+
+        Returns the complete market book with all runner prices
+        at 3 depth levels, matching what Betfair shows in their UI.
+        """
+        params = {
+            "marketIds": [market_id],
+            "priceProjection": {
+                "priceData": ["EX_BEST_OFFERS", "EX_TRADED"],
+            },
+        }
+        result = self._api_call("listMarketBook", params)
+        if result and len(result) > 0:
+            market = result[0]
+            return {
+                "market_id": market_id,
+                "status": market.get("status"),
+                "in_play": market.get("inPlay", False),
+                "total_matched": market.get("totalMatched", 0),
+                "number_of_runners": market.get("numberOfRunners", 0),
+                "runners": [
+                    {
+                        "selection_id": r.get("selectionId"),
+                        "status": r.get("status", "ACTIVE"),
+                        "last_price_traded": r.get("lastPriceTraded"),
+                        "total_matched": r.get("totalMatched", 0),
+                        "back": [
+                            {"price": p["price"], "size": round(p["size"], 0)}
+                            for p in r.get("ex", {}).get("availableToBack", [])[:3]
+                        ],
+                        "lay": [
+                            {"price": p["price"], "size": round(p["size"], 0)}
+                            for p in r.get("ex", {}).get("availableToLay", [])[:3]
+                        ],
+                    }
+                    for r in market.get("runners", [])
+                ],
+            }
+        return None
+
     # ──────────────────────────────────────────────
     #  ORDER PLACEMENT
     # ──────────────────────────────────────────────

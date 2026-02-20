@@ -391,7 +391,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 // ── Dashboard ──
 function Dashboard() {
   const [state, setState] = useState(null)
-  const [tab, setTab] = useState('snapshots')
+  const [tab, setTab] = useState('market')
   const intervalRef = useRef(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInitialDate, setChatInitialDate] = useState(null)
@@ -463,9 +463,9 @@ function Dashboard() {
   return (
     <div className="dashboard">
       {/* ── Header ── */}
-      <header>
+      <header className="glass">
         <div className="header-left">
-          <h1>🐴 CHIMERA</h1>
+          <h1>CHIMERA</h1>
           <Badge status={state.status} />
           {state.dry_run && <span className="badge dry-run">DRY RUN</span>}
         </div>
@@ -479,7 +479,7 @@ function Dashboard() {
       </header>
 
       {/* ── Controls ── */}
-      <div className="controls">
+      <div className="controls glass">
         <button
           className={`btn ${state.status === 'RUNNING' ? 'btn-danger' : 'btn-primary'}`}
           onClick={state.status === 'RUNNING' ? handleStop : handleStart}
@@ -526,7 +526,7 @@ function Dashboard() {
 
       {/* ── Tabs ── */}
       <nav className="tabs">
-        {['snapshots', 'matched', 'settled', 'reports', 'rules', 'errors', 'api'].map(t => (
+        {['market', 'snapshots', 'matched', 'settled', 'reports', 'rules', 'errors', 'api'].map(t => (
           <button
             key={t}
             className={tab === t ? 'active' : ''}
@@ -539,6 +539,7 @@ function Dashboard() {
 
       {/* ── Tab Content ── */}
       <div className="tab-content">
+        {tab === 'market' && <MarketTab />}
         {tab === 'snapshots' && <SnapshotsTab openChat={openChat} />}
         {tab === 'matched' && <MatchedTab />}
         {tab === 'settled' && <SettledTab openChat={openChat} />}
@@ -772,6 +773,186 @@ function DateRangeFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange })
         <label>To:</label>
         <input type="date" value={dateTo} onChange={e => onDateToChange(e.target.value)} max={today} />
       </div>
+    </div>
+  )
+}
+
+// ── Price Cell (Betfair-style) ──
+function PriceCell({ price, size, type, level }) {
+  if (!price) return <td className={`bf-${type}-${level} bf-empty`}>—</td>
+  const formatted = price >= 100 ? Math.round(price) : price >= 10 ? price.toFixed(1) : price.toFixed(2)
+  return (
+    <td className={`bf-${type}-${level}`}>
+      <div className="bf-price">{formatted}</div>
+      <div className="bf-size">£{Math.round(size)}</div>
+    </td>
+  )
+}
+
+// ── Market Tab (live Betfair market view) ──
+function MarketTab() {
+  const [markets, setMarkets] = useState([])
+  const [selectedMarketId, setSelectedMarketId] = useState('')
+  const [book, setBook] = useState(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [loading, setLoading] = useState(false)
+
+  // Fetch market list (refresh every 60s)
+  useEffect(() => {
+    const fetchMarkets = () => {
+      api('/api/markets')
+        .then(data => {
+          setMarkets(data.markets || [])
+          // Auto-select the next upcoming market if none selected
+          setSelectedMarketId(prev => {
+            if (!prev && data.markets?.length) {
+              const next = data.markets.find(m => m.minutes_to_off > 0)
+              return next ? next.market_id : (data.markets[0]?.market_id || '')
+            }
+            return prev
+          })
+        })
+        .catch(() => {})
+    }
+    fetchMarkets()
+    const interval = setInterval(fetchMarkets, 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Fetch selected market book
+  const fetchBook = useCallback(() => {
+    if (!selectedMarketId) return
+    setLoading(true)
+    api(`/api/markets/${selectedMarketId}/book`)
+      .then(data => { setBook(data); setLoading(false) })
+      .catch(() => { setBook(null); setLoading(false) })
+  }, [selectedMarketId])
+
+  useEffect(() => { fetchBook() }, [fetchBook])
+
+  // Auto-refresh every 5 seconds
+  useEffect(() => {
+    if (!autoRefresh || !selectedMarketId) return
+    const interval = setInterval(fetchBook, 5000)
+    return () => clearInterval(interval)
+  }, [autoRefresh, selectedMarketId, fetchBook])
+
+  // Book percentage calculation
+  const bookPercent = book?.runners?.reduce((sum, r) => {
+    const bestBack = r.back?.[0]?.price
+    return sum + (bestBack ? (1 / bestBack) * 100 : 0)
+  }, 0) || 0
+
+  const bookPercentClass = bookPercent <= 101 ? 'tight' : bookPercent <= 103 ? 'normal' : 'wide'
+
+  // Format race time
+  const formatRaceTime = (iso) => {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    } catch { return '' }
+  }
+
+  return (
+    <div>
+      <div className="tab-toolbar">
+        <h2>Market</h2>
+        <div className="auto-refresh">
+          {autoRefresh && selectedMarketId && <span className="refresh-indicator" />}
+          <label>
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={e => setAutoRefresh(e.target.checked)}
+            />
+            Auto-refresh
+          </label>
+        </div>
+      </div>
+
+      {/* Market selector */}
+      <div className="market-selector glass">
+        <select
+          value={selectedMarketId}
+          onChange={e => { setSelectedMarketId(e.target.value); setBook(null) }}
+        >
+          <option value="">Select a market...</option>
+          {markets.map(m => (
+            <option key={m.market_id} value={m.market_id}>
+              {formatRaceTime(m.race_time)} {m.venue} — {m.market_name} ({m.country})
+              {m.minutes_to_off > 0 ? ` [${Math.round(m.minutes_to_off)}m]` : ' [IN PLAY]'}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {!selectedMarketId && (
+        <div className="market-empty">
+          <p>Select a market above to view live prices.</p>
+          <p style={{ fontSize: 12 }}>{markets.length} market{markets.length !== 1 ? 's' : ''} available today</p>
+        </div>
+      )}
+
+      {loading && !book && <p className="empty">Loading market book...</p>}
+
+      {book && (
+        <>
+          {/* Market header */}
+          <div className="market-header">
+            <div>
+              <div className="market-title">
+                {formatRaceTime(book.race_time)} {book.venue} — {book.market_name}
+              </div>
+              <div className="market-meta">
+                <span>{book.number_of_runners} selections</span>
+                <span className={`book-percent ${bookPercentClass}`}>
+                  {bookPercent.toFixed(1)}%
+                </span>
+                <span className="market-matched">
+                  Matched: GBP {(book.total_matched || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+                {book.in_play && <span className="badge badge-live">IN PLAY</span>}
+                {book.status && book.status !== 'OPEN' && (
+                  <span className="badge badge-crashed">{book.status}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Price grid */}
+          <table className="market-table">
+            <thead>
+              <tr>
+                <th style={{ width: '35%' }}></th>
+                <th className="bf-back-header" colSpan={3}>Back all</th>
+                <th className="bf-lay-header" colSpan={3}>Lay all</th>
+              </tr>
+            </thead>
+            <tbody>
+              {book.runners.map(runner => (
+                <tr key={runner.selection_id} className={runner.status !== 'ACTIVE' ? 'runner-removed' : ''}>
+                  <td className="runner-cell">
+                    <div>
+                      <span className="runner-cloth">{runner.sort_priority}</span>
+                      <span className="runner-name">{runner.runner_name}</span>
+                    </div>
+                    {runner.status !== 'ACTIVE' && (
+                      <div className="runner-jockey">Non-runner</div>
+                    )}
+                  </td>
+                  {/* Back prices: worst→best (left→right) */}
+                  <PriceCell price={runner.back?.[2]?.price} size={runner.back?.[2]?.size} type="back" level={3} />
+                  <PriceCell price={runner.back?.[1]?.price} size={runner.back?.[1]?.size} type="back" level={2} />
+                  <PriceCell price={runner.back?.[0]?.price} size={runner.back?.[0]?.size} type="back" level={1} />
+                  {/* Lay prices: best→worst (left→right) */}
+                  <PriceCell price={runner.lay?.[0]?.price} size={runner.lay?.[0]?.size} type="lay" level={1} />
+                  <PriceCell price={runner.lay?.[1]?.price} size={runner.lay?.[1]?.size} type="lay" level={2} />
+                  <PriceCell price={runner.lay?.[2]?.price} size={runner.lay?.[2]?.size} type="lay" level={3} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   )
 }
