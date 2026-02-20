@@ -276,6 +276,183 @@ def get_session_detail(session_id: str):
     return detail
 
 
+# ──────────────────────────────────────────────
+#  MATCHED BETS (live bets placed on Betfair)
+# ──────────────────────────────────────────────
+
+@app.get("/api/matched")
+def get_matched_bets(
+    date_from: str = Query(None, description="Start date YYYY-MM-DD"),
+    date_to: str = Query(None, description="End date YYYY-MM-DD"),
+):
+    """Return LIVE bets placed on Betfair (non-dry-run), with date range filtering."""
+    bets = []
+    for s in engine.sessions:
+        if s.get("mode") != "LIVE":
+            continue
+        session_date = s.get("date", "")
+        if date_from and session_date < date_from:
+            continue
+        if date_to and session_date > date_to:
+            continue
+        for b in s.get("bets", []):
+            if b.get("dry_run"):
+                continue
+            bet = dict(b)
+            bet["session_id"] = s["session_id"]
+            bet["session_date"] = s["date"]
+            bets.append(bet)
+
+    # Group by date
+    grouped = {}
+    for b in bets:
+        d = b.get("session_date", "unknown")
+        if d not in grouped:
+            grouped[d] = []
+        grouped[d].append(b)
+
+    total_stake = sum(b.get("size", 0) for b in bets)
+    total_liability = sum(b.get("liability", 0) for b in bets)
+    avg_odds = (
+        round(sum(b.get("price", 0) for b in bets) / len(bets), 2)
+        if bets else 0
+    )
+
+    return {
+        "count": len(bets),
+        "total_stake": round(total_stake, 2),
+        "total_liability": round(total_liability, 2),
+        "avg_odds": avg_odds,
+        "bets_by_date": {
+            d: list(reversed(day_bets))
+            for d, day_bets in sorted(grouped.items(), reverse=True)
+        },
+    }
+
+
+# ──────────────────────────────────────────────
+#  SETTLED BETS (race results + P/L from Betfair)
+# ──────────────────────────────────────────────
+
+@app.get("/api/settled")
+def get_settled_bets(
+    date_from: str = Query(None, description="Start date YYYY-MM-DD"),
+    date_to: str = Query(None, description="End date YYYY-MM-DD"),
+):
+    """Return settled bets with P/L from Betfair cleared orders."""
+    if not engine.is_authenticated:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "Not authenticated with Betfair"},
+        )
+
+    from datetime import datetime as dt, timedelta, timezone as tz
+
+    now = dt.now(tz.utc)
+    if date_to:
+        to_str = date_to + "T23:59:59Z"
+    else:
+        to_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if date_from:
+        from_str = date_from + "T00:00:00Z"
+    else:
+        from_str = (now - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00Z")
+
+    # Fetch cleared orders from Betfair
+    try:
+        cleared = engine.client.get_cleared_orders(
+            settled_from=from_str,
+            settled_to=to_str,
+        )
+    except Exception as e:
+        logging.error(f"Failed to fetch cleared orders: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Betfair API error: {str(e)}"},
+        )
+
+    # Build lookup of our placed bets by bet_id
+    our_bets_by_id = {}
+    for s in engine.sessions:
+        if s.get("mode") != "LIVE":
+            continue
+        for b in s.get("bets", []):
+            bid = str(b.get("betfair_response", {}).get("bet_id", ""))
+            if bid:
+                our_bets_by_id[bid] = b
+
+    # Cross-reference cleared orders with our bets
+    settled = []
+    for co in cleared:
+        bet_id = str(co.get("betId", ""))
+        our_bet = our_bets_by_id.get(bet_id, {})
+        desc = co.get("itemDescription", {})
+
+        settled.append({
+            "bet_id": bet_id,
+            "market_id": co.get("marketId", ""),
+            "selection_id": co.get("selectionId"),
+            "runner_name": desc.get("runnerDesc", our_bet.get("runner_name", "Unknown")),
+            "venue": desc.get("eventDesc", our_bet.get("venue", "")),
+            "market_desc": desc.get("marketDesc", ""),
+            "price_matched": co.get("priceMatched", 0),
+            "price_requested": co.get("priceRequested", 0),
+            "size_settled": co.get("sizeSettled", 0),
+            "profit": co.get("profit", 0),
+            "commission": co.get("commission", 0),
+            "bet_outcome": co.get("betOutcome", ""),
+            "settled_date": co.get("settledDate", ""),
+            "placed_date": co.get("placedDate", ""),
+            "side": co.get("side", ""),
+            "rule_applied": our_bet.get("rule_applied", ""),
+            "our_stake": our_bet.get("size", 0),
+            "our_liability": our_bet.get("liability", 0),
+            "is_chimera_bet": bet_id in our_bets_by_id,
+        })
+
+    # Group by settled date
+    grouped = {}
+    for b in settled:
+        sd = (b.get("settled_date") or "")[:10]
+        if not sd:
+            sd = "unknown"
+        if sd not in grouped:
+            grouped[sd] = []
+        grouped[sd].append(b)
+
+    # Compute totals
+    total_pl = sum(b.get("profit", 0) for b in settled)
+    total_commission = sum(b.get("commission", 0) for b in settled)
+    wins = sum(1 for b in settled if b.get("bet_outcome") == "WON")
+    losses = sum(1 for b in settled if b.get("bet_outcome") == "LOST")
+
+    days_summary = {}
+    for d, day_bets in sorted(grouped.items(), reverse=True):
+        day_pl = sum(b.get("profit", 0) for b in day_bets)
+        day_wins = sum(1 for b in day_bets if b.get("bet_outcome") == "WON")
+        day_losses = sum(1 for b in day_bets if b.get("bet_outcome") == "LOST")
+        total_day = day_wins + day_losses
+        days_summary[d] = {
+            "bets": day_bets,
+            "day_pl": round(day_pl, 2),
+            "wins": day_wins,
+            "losses": day_losses,
+            "strike_rate": round(day_wins / total_day * 100, 1) if total_day > 0 else 0,
+            "races": len(set(b.get("market_id") for b in day_bets)),
+        }
+
+    total = wins + losses
+    return {
+        "count": len(settled),
+        "total_pl": round(total_pl, 2),
+        "total_commission": round(total_commission, 2),
+        "wins": wins,
+        "losses": losses,
+        "strike_rate": round(wins / total * 100, 1) if total > 0 else 0,
+        "days": days_summary,
+    }
+
+
 class AnalyseRequest(BaseModel):
     date: str  # YYYY-MM-DD
 

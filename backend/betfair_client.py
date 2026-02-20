@@ -318,25 +318,87 @@ class BetfairClient:
                 "error_code": result.get("errorCode", "UNKNOWN"),
             }
 
-    def get_account_balance(self) -> Optional[float]:
-        """Get current account available balance."""
+    # ──────────────────────────────────────────────
+    #  ACCOUNT API
+    # ──────────────────────────────────────────────
+
+    ACCOUNT_API_URL = "https://api.betfair.com/exchange/account/json-rpc/v1"
+
+    def _account_api_call(self, method: str, params: dict) -> Optional[dict]:
+        """Make a JSON-RPC call to the Betfair Account API."""
+        if not self.ensure_session():
+            logger.error("No valid session for account API call")
+            return None
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": f"AccountAPING/v1.0/{method}",
+            "params": params,
+            "id": 1,
+        }
+
         try:
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "AccountAPING/v1.0/getAccountFunds",
-                "params": {},
-                "id": 1,
-            }
             resp = requests.post(
-                "https://api.betfair.com/exchange/account/json-rpc/v1",
+                self.ACCOUNT_API_URL,
                 json=[payload],
                 headers=self._headers(),
-                timeout=15,
+                timeout=30,
             )
             results = resp.json()
             if results and len(results) > 0:
-                result = results[0].get("result", {})
+                result = results[0]
+                if "error" in result:
+                    logger.error(f"Account API error on {method}: {result['error']}")
+                    return None
+                return result.get("result")
+            return None
+        except Exception as e:
+            logger.error(f"Account API call {method} failed: {e}")
+            return None
+
+    def get_account_balance(self) -> Optional[float]:
+        """Get current account available balance."""
+        try:
+            result = self._account_api_call("getAccountFunds", {})
+            if result:
                 return result.get("availableToBetBalance")
         except Exception as e:
             logger.error(f"Balance check failed: {e}")
         return None
+
+    # ──────────────────────────────────────────────
+    #  SETTLED BETS
+    # ──────────────────────────────────────────────
+
+    def get_cleared_orders(
+        self,
+        settled_from: str = None,
+        settled_to: str = None,
+    ) -> list[dict]:
+        """
+        Fetch settled (cleared) orders from Betfair.
+        Uses listClearedOrders on the betting API.
+
+        settled_from/to: ISO 8601 datetime strings (e.g. "2026-02-20T00:00:00Z")
+        Returns list of cleared order dicts.
+        """
+        params = {
+            "betStatus": "SETTLED",
+            "includeItemDescription": True,
+            "fromRecord": 0,
+            "recordCount": 1000,
+        }
+
+        if settled_from or settled_to:
+            date_range = {}
+            if settled_from:
+                date_range["from"] = settled_from
+            if settled_to:
+                date_range["to"] = settled_to
+            params["settledDateRange"] = date_range
+
+        result = self._api_call("listClearedOrders", params)
+        if result is None:
+            return []
+
+        return result.get("clearedOrders", [])

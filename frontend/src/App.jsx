@@ -347,7 +347,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 
         <div className="chat-messages">
           {messages.length === 0 && !loading && (
-            <p className="empty">Ask anything about your betting sessions.</p>
+            <p className="empty">Ask anything about your betting snapshots.</p>
           )}
           {messages.map((m, i) => (
             <div key={i} className={`chat-msg chat-msg-${m.role}`}>
@@ -376,7 +376,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask about your sessions..."
+            placeholder="Ask about your snapshots..."
             disabled={loading}
           />
           <button type="submit" className="btn btn-primary btn-send" disabled={loading || !input.trim()}>
@@ -391,7 +391,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 // ── Dashboard ──
 function Dashboard() {
   const [state, setState] = useState(null)
-  const [tab, setTab] = useState('history')
+  const [tab, setTab] = useState('snapshots')
   const intervalRef = useRef(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInitialDate, setChatInitialDate] = useState(null)
@@ -526,7 +526,7 @@ function Dashboard() {
 
       {/* ── Tabs ── */}
       <nav className="tabs">
-        {['history', 'reports', 'bets', 'rules', 'errors', 'api'].map(t => (
+        {['snapshots', 'matched', 'settled', 'reports', 'rules', 'errors', 'api'].map(t => (
           <button
             key={t}
             className={tab === t ? 'active' : ''}
@@ -539,9 +539,10 @@ function Dashboard() {
 
       {/* ── Tab Content ── */}
       <div className="tab-content">
-        {tab === 'history' && <HistoryTab openChat={openChat} />}
+        {tab === 'snapshots' && <SnapshotsTab openChat={openChat} />}
+        {tab === 'matched' && <MatchedTab />}
+        {tab === 'settled' && <SettledTab openChat={openChat} />}
         {tab === 'reports' && <ReportsTab />}
-        {tab === 'bets' && <BetsTab bets={state.recent_bets} />}
         {tab === 'rules' && <RulesTab results={state.recent_results} />}
         {tab === 'errors' && <ErrorsTab errors={state.errors} />}
         {tab === 'api' && <ApiKeysTab />}
@@ -558,8 +559,14 @@ function Dashboard() {
   )
 }
 
-// ── History Tab ──
-function HistoryTab({ openChat }) {
+// ── Shared date formatter ──
+const formatDateHeader = (dateStr) => {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+// ── Snapshots Tab (formerly History) ──
+function SnapshotsTab({ openChat }) {
   const [sessions, setSessions] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -581,7 +588,7 @@ function HistoryTab({ openChat }) {
       .catch(() => setDetail(null))
   }, [selectedId])
 
-  if (loading) return <p className="empty">Loading sessions...</p>
+  if (loading) return <p className="empty">Loading snapshots...</p>
 
   // ── Detail View ──
   if (detail) {
@@ -603,7 +610,7 @@ function HistoryTab({ openChat }) {
               <> – {new Date(detail.stop_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
             )}
           </h2>
-          <SnapshotButton tableId="session-bets-table" filename={`session_${detail.session_id}`} />
+          <SnapshotButton tableId="session-bets-table" filename={`snapshot_${detail.session_id}`} />
         </div>
         <div className="session-stats">
           <span>Bets: <strong>{sm.total_bets || 0}</strong></span>
@@ -614,7 +621,7 @@ function HistoryTab({ openChat }) {
         </div>
         <div className="session-detail-scroll">
           {bets.length === 0 ? (
-            <p className="empty">No bets in this session.</p>
+            <p className="empty">No bets in this snapshot.</p>
           ) : (
             <table id="session-bets-table">
               <thead>
@@ -622,7 +629,7 @@ function HistoryTab({ openChat }) {
                   <th>Time</th>
                   <th>Country</th>
                   <th>Runner</th>
-                  <th>Odds</th>
+                  <th className="col-lay">Odds</th>
                   <th>Stake</th>
                   <th>Liability</th>
                   <th>Rule</th>
@@ -635,7 +642,7 @@ function HistoryTab({ openChat }) {
                     <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
                     <td>{b.country || '—'}</td>
                     <td>{b.runner_name}</td>
-                    <td>{b.price?.toFixed(2)}</td>
+                    <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
                     <td>£{b.size?.toFixed(2)}</td>
                     <td>£{b.liability?.toFixed(2)}</td>
                     <td><code>{b.rule_applied}</code></td>
@@ -662,11 +669,6 @@ function HistoryTab({ openChat }) {
   })
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 
-  const formatDateHeader = (dateStr) => {
-    const d = new Date(dateStr + 'T12:00:00')
-    return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  }
-
   const getSessionCountries = (s) => {
     const countries = s.countries || s.summary?.countries || []
     return countries.map(c => COUNTRY_LABELS[c] || c).join(' ')
@@ -676,13 +678,13 @@ function HistoryTab({ openChat }) {
   return (
     <div>
       <div className="tab-toolbar">
-        <h2>Session History</h2>
+        <h2>Snapshots</h2>
         {sortedDates.length > 0 && (
           <button
             className="btn btn-analysis"
             onClick={() => openChat(
               sortedDates[0],
-              `Provide a comprehensive analysis of today's session data (${sortedDates[0]}). Cover odds drift patterns, rule distribution, risk exposure, venue patterns, timing observations, anomalies, and actionable suggestions for rule tuning. Format as 6-10 concise bullet points with specific numbers.`
+              `Provide a comprehensive analysis of today's snapshot data (${sortedDates[0]}). Cover odds drift patterns, rule distribution, risk exposure, venue patterns, timing observations, anomalies, and actionable suggestions for rule tuning. Format as 6-10 concise bullet points with specific numbers.`
             )}
           >
             Analysis {sortedDates[0]}
@@ -691,20 +693,20 @@ function HistoryTab({ openChat }) {
       </div>
 
       {sessions.length === 0 ? (
-        <p className="empty">No sessions recorded yet. Start the engine to create one.</p>
+        <p className="empty">No snapshots recorded yet. Start the engine to create one.</p>
       ) : (
-        <div className="history-grouped">
+        <div className="snapshots-grouped">
           {sortedDates.map(date => (
-            <div key={date} className="history-date-group">
-              <div className="history-date-header">
-                <span className="history-date-label">{formatDateHeader(date)}</span>
-                <span className="history-date-count">{grouped[date].length} session{grouped[date].length !== 1 ? 's' : ''}</span>
+            <div key={date} className="snapshots-date-group">
+              <div className="snapshots-date-header">
+                <span className="snapshots-date-label">{formatDateHeader(date)}</span>
+                <span className="snapshots-date-count">{grouped[date].length} snapshot{grouped[date].length !== 1 ? 's' : ''}</span>
               </div>
-              <div className="history-session-list">
+              <div className="snapshots-list">
                 {grouped[date].map(s => (
                   <div
                     key={s.session_id}
-                    className="history-session-card"
+                    className="snapshots-card"
                     onClick={() => setSelectedId(s.session_id)}
                   >
                     <div className="session-card-top">
@@ -736,53 +738,390 @@ function HistoryTab({ openChat }) {
   )
 }
 
-// ── Bets Tab ──
-function BetsTab({ bets }) {
-  if (!bets || bets.length === 0) {
-    return <p className="empty">No bets placed yet today.</p>
+// ── Date Range Filter (shared) ──
+function DateRangeFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange }) {
+  const today = new Date().toISOString().slice(0, 10)
+
+  const setPreset = (preset) => {
+    const now = new Date()
+    let from = today, to = today
+    if (preset === 'yesterday') {
+      const y = new Date(now); y.setDate(y.getDate() - 1)
+      from = to = y.toISOString().slice(0, 10)
+    } else if (preset === '7days') {
+      const d = new Date(now); d.setDate(d.getDate() - 6)
+      from = d.toISOString().slice(0, 10)
+    } else if (preset === 'month') {
+      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    }
+    onDateFromChange(from)
+    onDateToChange(to)
   }
-  const fname = `chimera_bets_${new Date().toISOString().slice(0, 10)}`
+
+  return (
+    <div className="date-range-filter">
+      <div className="date-presets">
+        <button className="btn-preset" onClick={() => setPreset('today')}>Today</button>
+        <button className="btn-preset" onClick={() => setPreset('yesterday')}>Yesterday</button>
+        <button className="btn-preset" onClick={() => setPreset('7days')}>Last 7 Days</button>
+        <button className="btn-preset" onClick={() => setPreset('month')}>This Month</button>
+      </div>
+      <div className="date-inputs">
+        <label>From:</label>
+        <input type="date" value={dateFrom} onChange={e => onDateFromChange(e.target.value)} max={today} />
+        <label>To:</label>
+        <input type="date" value={dateTo} onChange={e => onDateToChange(e.target.value)} max={today} />
+      </div>
+    </div>
+  )
+}
+
+// ── Matched Tab (live bets placed on Betfair) ──
+function MatchedTab() {
+  const today = new Date().toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom] = useState(today)
+  const [dateTo, setDateTo] = useState(today)
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [expandedBets, setExpandedBets] = useState(new Set())
+  const [collapsedDays, setCollapsedDays] = useState(new Set())
+
+  const fetchMatched = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api(`/api/matched?date_from=${dateFrom}&date_to=${dateTo}`)
+      setData(res)
+    } catch (e) {
+      console.error('Failed to fetch matched bets:', e)
+    }
+    setLoading(false)
+  }, [dateFrom, dateTo])
+
+  useEffect(() => { fetchMatched() }, [fetchMatched])
+
+  const toggleBet = (key) => {
+    setExpandedBets(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  const toggleDay = (date) => {
+    setCollapsedDays(prev => {
+      const next = new Set(prev)
+      next.has(date) ? next.delete(date) : next.add(date)
+      return next
+    })
+  }
+
+  const fname = `chimera_matched_${dateFrom}_${dateTo}`
+
   return (
     <div>
       <div className="tab-toolbar">
-        <h2>Recent Bets</h2>
-        <SnapshotButton tableId="bets-table" filename={fname} />
+        <h2>Matched Bets</h2>
+        {data && data.count > 0 && (
+          <SnapshotButton tableId="matched-export-table" filename={fname} />
+        )}
       </div>
-      <table id="bets-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Country</th>
-            <th>Runner</th>
-            <th>Odds</th>
-            <th>Stake</th>
-            <th>Liability</th>
-            <th>Rule</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {bets.map((b, i) => (
-            <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
-              <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-              <td>{b.country || '—'}</td>
-              <td>{b.runner_name}</td>
-              <td>{b.price?.toFixed(2)}</td>
-              <td>£{b.size?.toFixed(2)}</td>
-              <td>£{b.liability?.toFixed(2)}</td>
-              <td><code>{b.rule_applied}</code></td>
-              <td>
-                <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                  {b.dry_run ? '🧪 DRY' : b.betfair_response?.status || '?'}
-                </span>
-              </td>
+
+      <DateRangeFilter
+        dateFrom={dateFrom} dateTo={dateTo}
+        onDateFromChange={setDateFrom} onDateToChange={setDateTo}
+      />
+
+      {data && (
+        <div className="matched-summary">
+          <span>Total Bets: <strong>{data.count}</strong></span>
+          <span>Total Staked: <strong>£{(data.total_stake || 0).toFixed(2)}</strong></span>
+          <span>Total Liability: <strong>£{(data.total_liability || 0).toFixed(2)}</strong></span>
+          <span>Avg Odds: <strong>{(data.avg_odds || 0).toFixed(2)}</strong></span>
+        </div>
+      )}
+
+      {loading && <p className="empty">Loading matched bets...</p>}
+
+      {!loading && data && data.count === 0 && (
+        <p className="empty">No live matched bets found for this period.</p>
+      )}
+
+      {!loading && data && data.bets_by_date && (
+        <div className="matched-grouped">
+          {/* Hidden table for Excel export */}
+          <table id="matched-export-table" style={{ display: 'none' }}>
+            <thead>
+              <tr>
+                <th>Date</th><th>Time</th><th>Venue</th><th>Country</th>
+                <th>Runner</th><th>Odds</th><th>Stake</th><th>Liability</th>
+                <th>Rule</th><th>Status</th><th>Bet ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(data.bets_by_date).flatMap(([date, bets]) =>
+                bets.map((b, i) => (
+                  <tr key={`${date}-${i}`}>
+                    <td>{date}</td>
+                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+                    <td>{b.venue || ''}</td>
+                    <td>{b.country || ''}</td>
+                    <td>{b.runner_name}</td>
+                    <td>{b.price?.toFixed(2)}</td>
+                    <td>{b.size?.toFixed(2)}</td>
+                    <td>{b.liability?.toFixed(2)}</td>
+                    <td>{b.rule_applied}</td>
+                    <td>{b.betfair_response?.status || '?'}</td>
+                    <td>{b.betfair_response?.bet_id || ''}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
+          {Object.entries(data.bets_by_date).map(([date, bets]) => {
+            const dayStake = bets.reduce((s, b) => s + (b.size || 0), 0)
+            const dayLiability = bets.reduce((s, b) => s + (b.liability || 0), 0)
+            return (
+              <div key={date} className="matched-date-group">
+                <div className="matched-date-header" onClick={() => toggleDay(date)}>
+                  <span className="matched-date-label">
+                    {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
+                  </span>
+                  <span className="matched-date-stats">
+                    <span>{bets.length} bet{bets.length !== 1 ? 's' : ''}</span>
+                    <span>£<strong>{dayStake.toFixed(2)}</strong> staked</span>
+                    <span>£<strong>{dayLiability.toFixed(2)}</strong> liability</span>
+                  </span>
+                </div>
+                {!collapsedDays.has(date) && (
+                  <div className="matched-bet-list">
+                    {bets.map((b, i) => {
+                      const key = `${date}-${i}`
+                      return (
+                        <div key={key} className="matched-bet-row" onClick={() => toggleBet(key)}>
+                          <div className="matched-bet-summary">
+                            <span className="matched-bet-time">
+                              {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className="matched-bet-runner">{b.runner_name}</span>
+                            <span className="cell-lay-odds">{b.price?.toFixed(2)}</span>
+                            <span>£{b.size?.toFixed(2)}</span>
+                            <span className="matched-bet-liability">£{b.liability?.toFixed(2)}</span>
+                            <code>{b.rule_applied}</code>
+                            <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
+                              {b.betfair_response?.status || '?'}
+                            </span>
+                          </div>
+                          {expandedBets.has(key) && (
+                            <div className="matched-bet-detail">
+                              <span>Bet ID: <code>{b.betfair_response?.bet_id || '—'}</code></span>
+                              <span>Matched: £{b.betfair_response?.size_matched?.toFixed(2) || '—'}</span>
+                              <span>Avg Price: {b.betfair_response?.avg_price_matched?.toFixed(2) || '—'}</span>
+                              <span>Market: <code>{b.market_id}</code></span>
+                              <span>Venue: {b.venue || '—'}</span>
+                              <span>Country: {b.country || '—'}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Settled Tab (race results + P/L) ──
+function SettledTab({ openChat }) {
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 6)
+    return d.toISOString().slice(0, 10)
+  })
+  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10))
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState('all')
+  const [collapsedDays, setCollapsedDays] = useState(new Set())
+
+  const fetchSettled = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api(`/api/settled?date_from=${dateFrom}&date_to=${dateTo}`)
+      setData(res)
+    } catch (e) {
+      console.error('Failed to fetch settled bets:', e)
+    }
+    setLoading(false)
+  }, [dateFrom, dateTo])
+
+  useEffect(() => { fetchSettled() }, [fetchSettled])
+
+  const toggleDay = (date) => {
+    setCollapsedDays(prev => {
+      const next = new Set(prev)
+      next.has(date) ? next.delete(date) : next.add(date)
+      return next
+    })
+  }
+
+  const getFilteredBets = (bets) => {
+    if (filter === 'won') return bets.filter(b => b.bet_outcome === 'WON')
+    if (filter === 'lost') return bets.filter(b => b.bet_outcome === 'LOST')
+    return bets
+  }
+
+  const fname = `chimera_settled_${dateFrom}_${dateTo}`
+
+  return (
+    <div>
+      <div className="tab-toolbar">
+        <h2>Settled Bets</h2>
+        {data && data.count > 0 && (
+          <SnapshotButton tableId="settled-export-table" filename={fname} />
+        )}
+      </div>
+
+      <DateRangeFilter
+        dateFrom={dateFrom} dateTo={dateTo}
+        onDateFromChange={setDateFrom} onDateToChange={setDateTo}
+      />
+
+      {/* Sticky P/L Summary */}
+      {data && data.count > 0 && (
+        <div className={`settled-summary ${(data.total_pl || 0) >= 0 ? 'pl-positive' : 'pl-negative'}`}>
+          <span>Settled: <strong>{data.count}</strong></span>
+          <span>Won: <strong className="text-success">{data.wins}</strong></span>
+          <span>Lost: <strong className="text-danger">{data.losses}</strong></span>
+          <span>Strike Rate: <strong>{data.strike_rate}%</strong></span>
+          <span className="settled-total-pl">
+            P/L: <strong className={(data.total_pl || 0) >= 0 ? 'text-success' : 'text-danger'}>
+              {(data.total_pl || 0) >= 0 ? '+' : ''}£{(data.total_pl || 0).toFixed(2)}
+            </strong>
+          </span>
+          <span>Commission: <strong>£{(data.total_commission || 0).toFixed(2)}</strong></span>
+        </div>
+      )}
+
+      {/* Filter toggles */}
+      <div className="settled-filters">
+        {['all', 'won', 'lost'].map(f => (
+          <button
+            key={f}
+            className={`btn-filter ${filter === f ? 'active' : ''}`}
+            onClick={() => setFilter(f)}
+          >
+            {f === 'all' ? 'All' : f === 'won' ? 'Won Only' : 'Lost Only'}
+          </button>
+        ))}
+      </div>
+
+      {loading && <p className="empty">Loading settled bets from Betfair...</p>}
+
+      {!loading && data && data.message && (
+        <p className="empty">{data.message}</p>
+      )}
+
+      {!loading && data && Object.keys(data.days || {}).length === 0 && !data.message && (
+        <p className="empty">No settled bets found for this period. Only LIVE bets appear here.</p>
+      )}
+
+      {/* Hidden table for Excel export */}
+      {data && data.days && (
+        <table id="settled-export-table" style={{ display: 'none' }}>
+          <thead>
+            <tr>
+              <th>Date</th><th>Settled</th><th>Runner</th><th>Venue</th>
+              <th>Odds</th><th>Stake</th><th>Outcome</th><th>P/L</th>
+              <th>Commission</th><th>Rule</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="tab-toolbar bottom">
-        <SnapshotButton tableId="bets-table" filename={fname} />
-      </div>
+          </thead>
+          <tbody>
+            {Object.entries(data.days).flatMap(([date, dayData]) =>
+              dayData.bets.map((b, i) => (
+                <tr key={`${date}-${i}`}>
+                  <td>{date}</td>
+                  <td>{b.settled_date ? new Date(b.settled_date).toLocaleTimeString() : ''}</td>
+                  <td>{b.runner_name}</td>
+                  <td>{b.venue}</td>
+                  <td>{b.price_matched?.toFixed(2)}</td>
+                  <td>{b.size_settled?.toFixed(2)}</td>
+                  <td>{b.bet_outcome}</td>
+                  <td>{b.profit?.toFixed(2)}</td>
+                  <td>{b.commission?.toFixed(2)}</td>
+                  <td>{b.rule_applied}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      )}
+
+      {!loading && data && data.days && (
+        <div className="settled-grouped">
+          {Object.entries(data.days).map(([date, dayData]) => {
+            const filteredBets = getFilteredBets(dayData.bets)
+            if (filteredBets.length === 0) return null
+
+            return (
+              <div key={date} className="settled-date-group">
+                <div className="settled-date-header" onClick={() => toggleDay(date)}>
+                  <span className="settled-date-label">
+                    {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
+                  </span>
+                  <span className="settled-date-stats">
+                    <span>{dayData.races} race{dayData.races !== 1 ? 's' : ''}</span>
+                    <span>{dayData.wins}W-{dayData.losses}L</span>
+                    <span>{dayData.strike_rate}%</span>
+                    <span className={dayData.day_pl >= 0 ? 'text-success' : 'text-danger'}>
+                      {dayData.day_pl >= 0 ? '+' : ''}£{dayData.day_pl.toFixed(2)}
+                    </span>
+                  </span>
+                  <button
+                    className="btn btn-analysis btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openChat(date, `Analyse my settled betting results for ${date}. I had ${dayData.wins} wins and ${dayData.losses} losses with a P/L of £${dayData.day_pl.toFixed(2)} and a strike rate of ${dayData.strike_rate}%. Provide insights on performance by rule, odds band analysis, liability management, and actionable suggestions for improving results.`)
+                    }}
+                  >
+                    AI Report
+                  </button>
+                </div>
+
+                {!collapsedDays.has(date) && (
+                  <div className="settled-bet-list">
+                    {filteredBets.map((b, i) => (
+                      <div key={i} className={`settled-card ${b.bet_outcome === 'WON' ? 'settled-won' : 'settled-lost'}`}>
+                        <div className="settled-card-header">
+                          <span className={`settled-outcome ${b.bet_outcome === 'WON' ? 'outcome-won' : 'outcome-lost'}`}>
+                            {b.bet_outcome === 'WON' ? 'WON' : 'LOST'}
+                          </span>
+                          <span className="settled-runner">{b.runner_name}</span>
+                          <span className="settled-venue">{b.venue}</span>
+                          <span className={`settled-pl ${(b.profit || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                            {(b.profit || 0) >= 0 ? '+' : ''}£{(b.profit || 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="settled-card-details">
+                          <span>Odds: <strong className="cell-lay-odds">{b.price_matched?.toFixed(2)}</strong></span>
+                          <span>Stake: £{b.size_settled?.toFixed(2)}</span>
+                          <span>Rule: <code>{b.rule_applied || '—'}</code></span>
+                          <span>Settled: {b.settled_date ? new Date(b.settled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                          {b.commission > 0 && <span>Comm: £{b.commission?.toFixed(2)}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -1176,11 +1515,11 @@ function ReportsTab() {
 
         {selectedDate && (
           <div className="report-sessions-panel">
-            <h3>Sessions for {selectedDate}</h3>
+            <h3>Snapshots for {selectedDate}</h3>
             {loadingSessions ? (
-              <p className="empty">Loading sessions...</p>
+              <p className="empty">Loading snapshots...</p>
             ) : daySessions.length === 0 ? (
-              <p className="empty">No sessions found for this date.</p>
+              <p className="empty">No snapshots found for this date.</p>
             ) : (
               <>
                 <div className="report-session-list">
@@ -1258,7 +1597,7 @@ function ReportsTab() {
       <div className="report-list-section">
         <h3>Generated Reports</h3>
         {reports.length === 0 ? (
-          <p className="empty">No reports generated yet. Select a date and sessions above to create one.</p>
+          <p className="empty">No reports generated yet. Select a date and snapshots above to create one.</p>
         ) : (
           <div className="report-list">
             {reports.map(r => (
@@ -1266,7 +1605,7 @@ function ReportsTab() {
                 <div className="report-card-info">
                   <strong>{r.title}</strong>
                   <span className="report-card-meta">
-                    {r.template_name} · {new Date(r.created_at).toLocaleString()} · {r.session_ids?.length || 0} session{(r.session_ids?.length || 0) !== 1 ? 's' : ''}
+                    {r.template_name} · {new Date(r.created_at).toLocaleString()} · {r.session_ids?.length || 0} snapshot{(r.session_ids?.length || 0) !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <div className="report-card-actions">
