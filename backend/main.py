@@ -371,7 +371,7 @@ Format each point as a single line starting with a bullet (•). Be specific wit
     try:
         client = get_gemini()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
         analysis_text = response.text
@@ -433,7 +433,7 @@ If asked for analysis, provide actionable insights. Keep responses conversationa
             role = "user" if m["role"] == "user" else "model"
             gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=gemini_contents,
         )
         return {"reply": response.text}
@@ -579,7 +579,7 @@ def generate_report(req: GenerateReportRequest):
     try:
         client = get_gemini()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
         report_content = response.text
