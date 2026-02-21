@@ -235,6 +235,7 @@ def get_state():
 @app.get("/api/rules")
 def get_rules():
     """Return the active rule set."""
+    from rules import SPREAD_THRESHOLDS
     return {
         "strategy": "UK_IE_Favourite_Lay",
         "version": "2.0",
@@ -266,6 +267,16 @@ def get_rules():
                 "action": "LAY favourite @ £1",
             },
         ],
+        "spread_control": {
+            "enabled": engine.spread_control,
+            "thresholds": [
+                {
+                    "odds_range": f"{lo}–{hi}",
+                    "max_spread": threshold if threshold is not None else "REJECT",
+                }
+                for lo, hi, threshold in SPREAD_THRESHOLDS
+            ],
+        },
     }
 
 
@@ -293,6 +304,21 @@ def toggle_dry_run():
     """Toggle dry run mode on/off."""
     engine.dry_run = not engine.dry_run
     return {"dry_run": engine.dry_run}
+
+
+@app.post("/api/engine/spread-control")
+def toggle_spread_control():
+    """Toggle spread control on/off. When enabled, bets are rejected if the
+    back-lay spread exceeds odds-based thresholds (market liquidity filter)."""
+    engine.spread_control = not engine.spread_control
+    engine._save_state()
+    return {"spread_control": engine.spread_control}
+
+
+@app.get("/api/engine/spread-rejections")
+def get_spread_rejections():
+    """Return recent spread control rejections for today."""
+    return {"rejections": list(reversed(engine.spread_rejections[-50:]))}
 
 
 @app.post("/api/engine/countries")

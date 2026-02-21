@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from betfair_client import BetfairClient
-from rules import Runner, apply_rules, RuleResult
+from rules import Runner, apply_rules, RuleResult, check_spread
 
 logger = logging.getLogger("engine")
 
@@ -110,6 +110,8 @@ class LayEngine:
         self.day_started: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.dry_run: bool = DRY_RUN  # Start with env default, toggleable at runtime
         self.countries: list[str] = ["GB", "IE"]  # Configurable at runtime
+        self.spread_control: bool = False  # Spread validation off by default
+        self.spread_rejections: list[dict] = []  # Log of rejected bets
 
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
@@ -149,6 +151,7 @@ class LayEngine:
                 "last_scan": self.last_scan,
                 "dry_run": self.dry_run,
                 "countries": self.countries,
+                "spread_control": self.spread_control,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -200,6 +203,7 @@ class LayEngine:
             self.last_scan = data.get("last_scan")
             self.dry_run = data.get("dry_run", DRY_RUN)
             self.countries = data.get("countries", ["GB", "IE"])
+            self.spread_control = data.get("spread_control", False)
             self.balance = data.get("balance")
 
             logger.info(
@@ -500,6 +504,7 @@ class LayEngine:
             self.processed_markets = set()
             self.processed_runners = set()
             self.errors = []
+            self.spread_rejections = []
             self.day_started = today
             self._session_bets_start_index = 0
 
@@ -611,6 +616,10 @@ class LayEngine:
             logger.info(f"Skipped {market['venue']}: {result.skip_reason}")
             return
 
+        # ── Step 2.5: Spread control validation (if enabled) ──
+        # Build runner lookup for spread checks
+        runner_lookup = {r.selection_id: r for r in runners_with_prices}
+
         # ── Step 3: Place the bets ──
         logger.info(
             f"Rule applied: {result.rule_applied} — "
@@ -625,6 +634,33 @@ class LayEngine:
                     f"already bet on for race {market['race_time']}"
                 )
                 continue
+
+            # ── Spread control check ──
+            if self.spread_control:
+                runner = runner_lookup.get(instruction.selection_id)
+                if runner:
+                    spread_result = check_spread(runner)
+                    if not spread_result.passed:
+                        logger.warning(
+                            f"[SPREAD CONTROL] REJECTED: {instruction.runner_name} "
+                            f"@ {market['venue']} — {spread_result.reason}"
+                        )
+                        self.spread_rejections.append({
+                            "runner": instruction.runner_name,
+                            "venue": market["venue"],
+                            "country": market.get("country", ""),
+                            "market_id": market_id,
+                            "lay_price": spread_result.lay_price,
+                            "back_price": spread_result.back_price,
+                            "spread": spread_result.spread,
+                            "max_spread": spread_result.max_spread,
+                            "reason": spread_result.reason,
+                            "rule": instruction.rule_applied,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        self.processed_runners.add(runner_key)
+                        continue
+
             self._place_bet(instruction, venue=market["venue"], country=market.get("country", ""))
             self.processed_runners.add(runner_key)
 
@@ -719,6 +755,7 @@ class LayEngine:
             "status": self.status,
             "dry_run": self.dry_run,
             "countries": self.countries,
+            "spread_control": self.spread_control,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
@@ -726,12 +763,14 @@ class LayEngine:
                 "total_markets": len(self.markets),
                 "processed": len(self.processed_markets),
                 "bets_placed": len(self.bets_placed),
+                "spread_rejections": len(self.spread_rejections),
                 "total_stake": round(total_stake, 2),
                 "total_liability": round(total_liability, 2),
             },
             "upcoming": upcoming[:10],
             "recent_bets": list(reversed(self.bets_placed)),
             "recent_results": list(reversed(self.results)),
+            "spread_rejections": list(reversed(self.spread_rejections[-20:])),
             "errors": self.errors[-10:],
         }
 

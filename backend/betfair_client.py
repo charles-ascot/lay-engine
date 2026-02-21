@@ -239,6 +239,11 @@ class BetfairClient:
             if lay_prices:
                 runner.best_available_to_lay = lay_prices[0]["price"]
 
+            # Get best available to back (the highest back price)
+            back_prices = r.get("ex", {}).get("availableToBack", [])
+            if back_prices:
+                runner.best_available_to_back = back_prices[0]["price"]
+
             runners.append(runner)
 
         return runners, True

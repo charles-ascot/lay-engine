@@ -424,6 +424,10 @@ function Dashboard() {
     await api('/api/engine/dry-run', { method: 'POST' })
     fetchState()
   }
+  const handleToggleSpreadControl = async () => {
+    await api('/api/engine/spread-control', { method: 'POST' })
+    fetchState()
+  }
   const handleResetBets = async () => {
     if (!confirm('Clear all bets and re-process all markets?')) return
     await api('/api/engine/reset-bets', { method: 'POST' })
@@ -492,6 +496,13 @@ function Dashboard() {
         >
           {state.dry_run ? '🧪 Dry Run ON → Go Live' : '🔴 LIVE → Switch to Dry Run'}
         </button>
+        <button
+          className={`btn ${state.spread_control ? 'btn-info' : 'btn-secondary'}`}
+          onClick={handleToggleSpreadControl}
+          title="Spread Control validates back-lay spreads to reject bets in illiquid markets"
+        >
+          {state.spread_control ? '📊 Spread Control ON' : '📊 Spread Control OFF'}
+        </button>
         <button className="btn btn-secondary" onClick={handleResetBets}>
           Clear Bets & Re-process
         </button>
@@ -502,6 +513,7 @@ function Dashboard() {
           <span>Markets: <strong>{s.total_markets || 0}</strong></span>
           <span>Processed: <strong>{s.processed || 0}</strong></span>
           <span>Bets: <strong>{s.bets_placed || 0}</strong></span>
+          {s.spread_rejections > 0 && <span>Spread Rejected: <strong style={{color:'#f59e0b'}}>{s.spread_rejections}</strong></span>}
           <span>Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
           <span>Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
         </div>

@@ -28,6 +28,7 @@ class Runner:
     runner_name: str
     handicap: float = 0.0
     best_available_to_lay: Optional[float] = None  # lowest lay price = best odds
+    best_available_to_back: Optional[float] = None  # highest back price
     status: str = "ACTIVE"
 
 
@@ -266,3 +267,103 @@ def apply_rules(
     result.skipped = True
     result.skip_reason = f"Unexpected odds value: {odds}"
     return result
+
+
+# ──────────────────────────────────────────────
+#  SPREAD CONTROL — Dynamic Back/Lay Spread Validation
+# ──────────────────────────────────────────────
+#
+#  Validates that the back-lay spread is within acceptable
+#  limits for the given odds range, protecting against
+#  illiquid markets where displayed odds are meaningless.
+#
+#  Based on Mark Insley's Spread Control Logic specification
+#  (18 February 2026).
+
+# Odds-based maximum spread thresholds.
+# Key = (min_odds, max_odds), Value = max acceptable spread.
+# None value = REJECT (too volatile / illiquid).
+SPREAD_THRESHOLDS = [
+    (1.0,  2.0,  0.05),   # Tight market — max 0.05 spread
+    (2.0,  3.0,  0.15),   # Core zone — max 0.15
+    (3.0,  5.0,  0.30),   # Standard — max 0.30
+    (5.0,  8.0,  0.50),   # Wide — max 0.50
+    (8.0,  15.0, None),   # REJECT — too volatile
+    (15.0, 1000, None),   # REJECT — extreme odds
+]
+
+
+@dataclass
+class SpreadCheckResult:
+    """Result of a spread validation check."""
+    passed: bool
+    lay_price: float
+    back_price: Optional[float]
+    spread: Optional[float]       # lay - back
+    max_spread: Optional[float]   # threshold for this odds range
+    reason: str = ""
+
+
+def check_spread(runner: Runner) -> SpreadCheckResult:
+    """Validate the back-lay spread for a runner.
+
+    Returns SpreadCheckResult indicating whether the spread
+    is within acceptable limits for the given odds range.
+    """
+    lay = runner.best_available_to_lay
+    back = runner.best_available_to_back
+
+    if lay is None:
+        return SpreadCheckResult(
+            passed=False, lay_price=0, back_price=None,
+            spread=None, max_spread=None,
+            reason="No lay price available",
+        )
+
+    if back is None:
+        # No back price means no market depth — reject
+        return SpreadCheckResult(
+            passed=False, lay_price=lay, back_price=None,
+            spread=None, max_spread=None,
+            reason=f"No back price available (lay={lay:.2f}) — insufficient market depth",
+        )
+
+    spread = round(lay - back, 4)
+
+    # Find the threshold for this odds range
+    max_spread = None
+    matched_band = False
+    for min_odds, max_odds, threshold in SPREAD_THRESHOLDS:
+        if min_odds <= lay < max_odds:
+            max_spread = threshold
+            matched_band = True
+            break
+
+    if not matched_band:
+        # Odds outside all defined bands
+        return SpreadCheckResult(
+            passed=False, lay_price=lay, back_price=back,
+            spread=spread, max_spread=None,
+            reason=f"Lay odds {lay:.2f} outside all defined bands",
+        )
+
+    if max_spread is None:
+        # Band exists but threshold is None = REJECT
+        return SpreadCheckResult(
+            passed=False, lay_price=lay, back_price=back,
+            spread=spread, max_spread=None,
+            reason=f"Lay odds {lay:.2f} in REJECT band (8.0+) — too volatile/illiquid",
+        )
+
+    if spread > max_spread:
+        inefficiency = (spread / lay) * 100
+        return SpreadCheckResult(
+            passed=False, lay_price=lay, back_price=back,
+            spread=spread, max_spread=max_spread,
+            reason=f"Spread {spread:.2f} exceeds max {max_spread:.2f} for odds {lay:.2f} ({inefficiency:.1f}% inefficiency)",
+        )
+
+    return SpreadCheckResult(
+        passed=True, lay_price=lay, back_price=back,
+        spread=spread, max_spread=max_spread,
+    )
