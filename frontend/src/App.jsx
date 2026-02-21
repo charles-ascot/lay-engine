@@ -497,7 +497,7 @@ function Dashboard() {
           {state.dry_run ? '🧪 Dry Run ON → Go Live' : '🔴 LIVE → Switch to Dry Run'}
         </button>
         <button
-          className={`btn ${state.spread_control ? 'btn-info' : 'btn-secondary'}`}
+          className={`btn ${state.spread_control ? 'btn-warning' : 'btn-secondary'}`}
           onClick={handleToggleSpreadControl}
           title="Spread Control validates back-lay spreads to reject bets in illiquid markets"
         >
