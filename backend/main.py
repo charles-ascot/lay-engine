@@ -536,8 +536,12 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
                     "liability": b.get("liability"),
                     "rule": b.get("rule_applied"),
                     "status": b.get("betfair_response", {}).get("status"),
+                    "bet_id": str(b.get("betfair_response", {}).get("bet_id", "")),
                     "time": b.get("timestamp"),
                     "dry_run": b.get("dry_run"),
+                    "venue": b.get("venue"),
+                    "country": b.get("country"),
+                    "market_id": b.get("market_id"),
                 }
                 for b in s.get("bets", [])
             ],
@@ -545,6 +549,8 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
                 {
                     "venue": r.get("venue"),
                     "race": r.get("market_name"),
+                    "race_time": r.get("race_time"),
+                    "market_id": r.get("market_id"),
                     "fav": r.get("favourite", {}).get("name") if r.get("favourite") else None,
                     "fav_odds": r.get("favourite", {}).get("odds") if r.get("favourite") else None,
                     "second_fav": r.get("second_favourite", {}).get("name") if r.get("second_favourite") else None,
@@ -557,6 +563,114 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
             ],
         })
     return data
+
+
+def _get_settled_for_date(target_date: str) -> list[dict]:
+    """Fetch settled bet outcomes from Betfair for a specific date.
+
+    Cross-references with engine bets to add rule_applied, venue, etc.
+    Returns a list of settled bet dicts with actual P/L.
+    """
+    if not engine.is_authenticated:
+        return []
+
+    from_str = target_date + "T00:00:00Z"
+    to_str = target_date + "T23:59:59Z"
+
+    try:
+        cleared = engine.client.get_cleared_orders(
+            settled_from=from_str,
+            settled_to=to_str,
+        )
+    except Exception as e:
+        logging.error(f"Failed to fetch settled data for {target_date}: {e}")
+        return []
+
+    # Build lookup of our placed bets by bet_id
+    our_bets_by_id = {}
+    for s in engine.sessions:
+        for b in s.get("bets", []):
+            bid = str(b.get("betfair_response", {}).get("bet_id", ""))
+            if bid:
+                our_bets_by_id[bid] = b
+
+    settled = []
+    for co in cleared:
+        bet_id = str(co.get("betId", ""))
+        our_bet = our_bets_by_id.get(bet_id, {})
+        desc = co.get("itemDescription", {})
+        settled.append({
+            "bet_id": bet_id,
+            "runner_name": desc.get("runnerDesc", our_bet.get("runner_name", "Unknown")),
+            "venue": desc.get("eventDesc", our_bet.get("venue", "")),
+            "market_desc": desc.get("marketDesc", ""),
+            "price_matched": co.get("priceMatched", 0),
+            "size_settled": co.get("sizeSettled", 0),
+            "profit": co.get("profit", 0),
+            "commission": co.get("commission", 0),
+            "bet_outcome": co.get("betOutcome", ""),  # WON or LOST
+            "settled_date": co.get("settledDate", ""),
+            "placed_date": co.get("placedDate", ""),
+            "rule_applied": our_bet.get("rule_applied", ""),
+            "country": our_bet.get("country", ""),
+            "our_stake": our_bet.get("size", 0),
+            "our_liability": our_bet.get("liability", 0),
+            "is_chimera_bet": bet_id in our_bets_by_id,
+        })
+    return settled
+
+
+def _get_historical_summary(exclude_date: str = None) -> dict:
+    """Build cumulative performance summary from all historical sessions.
+
+    Returns aggregated stats across all previous operating days,
+    broken down by day, odds band, rule, and venue.
+    """
+    days = {}  # date -> {bets, wins, losses, pl, stake, liability}
+
+    for s in engine.sessions:
+        date = s.get("date", "")
+        if exclude_date and date == exclude_date:
+            continue
+        if s.get("mode") != "LIVE":
+            continue
+
+        if date not in days:
+            days[date] = {
+                "date": date,
+                "bets": 0, "stake": 0, "liability": 0,
+                "sessions": 0,
+            }
+        days[date]["sessions"] += 1
+
+        for b in s.get("bets", []):
+            if b.get("dry_run"):
+                continue
+            days[date]["bets"] += len(s.get("bets", []))
+
+    # Also gather all session data compactly
+    all_sessions = []
+    for s in engine.sessions:
+        date = s.get("date", "")
+        if exclude_date and date == exclude_date:
+            continue
+        all_sessions.append({
+            "session_id": s["session_id"],
+            "mode": s["mode"],
+            "date": date,
+            "status": s.get("status"),
+            "total_bets": s.get("summary", {}).get("total_bets", 0),
+            "total_stake": s.get("summary", {}).get("total_stake", 0),
+            "total_liability": s.get("summary", {}).get("total_liability", 0),
+            "countries": s.get("summary", {}).get("countries", []),
+        })
+
+    return {
+        "total_sessions": len(all_sessions),
+        "operating_days": sorted(days.keys()),
+        "day_summaries": list(days.values()),
+        "sessions": all_sessions,
+    }
 
 
 RULES_DESCRIPTION = """The CHIMERA Lay Engine uses these rules on horse racing WIN markets:
@@ -585,19 +699,25 @@ def analyse_sessions(req: AnalyseRequest):
         )
 
     session_data = _compact_session_data(day_sessions)
+    settled_data = _get_settled_for_date(req.date)
 
     prompt = f"""You are an expert horse racing betting analyst. Analyse the following lay betting session data from {req.date}.
 
 {RULES_DESCRIPTION}
 
-SESSION DATA:
+SESSION DATA (bets placed by the engine):
 {json.dumps(session_data, indent=2, default=str)}
 
+SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L — use these for WIN/LOSS and P/L figures):
+{json.dumps(settled_data, indent=2, default=str) if settled_data else "No settled data available — calculate P/L as: WIN = +stake, LOSS = -liability"}
+
 Provide exactly 6-10 concise bullet points covering:
-- Odds drift patterns (are favourites drifting or shortening?)
+- Actual P/L performance (wins, losses, strike rate, net P/L)
+- Odds band performance (which bands performed best/worst?)
 - Rule distribution (which rules triggered most/least?)
 - Risk exposure (total liability vs stake ratio)
 - Venue/race patterns (any concentrations?)
+- Country performance (if multiple countries)
 - Session timing observations
 - Any anomalies or notable patterns
 - Actionable suggestions for rule tuning
@@ -644,17 +764,35 @@ def chat(req: ChatRequest):
 
     session_data = _compact_session_data(context_sessions)
 
+    # Fetch settled data for the relevant date
+    settled_context = ""
+    if req.date:
+        settled = _get_settled_for_date(req.date)
+        if settled:
+            settled_context = f"""
+
+SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L):
+{json.dumps(settled, indent=2, default=str)}"""
+
+    # Include historical summary for cumulative context
+    historical = _get_historical_summary()
+
     system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
-You have access to session data from the CHIMERA Lay Engine.
+You have access to all data from the CHIMERA Lay Engine.
 
 {RULES_DESCRIPTION}
 
 Active countries: {', '.join(engine.countries)}
+Engine mode: {"DRY_RUN" if engine.dry_run else "LIVE"}
 
-SESSION DATA:
-{json.dumps(session_data, indent=2, default=str)}
+SESSION DATA (bets placed by the engine):
+{json.dumps(session_data, indent=2, default=str)}{settled_context}
+
+HISTORICAL SUMMARY (all operating days):
+{json.dumps(historical, indent=2, default=str)}
 
 Answer questions about this data concisely. Be specific with numbers.
+You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes.
 If asked for analysis, provide actionable insights. Keep responses conversational but data-driven."""
 
     messages = [{"role": h.role, "content": h.content} for h in req.history]
@@ -699,72 +837,187 @@ class GenerateReportRequest(BaseModel):
     template: str = "daily_performance"
 
 
-DAILY_REPORT_PROMPT = """You are a professional horse racing lay betting analyst producing a comprehensive daily performance report for the CHIMERA Lay Engine. Generate a detailed report in clean markdown format following this exact structure. Use the session data provided.
+DAILY_REPORT_PROMPT = """You are a professional horse racing lay betting analyst producing a structured daily performance report for the CHIMERA Lay Engine. You MUST output a single valid JSON object conforming exactly to the schema below. No markdown, no commentary — only the JSON object.
 
 {rules_description}
 
-SESSION DATA FOR {date}:
+=== SCHEMA (TypeScript — follow these field names and types exactly) ===
+
+interface ChimeraReport {{
+  meta: {{
+    schema_version: string;        // Always "1.0.0"
+    report_title: string;          // "CHIMERA Lay Engine Performance Report"
+    subtitle: string;              // "Automated Lay Betting Performance Analysis"
+    day_number: number;            // Sequential operating day (count from historical data)
+    trading_date: string;          // ISO 8601: "YYYY-MM-DD"
+    report_date: string;           // ISO 8601: today's date
+    prepared_for: string;          // "Mark Insley"
+    prepared_by: string;           // "CHIMERA AI Agent"
+    version: string;               // "1.0"
+    confidential: boolean;         // true
+    engine_version: string;        // "CHIMERA Lay Engine v1.1"
+    dry_run_disabled: boolean;     // true if mode is LIVE
+  }};
+  executive_summary: {{
+    headline: string;              // One-sentence headline finding
+    narrative: string;             // 3-4 sentence summary
+    key_findings: string[];        // 5-7 bullet point findings
+  }};
+  day_performance: {{
+    slices: Array<{{
+      label: string;               // "All Bets", "Sub-2.0 Only", "2.0+ Only"
+      total_bets: number;
+      wins: number;
+      losses: number;
+      strike_rate: number;         // Decimal: 0.615 = 61.5%
+      net_pl: number;              // GBP raw number
+      total_staked: number;        // GBP
+      roi: number;                 // Decimal: 0.266 = +26.6%
+    }}>;
+    narrative: string;
+  }};
+  odds_band_analysis: {{
+    bands: Array<{{
+      label: string;               // "< 2.0", "2.0–2.99", "3.0–3.99", "4.0–4.99", "5.0+"
+      min_odds: number | null;
+      max_odds: number | null;
+      bets: number;
+      wins: number;
+      win_pct: number;             // Decimal
+      pl: number;                  // GBP
+      roi: number;                 // Decimal
+      verdict: string;             // ELITE|PRIME|STRONG|SOLID|CORE|MIXED|WEAK|POOR|TOXIC|EXCLUDE|ANOMALY|MONITOR
+      notes: string;
+    }}>;
+    narrative: string;
+  }};
+  cumulative_performance: {{
+    by_day: Array<{{
+      day_number: number;
+      date: string;
+      bets: number;
+      wins: number;
+      losses: number;
+      strike_rate: number;         // Decimal
+      pl: number;                  // GBP
+      cumulative_pl: number;       // Running total GBP
+      notes?: string;
+    }}>;
+    by_band: Array<{{
+      label: string;
+      bets: number;
+      wins: number;
+      losses: number;
+      strike_rate: number;         // Decimal
+      pl: number;
+      status: string;              // Same verdict enum
+      recommendation: string;
+    }}>;
+    narrative: string;
+  }};
+  drift_analysis: null;            // Set to null — no snapshot data yet
+  discipline_analysis: {{
+    rows: Array<{{
+      discipline: string;          // "Flat", "Flat (AW)", "Jumps (NH)"
+      bets: number;
+      wins: number;
+      losses: number;
+      strike_rate: number;         // Decimal
+      pl: number;
+      roi: number;                 // Decimal
+    }}>;
+    narrative: string;
+  }};
+  venue_analysis: {{
+    rows: Array<{{
+      venue: string;
+      country: string;             // "GB", "IE", "FR", "ZA"
+      discipline: string;
+      bets: number;
+      wins: number;
+      losses: number;
+      strike_rate: number;         // Decimal
+      pl: number;
+      roi: number;                 // Decimal
+      rating: string;              // SUPERB|EXCELLENT|GOOD|FAIR|MARGINAL|MIXED|POOR
+      notes?: string;
+    }}>;
+    narrative: string;
+  }};
+  bets: Array<{{
+    selection: string;             // Runner name
+    venue: string;
+    market: string;                // e.g. "GB Flat", "IE Jumps"
+    race_time: string;             // "HH:MM" format
+    odds: number;
+    stake: number;
+    liability: number;
+    pl: number;                    // +stake for WIN, -liability for LOSS
+    result: string;                // "WIN" | "LOSS" | "VOID" | "NR"
+    band_label: string;            // Which odds band this falls in
+    rule?: string;                 // e.g. "RULE_1", "RULE_2"
+    excluded?: boolean;            // true if sub-2.0
+    exclusion_reason?: string;     // e.g. "Sub-2.0"
+    notes?: string;
+  }}>;
+  timing_analysis: null;           // Set to null unless timing data available
+  weekday_weekend: null;           // Set to null unless weekend data available
+  agent_analysis: null;            // Set to null
+  conclusions: {{
+    findings: Array<{{
+      number: number;
+      priority: boolean;           // true for top 1-3 findings
+      text: string;
+    }}>;
+    recommendations: Array<{{
+      number: number;
+      priority: boolean;           // true for top 1-3 recommendations
+      text: string;
+    }}>;
+  }};
+  appendix: {{
+    day_over_day?: Array<{{
+      metric: string;
+      values: Record<string, string | number>;
+    }}>;
+    data_sources: Array<{{
+      label: string;
+      value: string;
+    }}>;
+  }};
+}}
+
+=== DATA INPUTS ===
+
+TRADING DATE: {date}
+REPORT DATE: {report_date}
+
+SESSION DATA (bets placed by the engine, with rule evaluations):
 {session_data}
 
-Generate the report in markdown with these sections. Use actual data from the sessions provided. If data is insufficient for a section, note it briefly and move on.
+SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L):
+{settled_data}
 
-# CHIMERA Lay Engine Performance Report
-## {date}
+HISTORICAL SESSIONS (all previous operating days — use for cumulative_performance):
+{historical_data}
 
-### Executive Summary
-Write a 3-4 sentence headline summary covering: total bets, win-loss record, strike rate, net P/L, and one key finding. Use the format "XW-YL (Z%)" for records.
+ENGINE STATE:
+- Active countries: {countries}
+- Mode: {mode}
+- Engine version: CHIMERA Lay Engine v1.1
 
-### Performance Summary
+=== INSTRUCTIONS ===
 
-| Metric | Value |
-|--------|-------|
-| Total Bets | (number) |
-| Record | XW-YL |
-| Strike Rate | X% |
-| Total Staked | £X.XX |
-| Total Liability | £X.XX |
-| Net P/L | £X.XX |
-| Mode | (DRY_RUN or LIVE) |
-
-### Odds Band Analysis
-Break down results into these bands: <2.0, 2.0-2.99, 3.0-3.99, 4.0-4.99, 5.0+
-For each band show: bets, wins, strike%, P/L, and a verdict (STRONG/SOLID/MIXED/POOR/TOXIC).
-Present as a table.
-
-### Country & Venue Analysis
-Break down by country and venue. Show bets, record, strike%, P/L for each.
-Present as a table.
-
-### Rule Distribution
-Show which rules triggered and their performance:
-- RULE_1 (<2.0): count, strike%, P/L
-- RULE_2 (2.0-5.0): count, strike%, P/L
-- RULE_3A (>5.0, gap<2): count, strike%, P/L
-- RULE_3B (>5.0, gap>=2): count, strike%, P/L
-Present as a table.
-
-### Individual Bet Breakdown
-List ALL bets in a table with columns: Runner, Venue, Country, Odds, Stake, Liability, Rule, Result (WIN/LOSS/DRY).
-Sort by time.
-
-### Session Timing
-Note when sessions started/stopped and any timing observations.
-
-### Key Observations
-Provide 5-8 bullet points with specific actionable observations covering:
-- Strike rate patterns
-- Risk exposure (liability vs stake ratios)
-- Best/worst performing segments
-- Any anomalies
-- Suggestions for rule tuning
-
-### Recommendations
-3-5 specific, data-driven recommendations for the next trading day.
-
----
-*Report generated by CHIMERA AI Agent*
-
-IMPORTANT: Use ONLY the data provided. Calculate P/L as: WIN = +stake, LOSS = -liability. For dry run bets, mark result as DRY (neither win nor loss). Be precise with numbers — do not invent data."""
+1. Use SETTLED BETS data for actual WIN/LOSS outcomes and real P/L figures. Cross-reference by runner name and venue to match session bets with settled outcomes.
+2. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN (lay wins when horse loses) = +stake, LOSS (lay loses when horse wins) = -liability. For DRY RUN bets, you must still assign WIN/LOSS results based on the settled data if available, otherwise mark as "VOID".
+3. For cumulative_performance.by_day, include ALL historical operating days plus today.
+4. For cumulative_performance.by_band, aggregate across ALL days (historical + today).
+5. Strike rates and ROI are DECIMAL values (0.615 not 61.5, 0.266 not 26.6).
+6. P/L values are raw GBP numbers (use -5.60 not "-£5.60").
+7. Be precise with numbers — do not invent data. Only use the data provided.
+8. The day_number should be calculated from the historical data (count of unique operating dates + 1 for today).
+9. Include ALL bets in the bets array — do not summarise or skip any.
+10. Output ONLY the JSON object. No backticks, no markdown fences, no explanatory text."""
 
 
 @app.get("/api/reports/templates")
@@ -778,7 +1031,15 @@ def get_report_templates():
 
 @app.post("/api/reports/generate")
 def generate_report(req: GenerateReportRequest):
-    """Generate an AI-powered daily report for the selected sessions."""
+    """Generate an AI-powered daily report for the selected sessions.
+
+    Gathers all available data sources:
+    - Session data (bets placed, rule evaluations)
+    - Settled bet outcomes from Betfair (actual P/L)
+    - Historical session data for cumulative performance
+    Then instructs the AI to produce a structured JSON report
+    conforming to the ChimeraReport schema.
+    """
     if not GEMINI_API_KEY:
         return JSONResponse(
             status_code=500,
@@ -804,12 +1065,33 @@ def generate_report(req: GenerateReportRequest):
             content={"status": "error", "message": "No matching sessions found"},
         )
 
+    # 1. Compact session data (enriched with venue, country, market_id)
     session_data = _compact_session_data(selected_sessions)
+
+    # 2. Settled bet data from Betfair (actual WIN/LOSS outcomes)
+    settled_data = _get_settled_for_date(req.date)
+
+    # 3. Historical session data for cumulative performance
+    historical_data = _get_historical_summary(exclude_date=req.date)
+
+    # 4. Current engine state
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    mode = "DRY_RUN" if engine.dry_run else "LIVE"
+    # Check mode from selected sessions — they may differ from current
+    session_modes = set(s.get("mode") for s in selected_sessions)
+    if session_modes:
+        mode = "LIVE" if "LIVE" in session_modes else "DRY_RUN"
 
     prompt = DAILY_REPORT_PROMPT.format(
         rules_description=RULES_DESCRIPTION,
         date=req.date,
+        report_date=now.strftime("%Y-%m-%d"),
         session_data=json.dumps(session_data, indent=2, default=str),
+        settled_data=json.dumps(settled_data, indent=2, default=str) if settled_data else "[]  (No settled data available — use session data to calculate P/L)",
+        historical_data=json.dumps(historical_data, indent=2, default=str),
+        countries=", ".join(engine.countries),
+        mode=mode,
     )
 
     try:
@@ -818,11 +1100,24 @@ def generate_report(req: GenerateReportRequest):
             model="gemini-2.5-flash",
             contents=prompt,
         )
-        report_content = response.text
+        report_text = response.text
 
-        # Store the report
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        # Parse the JSON response — strip any markdown fencing if present
+        clean_text = report_text.strip()
+        if clean_text.startswith("```"):
+            # Remove ```json ... ``` wrapping
+            first_newline = clean_text.index("\n")
+            last_fence = clean_text.rfind("```")
+            clean_text = clean_text[first_newline + 1:last_fence].strip()
+
+        try:
+            report_json = json.loads(clean_text)
+        except json.JSONDecodeError as je:
+            logging.error(f"Failed to parse AI report JSON: {je}")
+            logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
+            # Fall back to storing raw text
+            report_json = None
+
         report_id = f"rpt_{now.strftime('%Y%m%d_%H%M%S')}"
         template_info = REPORT_TEMPLATES[req.template]
 
@@ -834,7 +1129,8 @@ def generate_report(req: GenerateReportRequest):
             "template_name": template_info["name"],
             "created_at": now.isoformat(),
             "title": f"{template_info['name']} — {req.date}",
-            "content": report_content,
+            "content": report_json if report_json else report_text,
+            "format": "json" if report_json else "markdown",
         }
         engine.reports.append(report)
         engine._save_reports()
