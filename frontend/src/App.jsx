@@ -1655,6 +1655,152 @@ function ReportsTab() {
     return html
   }
 
+  // Render structured ChimeraReport JSON as HTML
+  const renderJsonReport = (data) => {
+    if (!data) return ''
+    const fmtPL = (v) => v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}`
+    const fmtPct = (v) => `${(v * 100).toFixed(1)}%`
+    const fmtOdds = (v) => v?.toFixed(2) ?? '—'
+    let h = ''
+
+    // Meta & Title
+    const m = data.meta || {}
+    h += `<h1>CHIMERA Lay Engine Performance Report</h1>`
+    h += `<h2>Day ${m.day_number || '?'} — ${m.trading_date || ''}</h2>`
+    h += `<p><em>Prepared by ${m.prepared_by || 'CHIMERA AI Agent'} | ${m.engine_version || ''} | ${m.dry_run_disabled ? 'LIVE' : 'DRY RUN'}</em></p>`
+
+    // Executive Summary
+    const es = data.executive_summary
+    if (es) {
+      h += `<h2>Executive Summary</h2>`
+      if (es.headline) h += `<p><strong>${es.headline}</strong></p>`
+      if (es.narrative) h += `<p>${es.narrative}</p>`
+      if (es.key_findings?.length) {
+        h += '<ul>' + es.key_findings.map(f => `<li>${f}</li>`).join('') + '</ul>'
+      }
+    }
+
+    // Day Performance
+    const dp = data.day_performance
+    if (dp?.slices?.length) {
+      h += `<h2>Performance Summary</h2>`
+      h += '<table><thead><tr><th>Slice</th><th>Bets</th><th>Record</th><th>Strike</th><th>Staked</th><th>P/L</th><th>ROI</th></tr></thead><tbody>'
+      dp.slices.forEach(s => {
+        h += `<tr><td>${s.label}</td><td>${s.total_bets}</td><td>${s.wins}W-${s.losses}L</td><td>${fmtPct(s.strike_rate)}</td><td>£${s.total_staked?.toFixed(2)}</td><td>${fmtPL(s.net_pl)}</td><td>${fmtPct(s.roi)}</td></tr>`
+      })
+      h += '</tbody></table>'
+      if (dp.narrative) h += `<p><em>${dp.narrative}</em></p>`
+    }
+
+    // Odds Band Analysis
+    const ob = data.odds_band_analysis
+    if (ob?.bands?.length) {
+      h += `<h2>Odds Band Analysis</h2>`
+      h += '<table><thead><tr><th>Band</th><th>Bets</th><th>Wins</th><th>Strike</th><th>P/L</th><th>ROI</th><th>Verdict</th></tr></thead><tbody>'
+      ob.bands.forEach(b => {
+        h += `<tr><td>${b.label}</td><td>${b.bets}</td><td>${b.wins}</td><td>${fmtPct(b.win_pct)}</td><td>${fmtPL(b.pl)}</td><td>${fmtPct(b.roi)}</td><td><strong>${b.verdict}</strong></td></tr>`
+      })
+      h += '</tbody></table>'
+      if (ob.narrative) h += `<p><em>${ob.narrative}</em></p>`
+    }
+
+    // Discipline Analysis
+    const da = data.discipline_analysis
+    if (da?.rows?.length) {
+      h += `<h2>Discipline Analysis</h2>`
+      h += '<table><thead><tr><th>Discipline</th><th>Bets</th><th>Record</th><th>Strike</th><th>P/L</th><th>ROI</th></tr></thead><tbody>'
+      da.rows.forEach(r => {
+        h += `<tr><td>${r.discipline}</td><td>${r.bets}</td><td>${r.wins}W-${r.losses}L</td><td>${fmtPct(r.strike_rate)}</td><td>${fmtPL(r.pl)}</td><td>${fmtPct(r.roi)}</td></tr>`
+      })
+      h += '</tbody></table>'
+      if (da.narrative) h += `<p><em>${da.narrative}</em></p>`
+    }
+
+    // Venue Analysis
+    const va = data.venue_analysis
+    if (va?.rows?.length) {
+      h += `<h2>Venue Analysis</h2>`
+      h += '<table><thead><tr><th>Venue</th><th>Country</th><th>Disc.</th><th>Bets</th><th>Record</th><th>Strike</th><th>P/L</th><th>ROI</th><th>Rating</th></tr></thead><tbody>'
+      va.rows.forEach(r => {
+        h += `<tr><td>${r.venue}</td><td>${r.country}</td><td>${r.discipline}</td><td>${r.bets}</td><td>${r.wins}W-${r.losses}L</td><td>${fmtPct(r.strike_rate)}</td><td>${fmtPL(r.pl)}</td><td>${fmtPct(r.roi)}</td><td><strong>${r.rating}</strong></td></tr>`
+      })
+      h += '</tbody></table>'
+      if (va.narrative) h += `<p><em>${va.narrative}</em></p>`
+    }
+
+    // Individual Bets
+    if (data.bets?.length) {
+      h += `<h2>Individual Bet Breakdown</h2>`
+      h += '<table><thead><tr><th>Time</th><th>Runner</th><th>Venue</th><th>Market</th><th>Odds</th><th>Stake</th><th>Liability</th><th>P/L</th><th>Result</th><th>Band</th><th>Rule</th></tr></thead><tbody>'
+      data.bets.forEach(b => {
+        const resultClass = b.result === 'WIN' ? 'color:#22c55e' : b.result === 'LOSS' ? 'color:#ef4444' : ''
+        h += `<tr><td>${b.race_time || ''}</td><td>${b.selection}</td><td>${b.venue}</td><td>${b.market || ''}</td><td>${fmtOdds(b.odds)}</td><td>£${b.stake?.toFixed(2)}</td><td>£${b.liability?.toFixed(2)}</td><td>${fmtPL(b.pl)}</td><td style="${resultClass}"><strong>${b.result}</strong></td><td>${b.band_label || ''}</td><td>${b.rule || ''}</td></tr>`
+      })
+      h += '</tbody></table>'
+    }
+
+    // Cumulative Performance
+    const cp = data.cumulative_performance
+    if (cp?.by_day?.length) {
+      h += `<h2>Cumulative Performance — By Day</h2>`
+      h += '<table><thead><tr><th>Day</th><th>Date</th><th>Bets</th><th>Record</th><th>Strike</th><th>Day P/L</th><th>Cumulative</th></tr></thead><tbody>'
+      cp.by_day.forEach(d => {
+        h += `<tr><td>${d.day_number}</td><td>${d.date}</td><td>${d.bets}</td><td>${d.wins}W-${d.losses}L</td><td>${fmtPct(d.strike_rate)}</td><td>${fmtPL(d.pl)}</td><td><strong>${fmtPL(d.cumulative_pl)}</strong></td></tr>`
+      })
+      h += '</tbody></table>'
+      if (cp.narrative) h += `<p><em>${cp.narrative}</em></p>`
+    }
+    if (cp?.by_band?.length) {
+      h += `<h3>Cumulative — By Odds Band</h3>`
+      h += '<table><thead><tr><th>Band</th><th>Bets</th><th>Record</th><th>Strike</th><th>P/L</th><th>Status</th><th>Recommendation</th></tr></thead><tbody>'
+      cp.by_band.forEach(b => {
+        h += `<tr><td>${b.label}</td><td>${b.bets}</td><td>${b.wins}W-${b.losses}L</td><td>${fmtPct(b.strike_rate)}</td><td>${fmtPL(b.pl)}</td><td><strong>${b.status}</strong></td><td>${b.recommendation || ''}</td></tr>`
+      })
+      h += '</tbody></table>'
+    }
+
+    // Conclusions
+    const cc = data.conclusions
+    if (cc) {
+      if (cc.findings?.length) {
+        h += `<h2>Key Findings</h2><ol>`
+        cc.findings.forEach(f => {
+          h += f.priority ? `<li><strong>${f.text}</strong></li>` : `<li>${f.text}</li>`
+        })
+        h += '</ol>'
+      }
+      if (cc.recommendations?.length) {
+        h += `<h2>Recommendations</h2><ol>`
+        cc.recommendations.forEach(r => {
+          h += r.priority ? `<li><strong>${r.text}</strong></li>` : `<li>${r.text}</li>`
+        })
+        h += '</ol>'
+      }
+    }
+
+    // Appendix
+    const ap = data.appendix
+    if (ap?.data_sources?.length) {
+      h += `<hr/><h3>Data Sources</h3><ul>`
+      ap.data_sources.forEach(ds => {
+        h += `<li><strong>${ds.label}:</strong> ${ds.value}</li>`
+      })
+      h += '</ul>'
+    }
+
+    h += `<hr/><p><em>Report generated by CHIMERA AI Agent</em></p>`
+    return h
+  }
+
+  // Render report content — handles both JSON and markdown formats
+  const renderReportContent = (report) => {
+    if (!report?.content) return ''
+    // JSON structured report
+    if (typeof report.content === 'object') return renderJsonReport(report.content)
+    // Legacy markdown report
+    return renderMarkdown(report.content)
+  }
+
   // ── Report Viewer ──
   if (viewingReport) {
     return (
@@ -1669,7 +1815,7 @@ function ReportsTab() {
           </button>
         </div>
         <div className="report-viewer" ref={reportContentRef}
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(viewingReport.content) }}
+          dangerouslySetInnerHTML={{ __html: renderReportContent(viewingReport) }}
         />
       </div>
     )
