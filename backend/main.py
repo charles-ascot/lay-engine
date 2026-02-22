@@ -1051,14 +1051,14 @@ ENGINE STATE:
 === INSTRUCTIONS ===
 
 1. Use SETTLED BETS data for actual WIN/LOSS outcomes and real P/L figures. Cross-reference by runner name and venue to match session bets with settled outcomes.
-2. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN (lay wins when horse loses) = +stake, LOSS (lay loses when horse wins) = -liability. For DRY RUN bets, you must still assign WIN/LOSS results based on the settled data if available, otherwise mark as "VOID".
+2. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN (lay wins when horse loses) = +stake, LOSS (lay loses when horse wins) = -liability. For DRY RUN bets, you must still assign WIN/LOSS results based on the settled data if available.
 3. For cumulative_performance.by_day, include ALL historical operating days plus today.
 4. For cumulative_performance.by_band, aggregate across ALL days (historical + today).
 5. Strike rates and ROI are DECIMAL values (0.615 not 61.5, 0.266 not 26.6).
 6. P/L values are raw GBP numbers (use -5.60 not "-£5.60").
 7. Be precise with numbers — do not invent data. Only use the data provided.
 8. The day_number should be calculated from the historical data (count of unique operating dates + 1 for today).
-9. Include ALL bets in the bets array — do not summarise or skip any.
+9. Include ALL bets that have a definitive outcome (WIN or LOSS) in the bets array. EXCLUDE any bets where the outcome cannot be determined — do NOT include VOID, NR, or unknown-result bets in any section (bets array, performance stats, odds band analysis, etc.). Only count bets with confirmed WIN/LOSS results.
 10. Output ONLY the JSON object. No backticks, no markdown fences, no explanatory text."""
 
 

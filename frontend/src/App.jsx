@@ -1756,11 +1756,12 @@ function ReportsTab() {
       if (va.narrative) h += `<p><em>${va.narrative}</em></p>`
     }
 
-    // Individual Bets
-    if (data.bets?.length) {
+    // Individual Bets (exclude VOID/NR — only show confirmed WIN/LOSS)
+    const confirmedBets = (data.bets || []).filter(b => b.result === 'WIN' || b.result === 'LOSS')
+    if (confirmedBets.length) {
       h += `<h2>Individual Bet Breakdown</h2>`
       h += '<table><thead><tr><th>Time</th><th>Runner</th><th>Venue</th><th>Market</th><th>Odds</th><th>Stake</th><th>Liability</th><th>P/L</th><th>Result</th><th>Band</th><th>Rule</th></tr></thead><tbody>'
-      data.bets.forEach(b => {
+      confirmedBets.forEach(b => {
         const resultClass = b.result === 'WIN' ? 'color:#22c55e' : b.result === 'LOSS' ? 'color:#ef4444' : ''
         h += `<tr><td>${b.race_time || ''}</td><td>${b.selection}</td><td>${b.venue}</td><td>${b.market || ''}</td><td>${fmtOdds(b.odds)}</td><td>£${b.stake?.toFixed(2)}</td><td>£${b.liability?.toFixed(2)}</td><td>${fmtPL(b.pl)}</td><td style="${resultClass}"><strong>${b.result}</strong></td><td>${b.band_label || ''}</td><td>${b.rule || ''}</td></tr>`
       })
