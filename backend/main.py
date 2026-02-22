@@ -1145,12 +1145,13 @@ def generate_report(req: GenerateReportRequest):
         report_text = response.text
 
         # Parse the JSON response — strip any markdown fencing if present
+        import re
         clean_text = report_text.strip()
-        if clean_text.startswith("```"):
-            # Remove ```json ... ``` wrapping
-            first_newline = clean_text.index("\n")
-            last_fence = clean_text.rfind("```")
-            clean_text = clean_text[first_newline + 1:last_fence].strip()
+        # Remove opening ```json or ``` fence
+        clean_text = re.sub(r'^```\w*\s*\n?', '', clean_text)
+        # Remove closing ``` fence
+        clean_text = re.sub(r'\n?```\s*$', '', clean_text)
+        clean_text = clean_text.strip()
 
         try:
             report_json = json.loads(clean_text)

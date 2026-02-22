@@ -1826,7 +1826,11 @@ function ReportsTab() {
     let content = report.content
     // If content is a string, try to parse as JSON first
     if (typeof content === 'string') {
-      const trimmed = content.trim()
+      let trimmed = content.trim()
+      // Strip markdown code fences (```json ... ```) if present
+      if (trimmed.startsWith('```')) {
+        trimmed = trimmed.replace(/^```\w*\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
+      }
       if (trimmed.startsWith('{')) {
         try {
           content = JSON.parse(trimmed)
