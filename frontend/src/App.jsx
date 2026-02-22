@@ -1807,10 +1807,22 @@ function ReportsTab() {
   // Render report content — handles both JSON and markdown formats
   const renderReportContent = (report) => {
     if (!report?.content) return ''
+    let content = report.content
+    // If content is a string, try to parse as JSON first
+    if (typeof content === 'string') {
+      const trimmed = content.trim()
+      if (trimmed.startsWith('{')) {
+        try {
+          content = JSON.parse(trimmed)
+        } catch (e) {
+          // Not valid JSON — fall through to markdown
+        }
+      }
+    }
     // JSON structured report
-    if (typeof report.content === 'object') return renderJsonReport(report.content)
+    if (typeof content === 'object') return renderJsonReport(content)
     // Legacy markdown report
-    return renderMarkdown(report.content)
+    return renderMarkdown(content)
   }
 
   // ── Report Viewer ──
