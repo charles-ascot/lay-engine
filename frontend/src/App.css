@@ -246,6 +246,43 @@ header {
   background-clip: text;
 }
 .header-right { display: flex; align-items: center; gap: 16px; }
+.point-value-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px 4px 10px;
+}
+.point-label {
+  font-family: 'Lexend', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.point-value-control select {
+  background: transparent;
+  border: none;
+  color: var(--warning);
+  font-family: 'Lexend', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: center;
+  min-width: 32px;
+}
+.point-value-control select option {
+  background: var(--surface-solid);
+  color: var(--text);
+}
 .balance {
   color: var(--success);
   font-family: 'Lexend', sans-serif;

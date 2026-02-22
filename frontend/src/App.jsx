@@ -428,6 +428,13 @@ function Dashboard() {
     await api('/api/engine/spread-control', { method: 'POST' })
     fetchState()
   }
+  const handleSetPointValue = async (value) => {
+    await api('/api/engine/point-value', {
+      method: 'POST',
+      body: JSON.stringify({ value: parseFloat(value) }),
+    })
+    fetchState()
+  }
   const handleResetBets = async () => {
     if (!confirm('Clear all bets and re-process all markets?')) return
     await api('/api/engine/reset-bets', { method: 'POST' })
@@ -474,6 +481,17 @@ function Dashboard() {
           {state.dry_run && <span className="badge dry-run">DRY RUN</span>}
         </div>
         <div className="header-right">
+          <div className="point-value-control">
+            <span className="point-label">PTS £</span>
+            <select
+              value={state.point_value || 1}
+              onChange={e => handleSetPointValue(e.target.value)}
+            >
+              {[1, 2, 5, 10, 20, 50].map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
           {state.balance != null && (
             <span className="balance">£{state.balance?.toFixed(2)}</span>
           )}
@@ -1131,11 +1149,9 @@ function MatchedTab() {
 
 // ── Settled Tab (race results + P/L) ──
 function SettledTab({ openChat }) {
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 6)
-    return d.toISOString().slice(0, 10)
-  })
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10))
+  const today = new Date().toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom] = useState(today)
+  const [dateTo, setDateTo] = useState(today)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('all')

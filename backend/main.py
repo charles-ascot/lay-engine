@@ -86,6 +86,9 @@ class LoginRequest(BaseModel):
 class CountriesRequest(BaseModel):
     countries: list[str]
 
+class PointValueRequest(BaseModel):
+    value: float
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -313,6 +316,19 @@ def toggle_spread_control():
     engine.spread_control = not engine.spread_control
     engine._save_state()
     return {"spread_control": engine.spread_control}
+
+
+@app.post("/api/engine/point-value")
+def set_point_value(req: PointValueRequest):
+    """Set the point value (£ per point). Multiplies all rule stakes."""
+    if req.value < 0.5 or req.value > 100:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "Point value must be between 0.5 and 100"},
+        )
+    engine.point_value = round(req.value, 2)
+    engine._save_state()
+    return {"point_value": engine.point_value}
 
 
 @app.get("/api/engine/spread-rejections")

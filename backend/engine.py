@@ -112,10 +112,12 @@ class LayEngine:
         self.countries: list[str] = ["GB", "IE"]  # Configurable at runtime
         self.spread_control: bool = False  # Spread validation off by default
         self.spread_rejections: list[dict] = []  # Log of rejected bets
+        self.point_value: float = 1.0  # £ per point (multiplier for all stakes)
 
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
         self._password: Optional[str] = None
+        self._last_balance_fetch: float = 0  # timestamp for caching
 
         # ── Session tracking ──
         self.sessions: list[dict] = []
@@ -152,6 +154,7 @@ class LayEngine:
                 "dry_run": self.dry_run,
                 "countries": self.countries,
                 "spread_control": self.spread_control,
+                "point_value": self.point_value,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -204,6 +207,7 @@ class LayEngine:
             self.dry_run = data.get("dry_run", DRY_RUN)
             self.countries = data.get("countries", ["GB", "IE"])
             self.spread_control = data.get("spread_control", False)
+            self.point_value = data.get("point_value", 1.0)
             self.balance = data.get("balance")
 
             logger.info(
@@ -610,6 +614,11 @@ class LayEngine:
             runners=runners_with_prices,
         )
 
+        # Apply point value multiplier to stakes
+        if self.point_value != 1.0:
+            for instruction in result.instructions:
+                instruction.size = round(instruction.size * self.point_value, 2)
+
         self.results.append(result.to_dict())
 
         if result.skipped:
@@ -731,6 +740,17 @@ class LayEngine:
         """Return current engine state for the frontend."""
         now = datetime.now(timezone.utc)
 
+        # Auto-refresh balance every 30 seconds
+        if self.client and self.is_authenticated:
+            if time.time() - self._last_balance_fetch > 30:
+                try:
+                    fresh_balance = self.client.get_account_balance()
+                    if fresh_balance is not None:
+                        self.balance = fresh_balance
+                    self._last_balance_fetch = time.time()
+                except Exception:
+                    pass
+
         # Upcoming = not yet processed
         upcoming = []
         for m in self.markets:
@@ -756,6 +776,7 @@ class LayEngine:
             "dry_run": self.dry_run,
             "countries": self.countries,
             "spread_control": self.spread_control,
+            "point_value": self.point_value,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
