@@ -2,6 +2,12 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [1.7.0] — 2026-02-25
+
+### Changed
+- **AI agent switched back to Anthropic Claude** — Replaced Gemini 2.5 Flash with Claude Sonnet 4.6 across all AI endpoints (analysis, chat, reports).
+- Updated `anthropic` SDK to v0.83.0, removed `google-genai` dependency.
+
 ## [1.6.0] — 2026-02-22
 
 ### Added

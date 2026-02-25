@@ -29,16 +29,16 @@ from pydantic import BaseModel
 
 from engine import LayEngine
 
-# ── Gemini client (lazy — only created when analysis is requested) ──
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-_gemini_client = None
+# ── Anthropic client (lazy — only created when analysis is requested) ──
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_anthropic_client = None
 
-def get_gemini():
-    global _gemini_client
-    if _gemini_client is None:
-        from google import genai
-        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    return _gemini_client
+def get_anthropic():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _anthropic_client
 
 # ── OpenAI client (lazy — for Whisper STT + TTS) ──
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -725,10 +725,10 @@ RULES_DESCRIPTION = """The CHIMERA Lay Engine uses these rules on horse racing W
 @app.post("/api/sessions/analyse")
 def analyse_sessions(req: AnalyseRequest):
     """AI-powered analysis of all sessions for a given date."""
-    if not GEMINI_API_KEY:
+    if not ANTHROPIC_API_KEY:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": "GEMINI_API_KEY not configured"},
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
         )
 
     day_sessions = [
@@ -767,12 +767,13 @@ Provide exactly 6-10 concise bullet points covering:
 Format each point as a single line starting with a bullet (•). Be specific with numbers. No headers, no preamble — just the bullet points."""
 
     try:
-        client = get_gemini()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
+        client = get_anthropic()
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
         )
-        analysis_text = response.text
+        analysis_text = message.content[0].text
         points = [
             line.strip().lstrip("•").lstrip("- ").strip()
             for line in analysis_text.strip().split("\n")
@@ -792,10 +793,10 @@ Format each point as a single line starting with a bullet (•). Be specific wit
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     """Interactive chat with AI about session data."""
-    if not GEMINI_API_KEY:
+    if not ANTHROPIC_API_KEY:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": "GEMINI_API_KEY not configured"},
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
         )
 
     # Build session context
@@ -841,18 +842,14 @@ If asked for analysis, provide actionable insights. Keep responses conversationa
     messages.append({"role": "user", "content": req.message})
 
     try:
-        client = get_gemini()
-        # Build Gemini contents: system instruction + conversation history
-        gemini_contents = [{"role": "user", "parts": [{"text": system_prompt}]},
-                          {"role": "model", "parts": [{"text": "Understood. I'm CHIMERA, ready to analyse your session data."}]}]
-        for m in messages:
-            role = "user" if m["role"] == "user" else "model"
-            gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=gemini_contents,
+        client = get_anthropic()
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages,
         )
-        return {"reply": response.text}
+        return {"reply": response.content[0].text}
     except Exception as e:
         logging.error(f"Chat failed: {e}")
         return JSONResponse(
@@ -1082,10 +1079,10 @@ def generate_report(req: GenerateReportRequest):
     Then instructs the AI to produce a structured JSON report
     conforming to the ChimeraReport schema.
     """
-    if not GEMINI_API_KEY:
+    if not ANTHROPIC_API_KEY:
         return JSONResponse(
             status_code=500,
-            content={"status": "error", "message": "GEMINI_API_KEY not configured"},
+            content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
         )
 
     if req.template not in REPORT_TEMPLATES:
@@ -1137,12 +1134,13 @@ def generate_report(req: GenerateReportRequest):
     )
 
     try:
-        client = get_gemini()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
+        client = get_anthropic()
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
         )
-        report_text = response.text
+        report_text = message.content[0].text
 
         # Parse the JSON response — strip any markdown fencing if present
         import re
