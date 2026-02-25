@@ -165,6 +165,101 @@ def test_favourite_identification():
     print("✓ FAVOURITE: Horse_3 (1.8) correctly identified from unsorted list")
 
 
+# ─────────────────────────────────────────────────────────────
+#  JOINT / CLOSE-ODDS TESTS
+# ─────────────────────────────────────────────────────────────
+
+def test_rule2_joint_exact():
+    """Rule 2: exact joint favourites (same odds) → £1 each."""
+    # Both at 3.0 — gap = 0.0 ≤ 0.2
+    runners = make_runners([3.0, 3.0, 8.0])
+    result = apply_rules("M13", "Test", "Ascot", "2026-02-08T14:00:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 2, f"Expected 2 bets, got {len(result.instructions)}"
+    assert result.instructions[0].size == 1.0, f"Expected £1 on fav, got {result.instructions[0].size}"
+    assert result.instructions[1].size == 1.0, f"Expected £1 on 2nd fav, got {result.instructions[1].size}"
+    assert result.instructions[0].price == 3.0
+    assert result.instructions[1].price == 3.0
+    assert "JOINT" in result.rule_applied
+    print("✓ RULE 2 JOINT (exact 3.0/3.0): £1 fav + £1 2nd fav")
+
+
+def test_rule2_joint_close_gap():
+    """Rule 2: near-joint (gap = 0.2) → £1 each."""
+    # Fav 3.1, 2nd 3.3 → gap 0.2 exactly (Mark's example)
+    runners = make_runners([3.1, 3.3, 9.0])
+    result = apply_rules("M14", "Test", "Cheltenham", "2026-02-08T14:30:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 2
+    assert result.instructions[0].size == 1.0
+    assert result.instructions[1].size == 1.0
+    assert result.instructions[0].price == 3.1
+    assert result.instructions[1].price == 3.3
+    assert "JOINT" in result.rule_applied
+    print("✓ RULE 2 JOINT (3.1/3.3, gap 0.2): £1 fav + £1 2nd fav")
+
+
+def test_rule2_not_joint_gap_above_threshold():
+    """Rule 2: gap just above 0.2 → normal £2 on fav only."""
+    # Fav 3.1, 2nd 3.35 → gap 0.25 > 0.2
+    runners = make_runners([3.1, 3.35, 9.0])
+    result = apply_rules("M15", "Test", "Kempton", "2026-02-08T15:00:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 1
+    assert result.instructions[0].size == 2.0
+    assert "JOINT" not in result.rule_applied
+    print("✓ RULE 2 normal (3.1/3.35, gap 0.25 > 0.2): £2 fav only")
+
+
+def test_rule1_joint_close_gap():
+    """Rule 1: near-joint favourites in < 2.0 range → £1.50 each."""
+    # Fav 1.6, 2nd 1.75 → gap 0.15 ≤ 0.2
+    runners = make_runners([1.6, 1.75, 5.0])
+    result = apply_rules("M16", "Test", "York", "2026-02-08T15:30:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 2
+    assert result.instructions[0].size == 1.5, f"Expected £1.50 on fav, got {result.instructions[0].size}"
+    assert result.instructions[1].size == 1.5, f"Expected £1.50 on 2nd fav, got {result.instructions[1].size}"
+    assert result.instructions[0].price == 1.6
+    assert result.instructions[1].price == 1.75
+    assert "JOINT" in result.rule_applied
+    # Total stake = £3, same as normal Rule 1
+    total = sum(i.size for i in result.instructions)
+    assert total == 3.0, f"Expected £3 total, got {total}"
+    print("✓ RULE 1 JOINT (1.6/1.75, gap 0.15): £1.50 fav + £1.50 2nd fav (£3 total)")
+
+
+def test_rule1_not_joint_normal():
+    """Rule 1: gap > 0.2 → normal £3 on fav only."""
+    # Fav 1.5, 2nd 2.0 → gap 0.5 > 0.2
+    runners = make_runners([1.5, 2.0, 5.0])
+    result = apply_rules("M17", "Test", "Newmarket", "2026-02-08T16:00:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 1
+    assert result.instructions[0].size == 3.0
+    assert "JOINT" not in result.rule_applied
+    print("✓ RULE 1 normal (1.5/2.0, gap 0.5): £3 fav only — no split")
+
+
+def test_rule3_joint_label():
+    """Rule 3: close-odds joint in >5.0 range labelled RULE_3_JOINT."""
+    # Fav 6.0, 2nd 6.2 → gap 0.2 ≤ 0.2 → RULE_3_JOINT (still £1+£1)
+    runners = make_runners([6.0, 6.2, 15.0])
+    result = apply_rules("M18", "Test", "Sandown", "2026-02-08T16:30:00Z", runners)
+
+    assert not result.skipped
+    assert len(result.instructions) == 2
+    assert result.instructions[0].size == 1.0
+    assert result.instructions[1].size == 1.0
+    assert "JOINT" in result.rule_applied
+    print("✓ RULE 3 JOINT (6.0/6.2, gap 0.2): labelled RULE_3_JOINT, £1+£1")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("CHIMERA Lay Engine — Rule Verification")
@@ -184,6 +279,13 @@ if __name__ == "__main__":
         test_no_runners,
         test_no_lay_prices,
         test_favourite_identification,
+        # Joint / close-odds tests
+        test_rule2_joint_exact,
+        test_rule2_joint_close_gap,
+        test_rule2_not_joint_gap_above_threshold,
+        test_rule1_joint_close_gap,
+        test_rule1_not_joint_normal,
+        test_rule3_joint_label,
     ]
 
     passed = 0

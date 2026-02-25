@@ -238,10 +238,10 @@ def get_state():
 @app.get("/api/rules")
 def get_rules():
     """Return the active rule set."""
-    from rules import SPREAD_THRESHOLDS
+    from rules import SPREAD_THRESHOLDS, CLOSE_ODDS_THRESHOLD
     return {
         "strategy": "UK_IE_Favourite_Lay",
-        "version": "2.0",
+        "version": "2.1",
         "timing": "pre_off",
         "markets": {
             "event_type": "7 (Horse Racing)",
@@ -253,21 +253,25 @@ def get_rules():
                 "id": "RULE_1",
                 "condition": "Favourite odds < 2.0",
                 "action": "LAY favourite @ £3",
+                "jofs_action": "LAY favourite @ £1.50 + LAY 2nd favourite @ £1.50",
             },
             {
                 "id": "RULE_2",
                 "condition": "Favourite odds 2.0 – 5.0",
                 "action": "LAY favourite @ £2",
+                "jofs_action": "LAY favourite @ £1 + LAY 2nd favourite @ £1",
             },
             {
                 "id": "RULE_3A",
                 "condition": "Favourite odds > 5.0 AND gap to 2nd favourite < 2",
                 "action": "LAY favourite @ £1 + LAY 2nd favourite @ £1",
+                "jofs_action": "LAY favourite @ £1 + LAY 2nd favourite @ £1 (labelled RULE_3_JOINT when gap ≤ 0.2)",
             },
             {
                 "id": "RULE_3B",
                 "condition": "Favourite odds > 5.0 AND gap to 2nd favourite ≥ 2",
                 "action": "LAY favourite @ £1",
+                "jofs_action": "Unchanged (close-odds cannot occur when gap ≥ 2)",
             },
         ],
         "spread_control": {
@@ -279,6 +283,14 @@ def get_rules():
                 }
                 for lo, hi, threshold in SPREAD_THRESHOLDS
             ],
+        },
+        "jofs_control": {
+            "enabled": engine.jofs_control,
+            "close_odds_threshold": CLOSE_ODDS_THRESHOLD,
+            "description": (
+                "Joint/Close-Odds Favourite Split. When the gap between 1st and 2nd "
+                f"favourite is ≤ {CLOSE_ODDS_THRESHOLD}, stake is split evenly across both runners."
+            ),
         },
     }
 
@@ -316,6 +328,17 @@ def toggle_spread_control():
     engine.spread_control = not engine.spread_control
     engine._save_state()
     return {"spread_control": engine.spread_control}
+
+
+@app.post("/api/engine/jofs-control")
+def toggle_jofs_control():
+    """Toggle Joint/Close-Odds Favourite Split (JOFS) on/off.
+    When enabled, markets where the gap between 1st and 2nd favourite is
+    ≤ 0.2 odds points have their stake split evenly across both runners
+    rather than being placed solely on the favourite."""
+    engine.jofs_control = not engine.jofs_control
+    engine._save_state()
+    return {"jofs_control": engine.jofs_control}
 
 
 @app.post("/api/engine/point-value")
@@ -717,9 +740,14 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
 
 RULES_DESCRIPTION = """The CHIMERA Lay Engine uses these rules on horse racing WIN markets:
 - RULE 1: Favourite odds < 2.0 -> £3 lay on favourite
+  RULE 1 JOINT (JOFS): if gap to 2nd fav <= 0.2 -> £1.50 lay fav + £1.50 lay 2nd fav
 - RULE 2: Favourite odds 2.0-5.0 -> £2 lay on favourite
+  RULE 2 JOINT (JOFS): if gap to 2nd fav <= 0.2 -> £1 lay fav + £1 lay 2nd fav
 - RULE 3A: Favourite odds > 5.0 AND gap to 2nd fav < 2 -> £1 lay fav + £1 lay 2nd fav
-- RULE 3B: Favourite odds > 5.0 AND gap to 2nd fav >= 2 -> £1 lay fav only"""
+  RULE 3 JOINT (JOFS): same as 3A but labelled RULE_3_JOINT when gap <= 0.2
+- RULE 3B: Favourite odds > 5.0 AND gap to 2nd fav >= 2 -> £1 lay fav only
+JOFS (Joint/Close-Odds Favourite Split): protective measure applied when the market
+has near-identical favourites, splitting the stake rather than doubling down on one."""
 
 
 @app.post("/api/sessions/analyse")

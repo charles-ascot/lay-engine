@@ -6,10 +6,19 @@ Pure rule-based lay betting. No intelligence. No ML. Just IF/WHEN logic.
 RULES:
   1. All bets are LAY bets on the favourite (lowest odds runner)
   2. If favourite odds < 2.0  → £3 lay on favourite
+     JOINT/CLOSE (gap ≤ 0.2): split as £1.50 fav + £1.50 2nd fav
   3. If favourite odds 2.0–5.0 → £2 lay on favourite
+     JOINT/CLOSE (gap ≤ 0.2): split as £1.00 fav + £1.00 2nd fav
   4. If favourite odds > 5.0:
      a. If gap to 2nd favourite < 2 → £1 lay on fav + £1 lay on 2nd fav
      b. If gap to 2nd favourite ≥ 2 → £1 lay on favourite only
+
+JOINT/CLOSE FAVOURITE RULE (applies to Rules 1–3):
+  When the gap between 1st and 2nd favourite is ≤ CLOSE_ODDS_THRESHOLD (0.2),
+  the market is treated as a joint-favourite race.  The full stake for the
+  applicable rule is split evenly across both runners rather than laid on
+  the favourite alone.  This protects against laying a horse that isn't
+  actually the dominant favourite at race time.
 """
 
 from dataclasses import dataclass, field
@@ -19,6 +28,11 @@ from datetime import datetime
 # Maximum lay odds — skip markets where the favourite exceeds this.
 # Odds like 560.00 indicate an illiquid market with no real trading.
 MAX_LAY_ODDS = 50.0
+
+# Close-odds / joint-favourite threshold.
+# When the gap between 1st and 2nd favourite is at or below this value,
+# the stake is split evenly across both runners.  Applies to all rules.
+CLOSE_ODDS_THRESHOLD = 0.2
 
 
 @dataclass
@@ -142,6 +156,7 @@ def apply_rules(
     venue: str,
     race_time: str,
     runners: list[Runner],
+    jofs_enabled: bool = True,
 ) -> RuleResult:
     """
     Apply the lay betting rules to a market.
@@ -149,7 +164,9 @@ def apply_rules(
 
     THE RULES (exhaustive):
       - Fav odds < 2.0  → £3 lay on fav
+        JOINT/CLOSE (gap ≤ 0.2): £1.50 fav + £1.50 2nd fav
       - Fav odds 2.0–5.0 → £2 lay on fav
+        JOINT/CLOSE (gap ≤ 0.2): £1.00 fav + £1.00 2nd fav
       - Fav odds > 5.0 AND gap to 2nd fav < 2 → £1 lay fav + £1 lay 2nd fav
       - Fav odds > 5.0 AND gap to 2nd fav ≥ 2 → £1 lay fav only
     """
@@ -179,30 +196,86 @@ def apply_rules(
         result.skip_reason = f"Favourite odds {odds} exceed max threshold ({MAX_LAY_ODDS})"
         return result
 
-    # ─── RULE 1: Favourite odds < 2.0 → £3 lay ───
+    # ─── Joint/Close-odds detection ───
+    # Compute gap between 1st and 2nd favourite up front.
+    # When jofs_enabled=False the close_odds flag stays False, reverting
+    # Rules 1 & 2 to single-favourite behaviour.
+    fav_gap = None
+    close_odds = False
+    if second_fav is not None:
+        fav_gap = round(second_fav.best_available_to_lay - odds, 4)
+        close_odds = jofs_enabled and (fav_gap <= CLOSE_ODDS_THRESHOLD)
+
+    # ─── RULE 1: Favourite odds < 2.0 ───
     if odds < 2.0:
-        result.rule_applied = f"RULE_1: Fav odds {odds} < 2.0 → £3 lay"
-        result.instructions.append(LayInstruction(
-            market_id=market_id,
-            selection_id=fav.selection_id,
-            runner_name=fav.runner_name,
-            price=odds,
-            size=3.0,
-            rule_applied="RULE_1_ODDS_UNDER_2",
-        ))
+        if close_odds:
+            # Joint/close favourite — split £3 as £1.50 each
+            result.rule_applied = (
+                f"RULE_1_JOINT: Fav {odds} < 2.0, 2nd fav {second_fav.best_available_to_lay} "
+                f"(gap {fav_gap:.2f} ≤ {CLOSE_ODDS_THRESHOLD}) → £1.50 fav + £1.50 2nd fav"
+            )
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=fav.selection_id,
+                runner_name=fav.runner_name,
+                price=odds,
+                size=1.5,
+                rule_applied="RULE_1_JOINT_FAV",
+            ))
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=second_fav.selection_id,
+                runner_name=second_fav.runner_name,
+                price=second_fav.best_available_to_lay,
+                size=1.5,
+                rule_applied="RULE_1_JOINT_2ND",
+            ))
+        else:
+            result.rule_applied = f"RULE_1: Fav odds {odds} < 2.0 → £3 lay"
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=fav.selection_id,
+                runner_name=fav.runner_name,
+                price=odds,
+                size=3.0,
+                rule_applied="RULE_1_ODDS_UNDER_2",
+            ))
         return result
 
-    # ─── RULE 2: Favourite odds 2.0–5.0 → £2 lay ───
+    # ─── RULE 2: Favourite odds 2.0–5.0 ───
     if 2.0 <= odds <= 5.0:
-        result.rule_applied = f"RULE_2: Fav odds {odds} in 2.0–5.0 → £2 lay"
-        result.instructions.append(LayInstruction(
-            market_id=market_id,
-            selection_id=fav.selection_id,
-            runner_name=fav.runner_name,
-            price=odds,
-            size=2.0,
-            rule_applied="RULE_2_ODDS_2_TO_5",
-        ))
+        if close_odds:
+            # Joint/close favourite — split £2 as £1 each
+            result.rule_applied = (
+                f"RULE_2_JOINT: Fav {odds} in 2.0–5.0, 2nd fav {second_fav.best_available_to_lay} "
+                f"(gap {fav_gap:.2f} ≤ {CLOSE_ODDS_THRESHOLD}) → £1 fav + £1 2nd fav"
+            )
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=fav.selection_id,
+                runner_name=fav.runner_name,
+                price=odds,
+                size=1.0,
+                rule_applied="RULE_2_JOINT_FAV",
+            ))
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=second_fav.selection_id,
+                runner_name=second_fav.runner_name,
+                price=second_fav.best_available_to_lay,
+                size=1.0,
+                rule_applied="RULE_2_JOINT_2ND",
+            ))
+        else:
+            result.rule_applied = f"RULE_2: Fav odds {odds} in 2.0–5.0 → £2 lay"
+            result.instructions.append(LayInstruction(
+                market_id=market_id,
+                selection_id=fav.selection_id,
+                runner_name=fav.runner_name,
+                price=odds,
+                size=2.0,
+                rule_applied="RULE_2_ODDS_2_TO_5",
+            ))
         return result
 
     # ─── RULE 3: Favourite odds > 5.0 ───
@@ -221,12 +294,13 @@ def apply_rules(
             ))
             return result
 
-        gap = second_fav.best_available_to_lay - odds
-
-        if gap < 2.0:
+        # fav_gap already computed (not None since second_fav is not None)
+        if fav_gap < 2.0:
             # Gap < 2 → £1 on fav + £1 on 2nd fav
+            # Label as JOINT when within the close-odds threshold
+            rule_tag = "RULE_3_JOINT" if close_odds else "RULE_3A"
             result.rule_applied = (
-                f"RULE_3A: Fav odds {odds} > 5.0, gap {gap:.2f} < 2 "
+                f"{rule_tag}: Fav odds {odds} > 5.0, gap {fav_gap:.2f} < 2 "
                 f"→ £1 fav + £1 2nd fav"
             )
             result.instructions.append(LayInstruction(
@@ -235,7 +309,7 @@ def apply_rules(
                 runner_name=fav.runner_name,
                 price=odds,
                 size=1.0,
-                rule_applied="RULE_3A_FAV",
+                rule_applied=f"{rule_tag}_FAV",
             ))
             result.instructions.append(LayInstruction(
                 market_id=market_id,
@@ -243,14 +317,14 @@ def apply_rules(
                 runner_name=second_fav.runner_name,
                 price=second_fav.best_available_to_lay,
                 size=1.0,
-                rule_applied="RULE_3A_SECOND_FAV",
+                rule_applied=f"{rule_tag}_2ND",
             ))
             return result
 
         else:
             # Gap ≥ 2 → £1 on fav only
             result.rule_applied = (
-                f"RULE_3B: Fav odds {odds} > 5.0, gap {gap:.2f} ≥ 2 "
+                f"RULE_3B: Fav odds {odds} > 5.0, gap {fav_gap:.2f} ≥ 2 "
                 f"→ £1 fav only"
             )
             result.instructions.append(LayInstruction(

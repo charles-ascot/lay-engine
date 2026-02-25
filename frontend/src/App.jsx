@@ -428,6 +428,10 @@ function Dashboard() {
     await api('/api/engine/spread-control', { method: 'POST' })
     fetchState()
   }
+  const handleToggleJofsControl = async () => {
+    await api('/api/engine/jofs-control', { method: 'POST' })
+    fetchState()
+  }
   const handleSetPointValue = async (value) => {
     await api('/api/engine/point-value', {
       method: 'POST',
@@ -521,6 +525,13 @@ function Dashboard() {
         >
           {state.spread_control ? '📊 Spread Control ON' : '📊 Spread Control OFF'}
         </button>
+        <button
+          className={`btn ${state.jofs_control ? 'btn-warning' : 'btn-secondary'}`}
+          onClick={handleToggleJofsControl}
+          title="JOFS Control: when the gap between 1st and 2nd favourite is ≤ 0.2, stake is split evenly across both runners"
+        >
+          {state.jofs_control ? '⚖️ JOFS Control ON' : '⚖️ JOFS Control OFF'}
+        </button>
         <button className="btn btn-secondary" onClick={handleResetBets}>
           Clear Bets & Re-process
         </button>
@@ -532,6 +543,7 @@ function Dashboard() {
           <span>Processed: <strong>{s.processed || 0}</strong></span>
           <span>Bets: <strong>{s.bets_placed || 0}</strong></span>
           {s.spread_rejections > 0 && <span>Spread Rejected: <strong style={{color:'#f59e0b'}}>{s.spread_rejections}</strong></span>}
+          {s.jofs_splits > 0 && <span>JOFS Splits: <strong style={{color:'#a78bfa'}}>{s.jofs_splits}</strong></span>}
           <span>Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
           <span>Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
         </div>

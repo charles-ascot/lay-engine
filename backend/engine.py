@@ -113,6 +113,7 @@ class LayEngine:
         self.spread_control: bool = False  # Spread validation off by default
         self.spread_rejections: list[dict] = []  # Log of rejected bets
         self.point_value: float = 1.0  # £ per point (multiplier for all stakes)
+        self.jofs_control: bool = True   # Joint/Close-Odds Favourite Split on by default
 
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
@@ -154,6 +155,7 @@ class LayEngine:
                 "dry_run": self.dry_run,
                 "countries": self.countries,
                 "spread_control": self.spread_control,
+                "jofs_control": self.jofs_control,
                 "point_value": self.point_value,
                 "status": self.status,
                 "balance": self.balance,
@@ -207,6 +209,7 @@ class LayEngine:
             self.dry_run = data.get("dry_run", DRY_RUN)
             self.countries = data.get("countries", ["GB", "IE"])
             self.spread_control = data.get("spread_control", False)
+            self.jofs_control = data.get("jofs_control", True)
             self.point_value = data.get("point_value", 1.0)
             self.balance = data.get("balance")
 
@@ -612,6 +615,7 @@ class LayEngine:
             venue=market["venue"],
             race_time=market["race_time"],
             runners=runners_with_prices,
+            jofs_enabled=self.jofs_control,
         )
 
         # Apply point value multiplier to stakes
@@ -776,6 +780,7 @@ class LayEngine:
             "dry_run": self.dry_run,
             "countries": self.countries,
             "spread_control": self.spread_control,
+            "jofs_control": self.jofs_control,
             "point_value": self.point_value,
             "date": self.day_started,
             "last_scan": self.last_scan,
@@ -785,6 +790,10 @@ class LayEngine:
                 "processed": len(self.processed_markets),
                 "bets_placed": len(self.bets_placed),
                 "spread_rejections": len(self.spread_rejections),
+                "jofs_splits": sum(
+                    1 for b in self.bets_placed
+                    if "JOINT" in b.get("rule_applied", "")
+                ),
                 "total_stake": round(total_stake, 2),
                 "total_liability": round(total_liability, 2),
             },
