@@ -2,6 +2,33 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [2.1.0] — 2026-02-26
+
+### Added
+- **Navy/teal financial terminal theme** — Dark navy backgrounds (#0c1421), teal accents (#06b6d4), premium financial terminal aesthetic with CSS custom properties.
+- **Pegasus branding** — SVG pegasus icon in header and login panel.
+- **Markets tab restored** — Live Betfair market view with 3-level back/lay price depth, auto-refresh, market selector, IN WINDOW / MONITORING badges, and **odds movement chart** per market.
+- **Settled tab restored** — Settled bets with P/L from Betfair, date range presets (Today / Yesterday / 7 Days / Month), Won/Lost/All filter, day-by-day grouping with strike rate, AI Report button per day, and Excel export.
+- **Chart.js integration** — Added `chart.js` and `react-chartjs-2` for interactive data visualisation.
+- **Daily P/L bar chart** — Colour-coded daily profit/loss on the Settled tab.
+- **Cumulative P/L line chart** — Running total P/L trend with teal fill on Settled and Backtest tabs.
+- **Odds Band chart** — Stacked bar chart showing win/loss distribution across odds bands (1–2, 2–3, 3–5, 5–8, 8+).
+- **Odds Drift chart** — Line chart showing favourite and second-favourite odds movement over time using monitoring snapshots.
+- **Backtest & Analysis tab** — Stats cards (total P/L, strike rate, bets, trading days), cumulative/daily P/L charts, odds band analysis, and drift analysis from live monitoring data.
+- **Stat cards** — Overview cards with large KPI numbers on the Backtest tab.
+- **PriceCell component** — Styled back (blue) and lay (pink) price cells for market book display.
+
+### Changed
+- **Tab restructure** — Expanded to 7 data-rich tabs: Live | Markets | Settled | History | Backtest | Reports | Engine. Default tab: Live.
+- **Engine tab** — Now includes API Keys section (combined from separate tab) alongside power, processing, risk controls, session info, and errors.
+- **Color palette** — Navy (#0c1421) background, teal (#06b6d4) accent, pink (#f472b6) lay prices, blue (#60a5fa) back prices, green (#10b981) success, red (#ef4444) danger.
+- **Stats ribbon** — Updated to navy/teal theme with glowing status dots.
+- **Chat drawer** — Navy background with teal accent border and dark message bubbles.
+- **Login panel** — Dark navy card with pegasus icon and teal submit button.
+
+### Removed
+- Allen Gray white corporate theme (v2.0.0) — replaced with navy/teal financial terminal.
+
 ## [2.0.0] — 2026-02-26
 
 ### Changed
