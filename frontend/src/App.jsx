@@ -365,29 +365,41 @@ function CumulativePLChart({ daysSummary }) {
 function OddsDriftChart({ snapshots, title }) {
   if (!snapshots || snapshots.length === 0) return null
   const labels = snapshots.map(s => {
+    if (s.minutes_to_off != null) return `${Math.round(s.minutes_to_off)}m`
     const d = new Date(s.timestamp)
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   })
-  const favOdds = snapshots.map(s => s.fav_odds || s.favourite_odds || null)
-  const secOdds = snapshots.map(s => s.sec_odds || s.second_fav_odds || null)
+  // Snapshots contain runners[] array with lay_odds — extract fav (index 0) and 2nd fav (index 1)
+  const favOdds = snapshots.map(s => {
+    if (s.runners && s.runners.length > 0) return s.runners[0].lay_odds
+    return s.fav_odds || s.favourite_odds || null
+  })
+  const secOdds = snapshots.map(s => {
+    if (s.runners && s.runners.length > 1) return s.runners[1].lay_odds
+    return s.sec_odds || s.second_fav_odds || null
+  })
+
+  // Try to get runner names from first snapshot
+  const favName = snapshots[0]?.runners?.[0]?.runner_name || 'Favourite'
+  const secName = snapshots[0]?.runners?.[1]?.runner_name || '2nd Favourite'
 
   const datasets = [{
-    label: 'Favourite',
+    label: favName,
     data: favOdds,
     borderColor: '#06b6d4',
     backgroundColor: 'rgba(6, 182, 212, 0.1)',
     tension: 0.3,
-    pointRadius: 2,
+    pointRadius: 3,
     pointBackgroundColor: '#06b6d4',
   }]
   if (secOdds.some(v => v != null)) {
     datasets.push({
-      label: '2nd Favourite',
+      label: secName,
       data: secOdds,
       borderColor: '#f472b6',
       backgroundColor: 'rgba(244, 114, 182, 0.1)',
       tension: 0.3,
-      pointRadius: 2,
+      pointRadius: 3,
       pointBackgroundColor: '#f472b6',
     })
   }
@@ -615,8 +627,8 @@ function MarketTab() {
             </thead>
             <tbody>
               {book.runners.map((r, i) => {
-                const backs = r.back_prices || []
-                const lays = r.lay_prices || []
+                const backs = r.back || r.back_prices || []
+                const lays = r.lay || r.lay_prices || []
                 return (
                   <tr key={i}>
                     <td style={{ fontWeight: 600 }}>{r.runner_name}{r.sort_priority === 1 ? ' ★' : ''}</td>
@@ -634,13 +646,25 @@ function MarketTab() {
               })}
             </tbody>
           </table>
-          {book.book_percentage != null && (
-            <div style={{ marginTop: 10, fontSize: 11 }}>
-              Book: <span className={`book-pct ${book.book_percentage > 105 ? 'over' : 'fair'}`}>
-                {book.book_percentage.toFixed(1)}%
-              </span>
-            </div>
-          )}
+          {(() => {
+            // Calculate book percentage from best back prices
+            const bookPct = book.runners.reduce((sum, r) => {
+              const bestBack = (r.back || [])[0]?.price
+              return bestBack ? sum + (100 / bestBack) : sum
+            }, 0)
+            return bookPct > 0 ? (
+              <div style={{ marginTop: 10, fontSize: 11 }}>
+                Book: <span className={`book-pct ${bookPct > 105 ? 'over' : 'fair'}`}>
+                  {bookPct.toFixed(1)}%
+                </span>
+                {' · '}<span style={{ color: 'var(--text-muted)' }}>Matched: £{(book.total_matched || 0).toLocaleString()}</span>
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+                No active book yet — market {currentMarket.minutes_to_off > 60 ? `${Math.round(currentMarket.minutes_to_off / 60)}h` : `${Math.round(currentMarket.minutes_to_off)}m`} from off
+              </div>
+            )
+          })()}
         </>
       ) : (
         <p className="empty">Select a market above to view the book.</p>
