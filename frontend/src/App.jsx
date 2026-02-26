@@ -363,7 +363,7 @@ function CumulativePLChart({ daysSummary }) {
 }
 
 function OddsDriftChart({ snapshots, title }) {
-  if (!snapshots || snapshots.length === 0) return null
+  if (!snapshots || snapshots.length < 3) return null // Need 3+ points for a meaningful chart
   const labels = snapshots.map(s => {
     if (s.minutes_to_off != null) return `${Math.round(s.minutes_to_off)}m`
     const d = new Date(s.timestamp)
@@ -672,7 +672,13 @@ function MarketTab() {
 
       {monitoringData && monitoringData.length > 0 && (
         <div style={{ marginTop: 20 }}>
-          <OddsDriftChart snapshots={monitoringData} title={`Odds Movement — ${currentMarket.venue || ''}`} />
+          {monitoringData.length < 3 ? (
+            <div className="empty-state">
+              Collecting odds data — {monitoringData.length} snapshot{monitoringData.length !== 1 ? 's' : ''} so far (need 3+ for drift chart). Snapshots are taken every 5 minutes for markets outside the processing window.
+            </div>
+          ) : (
+            <OddsDriftChart snapshots={monitoringData} title={`Odds Movement — ${currentMarket.venue || ''}`} />
+          )}
         </div>
       )}
     </div>
@@ -949,15 +955,59 @@ function BacktestTab() {
   )
 }
 
+// ── Win/Loss by Day Chart ──
+function WinLossChart({ daysSummary }) {
+  if (!daysSummary || Object.keys(daysSummary).length === 0) return null
+  const sorted = Object.entries(daysSummary).sort(([a], [b]) => a.localeCompare(b))
+  const labels = sorted.map(([d]) => d.slice(5))
+  const wins = sorted.map(([, v]) => v.wins)
+  const losses = sorted.map(([, v]) => -v.losses) // negative for visual separation
+
+  return (
+    <div className="chart-container">
+      <h3>Win / Loss by Day</h3>
+      <div className="chart-wrapper">
+        <Bar data={{
+          labels,
+          datasets: [
+            { label: 'Wins', data: wins, backgroundColor: 'rgba(16, 185, 129, 0.7)', borderColor: '#10b981', borderWidth: 1, borderRadius: 3 },
+            { label: 'Losses', data: losses, backgroundColor: 'rgba(239, 68, 68, 0.7)', borderColor: '#ef4444', borderWidth: 1, borderRadius: 3 },
+          ],
+        }} options={{
+          ...CHART_DEFAULTS,
+          plugins: {
+            ...CHART_DEFAULTS.plugins,
+            legend: { display: true, labels: { color: '#94a3b8', font: { family: 'Inter', size: 10 } } },
+            tooltip: { ...CHART_DEFAULTS.plugins.tooltip, callbacks: { label: (ctx) => `${ctx.dataset.label}: ${Math.abs(ctx.raw)}` } },
+          },
+          scales: {
+            ...CHART_DEFAULTS.scales,
+            x: { ...CHART_DEFAULTS.scales.x, stacked: true },
+            y: { ...CHART_DEFAULTS.scales.y, stacked: true, ticks: { ...CHART_DEFAULTS.scales.y.ticks, callback: v => Math.abs(v) } },
+          },
+        }} />
+      </div>
+    </div>
+  )
+}
+
 // ── History Tab ──
 function HistoryTab({ openChat }) {
   const [sessions, setSessions] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [settledData, setSettledData] = useState(null)
 
   useEffect(() => {
-    api('/api/sessions').then(data => { setSessions(data.sessions || []); setLoading(false) }).catch(() => setLoading(false))
+    Promise.all([
+      api('/api/sessions').then(data => data.sessions || []).catch(() => []),
+      api('/api/settled?date_from=2026-01-01').then(d => d).catch(() => null),
+    ]).then(([ss, sd]) => {
+      setSessions(ss)
+      setSettledData(sd)
+      setLoading(false)
+    })
   }, [])
   useEffect(() => {
     if (!selectedId) { setDetail(null); return }
@@ -1031,6 +1081,12 @@ function HistoryTab({ openChat }) {
           </button>
         )}
       </div>
+      {settledData?.days_summary && Object.keys(settledData.days_summary).length > 1 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <CumulativePLChart daysSummary={settledData.days_summary} />
+          <WinLossChart daysSummary={settledData.days_summary} />
+        </div>
+      )}
       {sessions.length === 0 ? <p className="empty">No snapshots recorded yet. Start the engine to create one.</p> : (
         <div className="snapshots-grouped">
           {sortedDates.map(date => (
