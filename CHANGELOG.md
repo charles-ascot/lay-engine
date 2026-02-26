@@ -2,6 +2,27 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [1.9.0] — 2026-02-26
+
+### Added
+- **Processing Window** — Configurable minutes-before-race threshold (default 12 min) so the engine discovers markets early but only places bets within the window. Prevents betting hours early with meaningless prices.
+- **Odds monitoring** — Markets outside the window are monitored with odds snapshots every ~5 minutes for drift analysis (up to 20 snapshots per market).
+- **Next Race Indicator** — Real-time dashboard display showing the nearest upcoming race, its venue, countdown, and IN_WINDOW / MONITORING status with a pulsing red glow when inside the window.
+- **Market selector badges** — "IN WINDOW" and "MONITORING" badges on the market dropdown for at-a-glance status.
+- `POST /api/engine/process-window` — Set the processing window (1–60 minutes).
+- `GET /api/monitoring/{market_id}` — Retrieve odds snapshots for a monitored market.
+
+### Changed
+- `engine.py` — Replaced immediate `_scan_and_process` with race-by-race timing control. Added `_monitor_market` method, `process_window` / `monitoring` / `next_race` state attributes, and persistence of window setting to GCS.
+- `main.py` — Added `ProcessWindowRequest` model, two new endpoints, updated `/api/markets` to include `in_window` and `monitoring_snapshots` fields.
+- `App.jsx` — Added window control dropdown, next race indicator, monitoring stats counter, and market selector badges.
+- `App.css` — Added styles for window control, next race indicator (with `windowPulse` animation), and window/monitoring badges.
+
+## [1.8.0] — 2026-02-25
+
+### Added
+- **Joint/Close-Odds Favourite Split (JOFS) Control** — When two or more runners share the same shortest price (joint favourites) or are within 1 tick of each other (close-odds favourites), the engine can now split the lay stake equally across them. Toggleable on/off from the dashboard.
+
 ## [1.7.0] — 2026-02-25
 
 ### Changed

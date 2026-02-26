@@ -540,6 +540,7 @@ function Dashboard() {
         </button>
         <div className="stats-row">
           <span>Markets: <strong>{s.total_markets || 0}</strong></span>
+          <span>Monitoring: <strong>{s.monitoring || 0}</strong></span>
           <span>Processed: <strong>{s.processed || 0}</strong></span>
           <span>Bets: <strong>{s.bets_placed || 0}</strong></span>
           {s.spread_rejections > 0 && <span>Spread Rejected: <strong style={{color:'#f59e0b'}}>{s.spread_rejections}</strong></span>}
@@ -559,6 +560,44 @@ function Dashboard() {
             </button>
           ))}
         </div>
+        {/* ── Processing Window ── */}
+        <div className="window-control">
+          <span className="window-label">Bet Window:</span>
+          <select
+            className="window-select"
+            value={state.process_window || 12}
+            onChange={async (e) => {
+              await api('/api/engine/process-window', {
+                method: 'POST',
+                body: JSON.stringify({ minutes: parseInt(e.target.value) }),
+              })
+              fetchState()
+            }}
+          >
+            {[5, 8, 10, 12, 15, 20, 30].map(m => (
+              <option key={m} value={m}>{m} min</option>
+            ))}
+          </select>
+        </div>
+
+        {/* ── Next Race Indicator ── */}
+        {state.next_race && (
+          <div className={`next-race ${state.next_race.status === 'IN_WINDOW' ? 'in-window' : ''}`}>
+            <span className="next-race-label">
+              {state.next_race.status === 'IN_WINDOW' ? 'BETTING:' : 'Next:'}
+            </span>
+            <span className="next-race-venue">{state.next_race.venue}</span>
+            <span className="next-race-time">
+              {new Date(state.next_race.race_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+            </span>
+            <span className="next-race-countdown">
+              {state.next_race.minutes_to_off > 0
+                ? `${Math.round(state.next_race.minutes_to_off)}m to off`
+                : 'OFF'}
+            </span>
+          </div>
+        )}
+
         {state.last_scan && (
           <p className="last-scan">
             Last scan: {new Date(state.last_scan).toLocaleTimeString()}
@@ -922,6 +961,7 @@ function MarketTab() {
             <option key={m.market_id} value={m.market_id}>
               {formatRaceTime(m.race_time)} {m.venue} — {m.market_name} ({m.country})
               {m.minutes_to_off > 0 ? ` [${Math.round(m.minutes_to_off)}m]` : ' [IN PLAY]'}
+              {m.in_window ? ' IN WINDOW' : ''}
             </option>
           ))}
         </select>

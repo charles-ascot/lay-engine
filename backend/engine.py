@@ -35,6 +35,10 @@ DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 # Poll interval in seconds
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 
+# Processing window: only place bets within this many minutes of race start
+# This prevents placing bets hours early with meaningless prices
+PROCESS_WINDOW_MINUTES = int(os.environ.get("PROCESS_WINDOW_MINUTES", "12"))
+
 # State file for Cloud Run cold-start recovery
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json"))
 
@@ -115,6 +119,11 @@ class LayEngine:
         self.point_value: float = 1.0  # £ per point (multiplier for all stakes)
         self.jofs_control: bool = True   # Joint/Close-Odds Favourite Split on by default
 
+        # ── Processing window ──
+        self.process_window: int = PROCESS_WINDOW_MINUTES  # Configurable at runtime
+        self.monitoring: dict[str, list[dict]] = {}  # market_id → list of odds snapshots
+        self.next_race: Optional[dict] = None  # The next race approaching its window
+
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
         self._password: Optional[str] = None
@@ -157,6 +166,7 @@ class LayEngine:
                 "spread_control": self.spread_control,
                 "jofs_control": self.jofs_control,
                 "point_value": self.point_value,
+                "process_window": self.process_window,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -211,6 +221,7 @@ class LayEngine:
             self.spread_control = data.get("spread_control", False)
             self.jofs_control = data.get("jofs_control", True)
             self.point_value = data.get("point_value", 1.0)
+            self.process_window = data.get("process_window", PROCESS_WINDOW_MINUTES)
             self.balance = data.get("balance")
 
             logger.info(
@@ -510,6 +521,8 @@ class LayEngine:
             self.bets_placed = []
             self.processed_markets = set()
             self.processed_runners = set()
+            self.monitoring = {}
+            self.next_race = None
             self.errors = []
             self.spread_rejections = []
             self.day_started = today
@@ -521,31 +534,41 @@ class LayEngine:
 
     def _scan_and_process(self):
         """
-        Discover markets and process any that are ready.
+        Discover markets and process them within the betting window.
 
-        FIX: Always fetch real markets from Betfair, regardless of dry_run.
-        DRY_RUN only affects whether the final placeOrders call is made.
+        BEHAVIOUR:
+          - Fetches today's market catalogue from Betfair (discovery)
+          - For each unprocessed market, calculates minutes to race
+          - If race has started (minutes < 0): mark as missed
+          - If race is within process_window: fetch prices, apply rules, place bets
+          - If race is outside window: take an odds snapshot for monitoring
+          - The engine cycles continuously — start once, runs all day
         """
         now = datetime.now(timezone.utc)
         self.last_scan = now.isoformat()
 
-        # ── ALWAYS fetch real markets (dry_run or not) ──
+        # ── Refresh market catalogue ──
         if not self.client.ensure_session():
             self._add_error("Session expired during scan")
             return
 
         self.markets = self.client.get_todays_win_markets(countries=self.countries)
 
+        # ── Identify next race for dashboard display ──
+        self.next_race = None
+        nearest_minutes = float('inf')
+
         logger.info(
             f"Scan: {len(self.markets)} markets, "
             f"{len(self.processed_markets)} processed, "
-            f"{len(self.bets_placed)} bets placed"
+            f"{len(self.bets_placed)} bets placed, "
+            f"window={self.process_window}m"
         )
 
         for market in self.markets:
             market_id = market["market_id"]
 
-            # Skip if already processed
+            # Skip if already processed (bets placed or missed)
             if market_id in self.processed_markets:
                 continue
 
@@ -559,17 +582,107 @@ class LayEngine:
 
             minutes_to_race = (race_time - now).total_seconds() / 60
 
+            # ── Race has started — mark as missed ──
             if minutes_to_race < 0:
-                # Race has started — mark as processed, we missed it
                 self.processed_markets.add(market_id)
+                if market_id in self.monitoring:
+                    del self.monitoring[market_id]
+                logger.info(
+                    f"MISSED: {market['venue']} {market['market_name']} "
+                    f"(started {abs(minutes_to_race):.0f}m ago)"
+                )
                 continue
 
-            # ── Process as soon as market is found (pre-off) ──
-            logger.info(
-                f"Processing {market['venue']} {market['market_name']} "
-                f"({minutes_to_race:.1f}m to off)"
+            # ── Track nearest upcoming race for dashboard ──
+            if minutes_to_race < nearest_minutes:
+                nearest_minutes = minutes_to_race
+                self.next_race = {
+                    "market_id": market_id,
+                    "venue": market["venue"],
+                    "market_name": market["market_name"],
+                    "race_time": market["race_time"],
+                    "minutes_to_off": round(minutes_to_race, 1),
+                    "country": market.get("country", ""),
+                    "status": "IN_WINDOW" if minutes_to_race <= self.process_window else "MONITORING",
+                }
+
+            # ── INSIDE processing window — fetch prices, apply rules, place bets ──
+            if minutes_to_race <= self.process_window:
+                logger.info(
+                    f"WINDOW HIT: {market['venue']} {market['market_name']} "
+                    f"({minutes_to_race:.1f}m to off) — processing now"
+                )
+                self._process_market(market)
+
+                # Clean up monitoring data for this market
+                if market_id in self.monitoring:
+                    del self.monitoring[market_id]
+
+            # ── OUTSIDE window — monitor odds for drift tracking ──
+            else:
+                self._monitor_market(market, minutes_to_race)
+
+        # Update session summary with monitoring count
+        if self.current_session:
+            self.current_session["summary"]["markets_monitoring"] = len(self.monitoring)
+
+    def _monitor_market(self, market: dict, minutes_to_race: float):
+        """
+        Take an odds snapshot for a market that's outside the processing window.
+        These snapshots feed drift analysis in reports.
+        """
+        market_id = market["market_id"]
+
+        # Only snapshot every ~5 minutes to avoid hammering the API
+        if market_id in self.monitoring:
+            last_snapshot = self.monitoring[market_id][-1]
+            last_time = datetime.fromisoformat(last_snapshot["timestamp"])
+            elapsed = (datetime.now(timezone.utc) - last_time).total_seconds()
+            if elapsed < 300:  # 5 minutes
+                return
+
+        # Fetch current prices
+        try:
+            runners_with_prices, is_valid = self.client.get_market_prices(market_id)
+            if not is_valid or not runners_with_prices:
+                return
+
+            # Merge runner names
+            name_map = {
+                r["selection_id"]: r["runner_name"]
+                for r in market.get("runners", [])
+            }
+
+            snapshot = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "minutes_to_off": round(minutes_to_race, 1),
+                "runners": [
+                    {
+                        "selection_id": r.selection_id,
+                        "runner_name": name_map.get(r.selection_id, r.runner_name),
+                        "lay_odds": r.best_available_to_lay,
+                    }
+                    for r in runners_with_prices
+                    if r.status == "ACTIVE" and r.best_available_to_lay is not None
+                ],
+            }
+
+            if market_id not in self.monitoring:
+                self.monitoring[market_id] = []
+            self.monitoring[market_id].append(snapshot)
+
+            # Keep only last 20 snapshots per market (avoid memory bloat)
+            if len(self.monitoring[market_id]) > 20:
+                self.monitoring[market_id] = self.monitoring[market_id][-20:]
+
+            logger.debug(
+                f"MONITORING: {market['venue']} {market['market_name']} "
+                f"({minutes_to_race:.0f}m to off) — "
+                f"fav @ {snapshot['runners'][0]['lay_odds'] if snapshot['runners'] else '?'}"
             )
-            self._process_market(market)
+
+        except Exception as e:
+            logger.debug(f"Monitor snapshot failed for {market_id}: {e}")
 
     def _process_market(self, market: dict):
         """
@@ -755,7 +868,7 @@ class LayEngine:
                 except Exception:
                     pass
 
-        # Upcoming = not yet processed
+        # Upcoming = not yet processed, sorted by race time
         upcoming = []
         for m in self.markets:
             if m["market_id"] not in self.processed_markets:
@@ -763,7 +876,12 @@ class LayEngine:
                     rt = datetime.fromisoformat(m["race_time"].replace("Z", "+00:00"))
                     if rt > now:
                         m_copy = dict(m)
-                        m_copy["minutes_to_off"] = round((rt - now).total_seconds() / 60, 1)
+                        minutes = (rt - now).total_seconds() / 60
+                        m_copy["minutes_to_off"] = round(minutes, 1)
+                        m_copy["in_window"] = minutes <= self.process_window
+                        m_copy["monitoring_snapshots"] = len(
+                            self.monitoring.get(m["market_id"], [])
+                        )
                         upcoming.append(m_copy)
                 except (ValueError, KeyError):
                     pass
@@ -785,9 +903,12 @@ class LayEngine:
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
+            "process_window": self.process_window,
+            "next_race": self.next_race,
             "summary": {
                 "total_markets": len(self.markets),
                 "processed": len(self.processed_markets),
+                "monitoring": len(self.monitoring),
                 "bets_placed": len(self.bets_placed),
                 "spread_rejections": len(self.spread_rejections),
                 "jofs_splits": sum(
@@ -797,7 +918,7 @@ class LayEngine:
                 "total_stake": round(total_stake, 2),
                 "total_liability": round(total_liability, 2),
             },
-            "upcoming": upcoming[:10],
+            "upcoming": upcoming[:15],
             "recent_bets": list(reversed(self.bets_placed)),
             "recent_results": list(reversed(self.results)),
             "spread_rejections": list(reversed(self.spread_rejections[-20:])),

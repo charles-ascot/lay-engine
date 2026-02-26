@@ -89,6 +89,9 @@ class CountriesRequest(BaseModel):
 class PointValueRequest(BaseModel):
     value: float
 
+class ProcessWindowRequest(BaseModel):
+    minutes: int
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -191,6 +194,8 @@ def get_markets():
                 **m,
                 "minutes_to_off": round(minutes_to_off, 1),
                 "status": "IN_PLAY" if minutes_to_off < 0 else "PRE_OFF",
+                "in_window": minutes_to_off > 0 and minutes_to_off <= engine.process_window,
+                "monitoring_snapshots": len(engine.monitoring.get(m["market_id"], [])),
             })
         except (ValueError, KeyError):
             pass
@@ -358,6 +363,23 @@ def set_point_value(req: PointValueRequest):
 def get_spread_rejections():
     """Return recent spread control rejections for today."""
     return {"rejections": list(reversed(engine.spread_rejections[-50:]))}
+
+
+@app.post("/api/engine/process-window")
+def set_process_window(req: ProcessWindowRequest):
+    """Set the processing window (minutes before race to place bets)."""
+    if req.minutes < 1 or req.minutes > 60:
+        raise HTTPException(status_code=400, detail="Window must be 1-60 minutes")
+    engine.process_window = req.minutes
+    engine._save_state()
+    return {"status": "ok", "process_window": engine.process_window}
+
+
+@app.get("/api/monitoring/{market_id}")
+def get_monitoring_data(market_id: str):
+    """Return odds monitoring snapshots for a specific market."""
+    snapshots = engine.monitoring.get(market_id, [])
+    return {"market_id": market_id, "snapshots": snapshots}
 
 
 @app.post("/api/engine/countries")
