@@ -59,10 +59,10 @@ function SnapshotButton({ tableId, filename }) {
 // ── Status Badge ──
 function Badge({ status }) {
   const colors = {
-    RUNNING: '#22c55e',
-    STOPPED: '#ef4444',
-    STARTING: '#f59e0b',
-    AUTH_FAILED: '#ef4444',
+    RUNNING: '#16a34a',
+    STOPPED: '#dc2626',
+    STARTING: '#d97706',
+    AUTH_FAILED: '#dc2626',
   }
   return (
     <span className="badge" style={{ background: colors[status] || '#6b7280' }}>
@@ -105,7 +105,7 @@ function LoginPanel({ onLogin }) {
   return (
     <div className="login-panel">
       <div className="login-box">
-        <h1>🐴 CHIMERA</h1>
+        <h1>CHIMERA</h1>
         <p className="subtitle">Lay Engine v1.1</p>
         <form onSubmit={handleLogin}>
           <input
@@ -147,12 +147,10 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   const initialSentRef = useRef(false)
   const currentAudioRef = useRef(null)
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Auto-send initial analysis message when opened with initialMessage
   useEffect(() => {
     if (isOpen && initialMessage && !initialSentRef.current) {
       initialSentRef.current = true
@@ -160,17 +158,14 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
     }
   }, [isOpen, initialMessage])
 
-  // Reset initialSentRef when drawer closes
   useEffect(() => {
     if (!isOpen) initialSentRef.current = false
   }, [isOpen])
 
-  // Focus input when drawer opens
   useEffect(() => {
     if (isOpen && !initialMessage) inputRef.current?.focus()
   }, [isOpen])
 
-  // Stop audio on unmount/close
   useEffect(() => {
     if (!isOpen && currentAudioRef.current) {
       currentAudioRef.current.pause()
@@ -180,7 +175,6 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 
   const speakText = async (text) => {
     if (!speakEnabled) return
-    // Stop any currently playing audio
     if (currentAudioRef.current) {
       currentAudioRef.current.pause()
       currentAudioRef.current = null
@@ -192,7 +186,6 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
         body: JSON.stringify({ text }),
       })
       if (!res.ok) {
-        // Fallback to browser TTS if OpenAI TTS fails
         if ('speechSynthesis' in window) {
           window.speechSynthesis.cancel()
           const utterance = new SpeechSynthesisUtterance(text)
@@ -211,7 +204,6 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
       }
       audio.play()
     } catch (e) {
-      // Fallback to browser TTS
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel()
         const utterance = new SpeechSynthesisUtterance(text)
@@ -262,10 +254,8 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
     sendMessage(input)
   }
 
-  // ── Speech Recognition via OpenAI Whisper ──
   const toggleListening = async () => {
     if (listening) {
-      // Stop recording
       mediaRecorderRef.current?.stop()
       setListening(false)
       return
@@ -281,11 +271,10 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
       }
 
       mediaRecorder.onstop = async () => {
-        // Stop all tracks to release the microphone
         stream.getTracks().forEach(t => t.stop())
 
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        if (blob.size < 100) return // Too short, ignore
+        if (blob.size < 100) return
 
         setLoading(true)
         try {
@@ -333,7 +322,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
               }}
               title={speakEnabled ? 'Mute voice' : 'Enable voice'}
             >
-              {speakEnabled ? '🔊' : '🔇'}
+              {speakEnabled ? 'Sound ON' : 'Sound OFF'}
             </button>
             <button className="btn-sm" onClick={() => {
               setMessages([])
@@ -341,7 +330,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
               currentAudioRef.current = null
               window.speechSynthesis?.cancel()
             }}>Clear</button>
-            <button className="btn-sm" onClick={onClose}>✕</button>
+            <button className="btn-sm" onClick={onClose}>Close</button>
           </div>
         </div>
 
@@ -369,7 +358,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
             onClick={toggleListening}
             title={listening ? 'Stop listening' : 'Speak'}
           >
-            {listening ? '⏹' : '🎤'}
+            {listening ? 'Stop' : 'Mic'}
           </button>
           <input
             ref={inputRef}
@@ -388,255 +377,220 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   )
 }
 
-// ── Dashboard ──
-function Dashboard() {
-  const [state, setState] = useState(null)
-  const [tab, setTab] = useState('market')
-  const intervalRef = useRef(null)
-  const [chatOpen, setChatOpen] = useState(false)
-  const [chatInitialDate, setChatInitialDate] = useState(null)
-  const [chatInitialMessage, setChatInitialMessage] = useState(null)
+// ── Engine Tab ──
+function EngineTab({ state, onStart, onStop, onToggleDryRun, onResetBets, onToggleCountry, onToggleJofs, onToggleSpread, onSetProcessWindow, onSetPointValue }) {
+  return (
+    <div className="engine-tab">
+      <div className="engine-section">
+        <h3>Power</h3>
+        <div className="engine-row">
+          <button className={`btn ${state.status === 'RUNNING' ? 'btn-danger' : 'btn-primary'}`}
+            onClick={state.status === 'RUNNING' ? onStop : onStart}>
+            {state.status === 'RUNNING' ? 'Stop Engine' : 'Start Engine'}
+          </button>
+          <button className={`btn ${state.dry_run ? 'btn-warning' : 'btn-success'}`}
+            onClick={onToggleDryRun}>
+            {state.dry_run ? 'Dry Run ON → Go Live' : 'LIVE → Switch to Dry Run'}
+          </button>
+          <button className="btn btn-secondary" onClick={onResetBets}>
+            Clear Bets & Re-process
+          </button>
+        </div>
+      </div>
 
-  const fetchState = useCallback(async () => {
-    try {
-      const s = await api('/api/state')
-      setState(s)
-    } catch (e) {
-      console.error('Failed to fetch state:', e)
-    }
-  }, [])
+      <div className="engine-section">
+        <h3>Processing</h3>
+        <div className="engine-row">
+          <label>Window:
+            <select value={state.process_window || 12} onChange={e => onSetProcessWindow(+e.target.value)}>
+              {[5,8,10,12,15,20,30].map(v => <option key={v} value={v}>{v} min</option>)}
+            </select>
+          </label>
+          <label>Points £:
+            <select value={state.point_value || 1} onChange={e => onSetPointValue(+e.target.value)}>
+              {[1,2,5,10,20,50].map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </label>
+          <div className="country-toggles">
+            {ALL_COUNTRIES.map(c => (
+              <button key={c}
+                className={`btn-toggle ${(state.countries || ['GB','IE']).includes(c) ? 'active' : ''}`}
+                onClick={() => onToggleCountry(c)}>
+                {COUNTRY_LABELS[c]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
-  useEffect(() => {
-    fetchState()
-    intervalRef.current = setInterval(fetchState, 10000) // Poll every 10s
-    return () => clearInterval(intervalRef.current)
-  }, [fetchState])
+      <div className="engine-section">
+        <h3>Risk Controls</h3>
+        <div className="engine-row">
+          <label>JOFS (Joint Favourite Split):</label>
+          <button className={`btn-toggle ${state.jofs_control ? 'active' : ''}`}
+            onClick={onToggleJofs}>
+            {state.jofs_control ? 'ON' : 'OFF'}
+          </button>
+          <label>Spread Control:</label>
+          <button className={`btn-toggle ${state.spread_control ? 'active' : ''}`}
+            onClick={onToggleSpread}>
+            {state.spread_control ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      </div>
 
-  const handleStart = async () => {
-    await api('/api/engine/start', { method: 'POST' })
-    fetchState()
-  }
-  const handleStop = async () => {
-    await api('/api/engine/stop', { method: 'POST' })
-    fetchState()
-  }
-  const handleToggleDryRun = async () => {
-    await api('/api/engine/dry-run', { method: 'POST' })
-    fetchState()
-  }
-  const handleToggleSpreadControl = async () => {
-    await api('/api/engine/spread-control', { method: 'POST' })
-    fetchState()
-  }
-  const handleToggleJofsControl = async () => {
-    await api('/api/engine/jofs-control', { method: 'POST' })
-    fetchState()
-  }
-  const handleSetPointValue = async (value) => {
-    await api('/api/engine/point-value', {
-      method: 'POST',
-      body: JSON.stringify({ value: parseFloat(value) }),
-    })
-    fetchState()
-  }
-  const handleResetBets = async () => {
-    if (!confirm('Clear all bets and re-process all markets?')) return
-    await api('/api/engine/reset-bets', { method: 'POST' })
-    fetchState()
-  }
-  const handleToggleCountry = async (country) => {
-    const current = state.countries || ['GB', 'IE']
-    const updated = current.includes(country)
-      ? current.filter(c => c !== country)
-      : [...current, country]
-    if (updated.length === 0) return
-    await api('/api/engine/countries', {
-      method: 'POST',
-      body: JSON.stringify({ countries: updated }),
-    })
-    fetchState()
-  }
-  const handleLogout = async () => {
-    await api('/api/logout', { method: 'POST' })
-    window.location.reload()
-  }
+      <div className="engine-section">
+        <h3>Session</h3>
+        <div className="engine-info">
+          <span>Session: <code>{state.session_id || '—'}</code></span>
+          <span>Started: {state.session_start ? new Date(state.session_start).toLocaleTimeString() : '—'}</span>
+          <span>Last scan: {state.last_scan ? new Date(state.last_scan).toLocaleTimeString() : '—'}</span>
+        </div>
+      </div>
 
-  const openChat = (date = null, initialMessage = null) => {
-    setChatInitialDate(date)
-    setChatInitialMessage(initialMessage)
-    setChatOpen(true)
-  }
-  const closeChat = () => {
-    setChatOpen(false)
-    setChatInitialMessage(null)
-  }
+      {state.errors && state.errors.length > 0 && (
+        <div className="engine-section">
+          <h3>Errors ({state.errors.length})</h3>
+          <div className="error-list">
+            {state.errors.map((e, i) => (
+              <div key={i} className="error-item">
+                <span className="error-time">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                <span>{e.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
-  if (!state) return <div className="loading">Loading engine state...</div>
-
-  const s = state.summary || {}
+// ── Live Tab ──
+function LiveTab({ bets, results, errors }) {
+  const [showRules, setShowRules] = useState(false)
+  const fname = `chimera_live_${new Date().toISOString().slice(0, 10)}`
 
   return (
-    <div className="dashboard">
-      {/* ── Header ── */}
-      <header className="glass">
-        <div className="header-left">
-          <h1>CHIMERA</h1>
-          <Badge status={state.status} />
-          {state.dry_run && <span className="badge dry-run">DRY RUN</span>}
+    <div>
+      {errors && errors.length > 0 && (
+        <div className="live-error-bar">
+          {errors.length} error{errors.length !== 1 ? 's' : ''} — latest: {errors[errors.length - 1]?.message}
         </div>
-        <div className="header-right">
-          <div className="point-value-control">
-            <span className="point-label">PTS £</span>
-            <select
-              value={state.point_value || 1}
-              onChange={e => handleSetPointValue(e.target.value)}
-            >
-              {[1, 2, 5, 10, 20, 50].map(v => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </div>
-          {state.balance != null && (
-            <span className="balance">£{state.balance?.toFixed(2)}</span>
-          )}
-          <span className="date">{state.date}</span>
-          <button className="btn-sm" onClick={handleLogout}>Logout</button>
-        </div>
-      </header>
+      )}
 
-      {/* ── Controls ── */}
-      <div className="controls glass">
-        <button
-          className={`btn ${state.status === 'RUNNING' ? 'btn-danger' : 'btn-primary'}`}
-          onClick={state.status === 'RUNNING' ? handleStop : handleStart}
-        >
-          {state.status === 'RUNNING' ? '⏹ Stop Engine' : '▶ Start Engine'}
-        </button>
-        <button
-          className={`btn ${state.dry_run ? 'btn-warning' : 'btn-success'}`}
-          onClick={handleToggleDryRun}
-        >
-          {state.dry_run ? '🧪 Dry Run ON → Go Live' : '🔴 LIVE → Switch to Dry Run'}
-        </button>
-        <button
-          className={`btn ${state.spread_control ? 'btn-warning' : 'btn-secondary'}`}
-          onClick={handleToggleSpreadControl}
-          title="Spread Control validates back-lay spreads to reject bets in illiquid markets"
-        >
-          {state.spread_control ? '📊 Spread Control ON' : '📊 Spread Control OFF'}
-        </button>
-        <button
-          className={`btn ${state.jofs_control ? 'btn-warning' : 'btn-secondary'}`}
-          onClick={handleToggleJofsControl}
-          title="JOFS Control: when the gap between 1st and 2nd favourite is ≤ 0.2, stake is split evenly across both runners"
-        >
-          {state.jofs_control ? '⚖️ JOFS Control ON' : '⚖️ JOFS Control OFF'}
-        </button>
-        <button className="btn btn-secondary" onClick={handleResetBets}>
-          Clear Bets & Re-process
-        </button>
-        <button className="btn btn-chat" onClick={() => openChat()}>
-          🤖 AI Chat
-        </button>
-        <div className="stats-row">
-          <span>Markets: <strong>{s.total_markets || 0}</strong></span>
-          <span>Monitoring: <strong>{s.monitoring || 0}</strong></span>
-          <span>Processed: <strong>{s.processed || 0}</strong></span>
-          <span>Bets: <strong>{s.bets_placed || 0}</strong></span>
-          {s.spread_rejections > 0 && <span>Spread Rejected: <strong style={{color:'#f59e0b'}}>{s.spread_rejections}</strong></span>}
-          {s.jofs_splits > 0 && <span>JOFS Splits: <strong style={{color:'#a78bfa'}}>{s.jofs_splits}</strong></span>}
-          <span>Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
-          <span>Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
-        </div>
-        <div className="country-toggles">
-          <span className="country-label">Markets:</span>
-          {ALL_COUNTRIES.map(c => (
-            <button
-              key={c}
-              className={`btn-country ${(state.countries || ['GB', 'IE']).includes(c) ? 'active' : ''}`}
-              onClick={() => handleToggleCountry(c)}
-            >
-              {COUNTRY_LABELS[c]}
-            </button>
-          ))}
-        </div>
-        {/* ── Processing Window ── */}
-        <div className="window-control">
-          <span className="window-label">Bet Window:</span>
-          <select
-            className="window-select"
-            value={state.process_window || 12}
-            onChange={async (e) => {
-              await api('/api/engine/process-window', {
-                method: 'POST',
-                body: JSON.stringify({ minutes: parseInt(e.target.value) }),
-              })
-              fetchState()
-            }}
-          >
-            {[5, 8, 10, 12, 15, 20, 30].map(m => (
-              <option key={m} value={m}>{m} min</option>
+      <div className="tab-toolbar">
+        <h2>Live Bets</h2>
+        {bets && bets.length > 0 && (
+          <SnapshotButton tableId="live-bets-table" filename={fname} />
+        )}
+      </div>
+
+      {!bets || bets.length === 0 ? (
+        <p className="empty">No bets placed in the current session.</p>
+      ) : (
+        <table id="live-bets-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Venue</th>
+              <th>Runner</th>
+              <th>Odds</th>
+              <th>Stake</th>
+              <th>Liability</th>
+              <th>Rule</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bets.map((b, i) => (
+              <tr key={i} className={b.dry_run ? 'row-dry' : ''}>
+                <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+                <td>{b.venue || '—'}</td>
+                <td>{b.runner_name}</td>
+                <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
+                <td>£{b.size?.toFixed(2)}</td>
+                <td>£{b.liability?.toFixed(2)}</td>
+                <td><code>{b.rule_applied}</code></td>
+                <td>
+                  <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
+                    {b.dry_run ? 'DRY' : b.betfair_response?.status || '?'}
+                  </span>
+                </td>
+              </tr>
             ))}
-          </select>
-        </div>
+          </tbody>
+        </table>
+      )}
 
-        {/* ── Next Race Indicator ── */}
-        {state.next_race && (
-          <div className={`next-race ${state.next_race.status === 'IN_WINDOW' ? 'in-window' : ''}`}>
-            <span className="next-race-label">
-              {state.next_race.status === 'IN_WINDOW' ? 'BETTING:' : 'Next:'}
-            </span>
-            <span className="next-race-venue">{state.next_race.venue}</span>
-            <span className="next-race-time">
-              {new Date(state.next_race.race_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-            </span>
-            <span className="next-race-countdown">
-              {state.next_race.minutes_to_off > 0
-                ? `${Math.round(state.next_race.minutes_to_off)}m to off`
-                : 'OFF'}
-            </span>
-          </div>
-        )}
-
-        {state.last_scan && (
-          <p className="last-scan">
-            Last scan: {new Date(state.last_scan).toLocaleTimeString()}
-          </p>
-        )}
-      </div>
-
-      {/* ── Tabs ── */}
-      <nav className="tabs">
-        {['market', 'snapshots', 'matched', 'settled', 'reports', 'rules', 'errors', 'api'].map(t => (
-          <button
-            key={t}
-            className={tab === t ? 'active' : ''}
-            onClick={() => setTab(t)}
-          >
-            {t === 'api' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1)}
+      {results && results.length > 0 && (
+        <div className="live-rules-section">
+          <button className="rules-toggle" onClick={() => setShowRules(!showRules)}>
+            {showRules ? '▾' : '▸'} Rule Evaluations ({results.length})
           </button>
-        ))}
-      </nav>
+          {showRules && (
+            <table>
+              <thead>
+                <tr>
+                  <th>Venue</th>
+                  <th>Race</th>
+                  <th>Favourite</th>
+                  <th>Odds</th>
+                  <th>2nd Fav</th>
+                  <th>Odds</th>
+                  <th>Rule</th>
+                  <th>Bets</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={i} className={r.skipped ? 'row-skip' : ''}>
+                    <td>{r.venue}</td>
+                    <td>{r.market_name}</td>
+                    <td>{r.favourite?.name || '-'}</td>
+                    <td>{r.favourite?.odds?.toFixed(2) || '-'}</td>
+                    <td>{r.second_favourite?.name || '-'}</td>
+                    <td>{r.second_favourite?.odds?.toFixed(2) || '-'}</td>
+                    <td>
+                      {r.skipped
+                        ? <span className="skip">{r.skip_reason}</span>
+                        : <code>{r.rule_applied}</code>
+                      }
+                    </td>
+                    <td>{r.instructions?.length || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
-      {/* ── Tab Content ── */}
-      <div className="tab-content">
-        {tab === 'market' && <MarketTab />}
-        {tab === 'snapshots' && <SnapshotsTab openChat={openChat} />}
-        {tab === 'matched' && <MatchedTab />}
-        {tab === 'settled' && <SettledTab openChat={openChat} />}
-        {tab === 'reports' && <ReportsTab />}
-        {tab === 'rules' && <RulesTab results={state.recent_results} />}
-        {tab === 'errors' && <ErrorsTab errors={state.errors} />}
-        {tab === 'api' && <ApiKeysTab />}
+// ── Backtest Tab ──
+function BacktestTab() {
+  return (
+    <div className="backtest-tab">
+      <h2>Backtest</h2>
+      <p className="empty-state">
+        Backtesting module coming soon. This will allow you to test JOFS thresholds,
+        processing window timings, and rule parameters against historical Betfair data.
+      </p>
+      <div className="backtest-placeholder">
+        <div className="placeholder-section">
+          <h3>Data Sources</h3>
+          <p>Live recorded data (Data Recorder) &middot; Betfair historic data (purchased) &middot; Engine snapshots</p>
+        </div>
+        <div className="placeholder-section">
+          <h3>Parameters</h3>
+          <p>JOFS threshold &middot; Processing window &middot; Odds bands &middot; Stake sizing &middot; Venue filters</p>
+        </div>
+        <div className="placeholder-section">
+          <h3>Output</h3>
+          <p>Simulated P/L &middot; Strike rate by parameter &middot; Optimal configuration recommendations</p>
+        </div>
       </div>
-
-      {/* ── Chat Drawer ── */}
-      <ChatDrawer
-        isOpen={chatOpen}
-        onClose={closeChat}
-        initialDate={chatInitialDate}
-        initialMessage={chatInitialMessage}
-      />
     </div>
   )
 }
@@ -647,8 +601,8 @@ const formatDateHeader = (dateStr) => {
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-// ── Snapshots Tab (formerly History) ──
-function SnapshotsTab({ openChat }) {
+// ── History Tab (formerly Snapshots) ──
+function HistoryTab({ openChat }) {
   const [sessions, setSessions] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -680,7 +634,7 @@ function SnapshotsTab({ openChat }) {
       <div>
         <div className="session-detail-header">
           <button className="btn btn-secondary btn-back" onClick={() => setSelectedId(null)}>
-            ← Back
+            Back
           </button>
           <h2>
             <span className={`badge ${detail.mode === 'LIVE' ? 'badge-live' : 'dry-run'}`}>
@@ -711,7 +665,7 @@ function SnapshotsTab({ openChat }) {
                   <th>Time</th>
                   <th>Country</th>
                   <th>Runner</th>
-                  <th className="col-lay">Odds</th>
+                  <th>Odds</th>
                   <th>Stake</th>
                   <th>Liability</th>
                   <th>Rule</th>
@@ -730,7 +684,7 @@ function SnapshotsTab({ openChat }) {
                     <td><code>{b.rule_applied}</code></td>
                     <td>
                       <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                        {b.dry_run ? '🧪 DRY' : b.betfair_response?.status || '?'}
+                        {b.dry_run ? 'DRY' : b.betfair_response?.status || '?'}
                       </span>
                     </td>
                   </tr>
@@ -760,7 +714,7 @@ function SnapshotsTab({ openChat }) {
   return (
     <div>
       <div className="tab-toolbar">
-        <h2>Snapshots</h2>
+        <h2>History</h2>
         {sortedDates.length > 0 && (
           <button
             className="btn btn-analysis"
@@ -820,647 +774,6 @@ function SnapshotsTab({ openChat }) {
   )
 }
 
-// ── Date Range Filter (shared) ──
-function DateRangeFilter({ dateFrom, dateTo, onDateFromChange, onDateToChange }) {
-  const today = new Date().toISOString().slice(0, 10)
-
-  const setPreset = (preset) => {
-    const now = new Date()
-    let from = today, to = today
-    if (preset === 'yesterday') {
-      const y = new Date(now); y.setDate(y.getDate() - 1)
-      from = to = y.toISOString().slice(0, 10)
-    } else if (preset === '7days') {
-      const d = new Date(now); d.setDate(d.getDate() - 6)
-      from = d.toISOString().slice(0, 10)
-    } else if (preset === 'month') {
-      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-    }
-    onDateFromChange(from)
-    onDateToChange(to)
-  }
-
-  return (
-    <div className="date-range-filter">
-      <div className="date-presets">
-        <button className="btn-preset" onClick={() => setPreset('today')}>Today</button>
-        <button className="btn-preset" onClick={() => setPreset('yesterday')}>Yesterday</button>
-        <button className="btn-preset" onClick={() => setPreset('7days')}>Last 7 Days</button>
-        <button className="btn-preset" onClick={() => setPreset('month')}>This Month</button>
-      </div>
-      <div className="date-inputs">
-        <label>From:</label>
-        <input type="date" value={dateFrom} onChange={e => onDateFromChange(e.target.value)} max={today} />
-        <label>To:</label>
-        <input type="date" value={dateTo} onChange={e => onDateToChange(e.target.value)} max={today} />
-      </div>
-    </div>
-  )
-}
-
-// ── Price Cell (Betfair-style) ──
-function PriceCell({ price, size, type, level }) {
-  if (!price) return <td className={`bf-${type}-${level} bf-empty`}>—</td>
-  const formatted = price >= 100 ? Math.round(price) : price >= 10 ? price.toFixed(1) : price.toFixed(2)
-  return (
-    <td className={`bf-${type}-${level}`}>
-      <div className="bf-price">{formatted}</div>
-      <div className="bf-size">£{Math.round(size)}</div>
-    </td>
-  )
-}
-
-// ── Market Tab (live Betfair market view) ──
-function MarketTab() {
-  const [markets, setMarkets] = useState([])
-  const [selectedMarketId, setSelectedMarketId] = useState('')
-  const [book, setBook] = useState(null)
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [loading, setLoading] = useState(false)
-
-  // Fetch market list (refresh every 60s)
-  useEffect(() => {
-    const fetchMarkets = () => {
-      api('/api/markets')
-        .then(data => {
-          setMarkets(data.markets || [])
-          // Auto-select the next upcoming market if none selected
-          setSelectedMarketId(prev => {
-            if (!prev && data.markets?.length) {
-              const next = data.markets.find(m => m.minutes_to_off > 0)
-              return next ? next.market_id : (data.markets[0]?.market_id || '')
-            }
-            return prev
-          })
-        })
-        .catch(() => {})
-    }
-    fetchMarkets()
-    const interval = setInterval(fetchMarkets, 60000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Fetch selected market book
-  const fetchBook = useCallback(() => {
-    if (!selectedMarketId) return
-    setLoading(true)
-    api(`/api/markets/${selectedMarketId}/book`)
-      .then(data => { setBook(data); setLoading(false) })
-      .catch(() => { setBook(null); setLoading(false) })
-  }, [selectedMarketId])
-
-  useEffect(() => { fetchBook() }, [fetchBook])
-
-  // Auto-refresh every 5 seconds
-  useEffect(() => {
-    if (!autoRefresh || !selectedMarketId) return
-    const interval = setInterval(fetchBook, 5000)
-    return () => clearInterval(interval)
-  }, [autoRefresh, selectedMarketId, fetchBook])
-
-  // Book percentage calculation
-  const bookPercent = book?.runners?.reduce((sum, r) => {
-    const bestBack = r.back?.[0]?.price
-    return sum + (bestBack ? (1 / bestBack) * 100 : 0)
-  }, 0) || 0
-
-  const bookPercentClass = bookPercent <= 101 ? 'tight' : bookPercent <= 103 ? 'normal' : 'wide'
-
-  // Format race time
-  const formatRaceTime = (iso) => {
-    try {
-      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    } catch { return '' }
-  }
-
-  return (
-    <div>
-      <div className="tab-toolbar">
-        <h2>Market</h2>
-        <div className="auto-refresh">
-          {autoRefresh && selectedMarketId && <span className="refresh-indicator" />}
-          <label>
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={e => setAutoRefresh(e.target.checked)}
-            />
-            Auto-refresh
-          </label>
-        </div>
-      </div>
-
-      {/* Market selector */}
-      <div className="market-selector glass">
-        <select
-          value={selectedMarketId}
-          onChange={e => { setSelectedMarketId(e.target.value); setBook(null) }}
-        >
-          <option value="">Select a market...</option>
-          {markets.map(m => (
-            <option key={m.market_id} value={m.market_id}>
-              {formatRaceTime(m.race_time)} {m.venue} — {m.market_name} ({m.country})
-              {m.minutes_to_off > 0 ? ` [${Math.round(m.minutes_to_off)}m]` : ' [IN PLAY]'}
-              {m.in_window ? ' IN WINDOW' : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {!selectedMarketId && (
-        <div className="market-empty">
-          <p>Select a market above to view live prices.</p>
-          <p style={{ fontSize: 12 }}>{markets.length} market{markets.length !== 1 ? 's' : ''} available today</p>
-        </div>
-      )}
-
-      {loading && !book && <p className="empty">Loading market book...</p>}
-
-      {book && (
-        <>
-          {/* Market header */}
-          <div className="market-header">
-            <div>
-              <div className="market-title">
-                {formatRaceTime(book.race_time)} {book.venue} — {book.market_name}
-              </div>
-              <div className="market-meta">
-                <span>{book.number_of_runners} selections</span>
-                <span className={`book-percent ${bookPercentClass}`}>
-                  {bookPercent.toFixed(1)}%
-                </span>
-                <span className="market-matched">
-                  Matched: GBP {(book.total_matched || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </span>
-                {book.in_play && <span className="badge badge-live">IN PLAY</span>}
-                {book.status && book.status !== 'OPEN' && (
-                  <span className="badge badge-crashed">{book.status}</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Price grid */}
-          <table className="market-table">
-            <thead>
-              <tr>
-                <th style={{ width: '35%' }}></th>
-                <th className="bf-back-header" colSpan={3}>Back all</th>
-                <th className="bf-lay-header" colSpan={3}>Lay all</th>
-              </tr>
-            </thead>
-            <tbody>
-              {book.runners.map(runner => (
-                <tr key={runner.selection_id} className={runner.status !== 'ACTIVE' ? 'runner-removed' : ''}>
-                  <td className="runner-cell">
-                    <div>
-                      <span className="runner-cloth">{runner.sort_priority}</span>
-                      <span className="runner-name">{runner.runner_name}</span>
-                    </div>
-                    {runner.status !== 'ACTIVE' && (
-                      <div className="runner-jockey">Non-runner</div>
-                    )}
-                  </td>
-                  {/* Back prices: worst→best (left→right) */}
-                  <PriceCell price={runner.back?.[2]?.price} size={runner.back?.[2]?.size} type="back" level={3} />
-                  <PriceCell price={runner.back?.[1]?.price} size={runner.back?.[1]?.size} type="back" level={2} />
-                  <PriceCell price={runner.back?.[0]?.price} size={runner.back?.[0]?.size} type="back" level={1} />
-                  {/* Lay prices: best→worst (left→right) */}
-                  <PriceCell price={runner.lay?.[0]?.price} size={runner.lay?.[0]?.size} type="lay" level={1} />
-                  <PriceCell price={runner.lay?.[1]?.price} size={runner.lay?.[1]?.size} type="lay" level={2} />
-                  <PriceCell price={runner.lay?.[2]?.price} size={runner.lay?.[2]?.size} type="lay" level={3} />
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ── Matched Tab (live bets placed on Betfair) ──
-function MatchedTab() {
-  const today = new Date().toISOString().slice(0, 10)
-  const [dateFrom, setDateFrom] = useState(today)
-  const [dateTo, setDateTo] = useState(today)
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [expandedBets, setExpandedBets] = useState(new Set())
-  const [collapsedDays, setCollapsedDays] = useState(new Set())
-
-  const fetchMatched = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await api(`/api/matched?date_from=${dateFrom}&date_to=${dateTo}`)
-      setData(res)
-    } catch (e) {
-      console.error('Failed to fetch matched bets:', e)
-    }
-    setLoading(false)
-  }, [dateFrom, dateTo])
-
-  useEffect(() => { fetchMatched() }, [fetchMatched])
-
-  const toggleBet = (key) => {
-    setExpandedBets(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
-
-  const toggleDay = (date) => {
-    setCollapsedDays(prev => {
-      const next = new Set(prev)
-      next.has(date) ? next.delete(date) : next.add(date)
-      return next
-    })
-  }
-
-  const fname = `chimera_matched_${dateFrom}_${dateTo}`
-
-  return (
-    <div>
-      <div className="tab-toolbar">
-        <h2>Matched Bets</h2>
-        {data && data.count > 0 && (
-          <SnapshotButton tableId="matched-export-table" filename={fname} />
-        )}
-      </div>
-
-      <DateRangeFilter
-        dateFrom={dateFrom} dateTo={dateTo}
-        onDateFromChange={setDateFrom} onDateToChange={setDateTo}
-      />
-
-      {data && (
-        <div className="matched-summary">
-          <span>Total Bets: <strong>{data.count}</strong></span>
-          <span>Total Staked: <strong>£{(data.total_stake || 0).toFixed(2)}</strong></span>
-          <span>Total Liability: <strong>£{(data.total_liability || 0).toFixed(2)}</strong></span>
-          <span>Avg Odds: <strong>{(data.avg_odds || 0).toFixed(2)}</strong></span>
-        </div>
-      )}
-
-      {loading && <p className="empty">Loading matched bets...</p>}
-
-      {!loading && data && data.count === 0 && (
-        <p className="empty">No live matched bets found for this period.</p>
-      )}
-
-      {!loading && data && data.bets_by_date && (
-        <div className="matched-grouped">
-          {/* Hidden table for Excel export */}
-          <table id="matched-export-table" style={{ display: 'none' }}>
-            <thead>
-              <tr>
-                <th>Date</th><th>Time</th><th>Venue</th><th>Country</th>
-                <th>Runner</th><th>Odds</th><th>Stake</th><th>Liability</th>
-                <th>Rule</th><th>Status</th><th>Bet ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(data.bets_by_date).flatMap(([date, bets]) =>
-                bets.map((b, i) => (
-                  <tr key={`${date}-${i}`}>
-                    <td>{date}</td>
-                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                    <td>{b.venue || ''}</td>
-                    <td>{b.country || ''}</td>
-                    <td>{b.runner_name}</td>
-                    <td>{b.price?.toFixed(2)}</td>
-                    <td>{b.size?.toFixed(2)}</td>
-                    <td>{b.liability?.toFixed(2)}</td>
-                    <td>{b.rule_applied}</td>
-                    <td>{b.betfair_response?.status || '?'}</td>
-                    <td>{b.betfair_response?.bet_id || ''}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          {Object.entries(data.bets_by_date).map(([date, bets]) => {
-            const dayStake = bets.reduce((s, b) => s + (b.size || 0), 0)
-            const dayLiability = bets.reduce((s, b) => s + (b.liability || 0), 0)
-            return (
-              <div key={date} className="matched-date-group">
-                <div className="matched-date-header" onClick={() => toggleDay(date)}>
-                  <span className="matched-date-label">
-                    {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
-                  </span>
-                  <span className="matched-date-stats">
-                    <span>{bets.length} bet{bets.length !== 1 ? 's' : ''}</span>
-                    <span>£<strong>{dayStake.toFixed(2)}</strong> staked</span>
-                    <span>£<strong>{dayLiability.toFixed(2)}</strong> liability</span>
-                  </span>
-                </div>
-                {!collapsedDays.has(date) && (
-                  <div className="matched-bet-list">
-                    {bets.map((b, i) => {
-                      const key = `${date}-${i}`
-                      return (
-                        <div key={key} className="matched-bet-row" onClick={() => toggleBet(key)}>
-                          <div className="matched-bet-summary">
-                            <span className="matched-bet-time">
-                              {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            <span className="matched-bet-runner">{b.runner_name}</span>
-                            <span className="cell-lay-odds">{b.price?.toFixed(2)}</span>
-                            <span>£{b.size?.toFixed(2)}</span>
-                            <span className="matched-bet-liability">£{b.liability?.toFixed(2)}</span>
-                            <code>{b.rule_applied}</code>
-                            <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                              {b.betfair_response?.status || '?'}
-                            </span>
-                          </div>
-                          {expandedBets.has(key) && (
-                            <div className="matched-bet-detail">
-                              <span>Bet ID: <code>{b.betfair_response?.bet_id || '—'}</code></span>
-                              <span>Matched: £{b.betfair_response?.size_matched?.toFixed(2) || '—'}</span>
-                              <span>Avg Price: {b.betfair_response?.avg_price_matched?.toFixed(2) || '—'}</span>
-                              <span>Market: <code>{b.market_id}</code></span>
-                              <span>Venue: {b.venue || '—'}</span>
-                              <span>Country: {b.country || '—'}</span>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Settled Tab (race results + P/L) ──
-function SettledTab({ openChat }) {
-  const today = new Date().toISOString().slice(0, 10)
-  const [dateFrom, setDateFrom] = useState(today)
-  const [dateTo, setDateTo] = useState(today)
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [filter, setFilter] = useState('all')
-  const [collapsedDays, setCollapsedDays] = useState(new Set())
-
-  const fetchSettled = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await api(`/api/settled?date_from=${dateFrom}&date_to=${dateTo}`)
-      setData(res)
-    } catch (e) {
-      console.error('Failed to fetch settled bets:', e)
-    }
-    setLoading(false)
-  }, [dateFrom, dateTo])
-
-  useEffect(() => { fetchSettled() }, [fetchSettled])
-
-  const toggleDay = (date) => {
-    setCollapsedDays(prev => {
-      const next = new Set(prev)
-      next.has(date) ? next.delete(date) : next.add(date)
-      return next
-    })
-  }
-
-  const getFilteredBets = (bets) => {
-    if (filter === 'won') return bets.filter(b => b.bet_outcome === 'WON')
-    if (filter === 'lost') return bets.filter(b => b.bet_outcome === 'LOST')
-    return bets
-  }
-
-  const fname = `chimera_settled_${dateFrom}_${dateTo}`
-
-  return (
-    <div>
-      <div className="tab-toolbar">
-        <h2>Settled Bets</h2>
-        {data && data.count > 0 && (
-          <SnapshotButton tableId="settled-export-table" filename={fname} />
-        )}
-      </div>
-
-      <DateRangeFilter
-        dateFrom={dateFrom} dateTo={dateTo}
-        onDateFromChange={setDateFrom} onDateToChange={setDateTo}
-      />
-
-      {/* Sticky P/L Summary */}
-      {data && data.count > 0 && (
-        <div className={`settled-summary ${(data.total_pl || 0) >= 0 ? 'pl-positive' : 'pl-negative'}`}>
-          <span>Settled: <strong>{data.count}</strong></span>
-          <span>Won: <strong className="text-success">{data.wins}</strong></span>
-          <span>Lost: <strong className="text-danger">{data.losses}</strong></span>
-          <span>Strike Rate: <strong>{data.strike_rate}%</strong></span>
-          <span className="settled-total-pl">
-            P/L: <strong className={(data.total_pl || 0) >= 0 ? 'text-success' : 'text-danger'}>
-              {(data.total_pl || 0) >= 0 ? '+' : ''}£{(data.total_pl || 0).toFixed(2)}
-            </strong>
-          </span>
-          <span>Commission: <strong>£{(data.total_commission || 0).toFixed(2)}</strong></span>
-        </div>
-      )}
-
-      {/* Filter toggles */}
-      <div className="settled-filters">
-        {['all', 'won', 'lost'].map(f => (
-          <button
-            key={f}
-            className={`btn-filter ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
-          >
-            {f === 'all' ? 'All' : f === 'won' ? 'Won Only' : 'Lost Only'}
-          </button>
-        ))}
-      </div>
-
-      {loading && <p className="empty">Loading settled bets from Betfair...</p>}
-
-      {!loading && data && data.message && (
-        <p className="empty">{data.message}</p>
-      )}
-
-      {!loading && data && Object.keys(data.days || {}).length === 0 && !data.message && (
-        <p className="empty">No settled bets found for this period. Only LIVE bets appear here.</p>
-      )}
-
-      {/* Hidden table for Excel export */}
-      {data && data.days && (
-        <table id="settled-export-table" style={{ display: 'none' }}>
-          <thead>
-            <tr>
-              <th>Date</th><th>Settled</th><th>Runner</th><th>Venue</th>
-              <th>Odds</th><th>Stake</th><th>Outcome</th><th>P/L</th>
-              <th>Commission</th><th>Rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(data.days).flatMap(([date, dayData]) =>
-              dayData.bets.map((b, i) => (
-                <tr key={`${date}-${i}`}>
-                  <td>{date}</td>
-                  <td>{b.settled_date ? new Date(b.settled_date).toLocaleTimeString() : ''}</td>
-                  <td>{b.runner_name}</td>
-                  <td>{b.venue}</td>
-                  <td>{b.price_matched?.toFixed(2)}</td>
-                  <td>{b.size_settled?.toFixed(2)}</td>
-                  <td>{b.bet_outcome}</td>
-                  <td>{b.profit?.toFixed(2)}</td>
-                  <td>{b.commission?.toFixed(2)}</td>
-                  <td>{b.rule_applied}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      )}
-
-      {!loading && data && data.days && (
-        <div className="settled-grouped">
-          {Object.entries(data.days).map(([date, dayData]) => {
-            const filteredBets = getFilteredBets(dayData.bets)
-            if (filteredBets.length === 0) return null
-
-            return (
-              <div key={date} className="settled-date-group">
-                <div className="settled-date-header" onClick={() => toggleDay(date)}>
-                  <span className="settled-date-label">
-                    {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
-                  </span>
-                  <span className="settled-date-stats">
-                    <span>{dayData.races} race{dayData.races !== 1 ? 's' : ''}</span>
-                    <span>{dayData.wins}W-{dayData.losses}L</span>
-                    <span>{dayData.strike_rate}%</span>
-                    <span className={dayData.day_pl >= 0 ? 'text-success' : 'text-danger'}>
-                      {dayData.day_pl >= 0 ? '+' : ''}£{dayData.day_pl.toFixed(2)}
-                    </span>
-                  </span>
-                  <button
-                    className="btn btn-analysis btn-sm"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openChat(date, `Analyse my settled betting results for ${date}. I had ${dayData.wins} wins and ${dayData.losses} losses with a P/L of £${dayData.day_pl.toFixed(2)} and a strike rate of ${dayData.strike_rate}%. Provide insights on performance by rule, odds band analysis, liability management, and actionable suggestions for improving results.`)
-                    }}
-                  >
-                    AI Report
-                  </button>
-                </div>
-
-                {!collapsedDays.has(date) && (
-                  <div className="settled-bet-list">
-                    {filteredBets.map((b, i) => (
-                      <div key={i} className={`settled-card ${b.bet_outcome === 'WON' ? 'settled-won' : 'settled-lost'}`}>
-                        <div className="settled-card-header">
-                          <span className={`settled-outcome ${b.bet_outcome === 'WON' ? 'outcome-won' : 'outcome-lost'}`}>
-                            {b.bet_outcome === 'WON' ? 'WON' : 'LOST'}
-                          </span>
-                          <span className="settled-runner">{b.runner_name}</span>
-                          <span className="settled-venue">{b.venue}</span>
-                          <span className={`settled-pl ${(b.profit || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
-                            {(b.profit || 0) >= 0 ? '+' : ''}£{(b.profit || 0).toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="settled-card-details">
-                          <span>Odds: <strong className="cell-lay-odds">{b.price_matched?.toFixed(2)}</strong></span>
-                          <span>Stake: £{b.size_settled?.toFixed(2)}</span>
-                          <span>Rule: <code>{b.rule_applied || '—'}</code></span>
-                          <span>Settled: {b.settled_date ? new Date(b.settled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                          {b.commission > 0 && <span>Comm: £{b.commission?.toFixed(2)}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Rules Tab ──
-function RulesTab({ results }) {
-  if (!results || results.length === 0) {
-    return <p className="empty">No markets evaluated yet.</p>
-  }
-  const fname = `chimera_rules_${new Date().toISOString().slice(0, 10)}`
-  return (
-    <div>
-      <div className="tab-toolbar">
-        <h2>Rule Evaluations</h2>
-        <SnapshotButton tableId="rules-table" filename={fname} />
-      </div>
-      <table id="rules-table">
-        <thead>
-          <tr>
-            <th>Venue</th>
-            <th>Race</th>
-            <th>Favourite</th>
-            <th>Odds</th>
-            <th>2nd Fav</th>
-            <th>Odds</th>
-            <th>Rule</th>
-            <th>Bets</th>
-          </tr>
-        </thead>
-        <tbody>
-          {results.map((r, i) => (
-            <tr key={i} className={r.skipped ? 'row-skip' : ''}>
-              <td>{r.venue}</td>
-              <td>{r.market_name}</td>
-              <td>{r.favourite?.name || '-'}</td>
-              <td>{r.favourite?.odds?.toFixed(2) || '-'}</td>
-              <td>{r.second_favourite?.name || '-'}</td>
-              <td>{r.second_favourite?.odds?.toFixed(2) || '-'}</td>
-              <td>
-                {r.skipped
-                  ? <span className="skip">{r.skip_reason}</span>
-                  : <code>{r.rule_applied}</code>
-                }
-              </td>
-              <td>{r.instructions?.length || 0}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="tab-toolbar bottom">
-        <SnapshotButton tableId="rules-table" filename={fname} />
-      </div>
-    </div>
-  )
-}
-
-// ── Errors Tab ──
-function ErrorsTab({ errors }) {
-  if (!errors || errors.length === 0) {
-    return <p className="empty">No errors. Suspiciously quiet.</p>
-  }
-  return (
-    <div>
-      <h2>Errors</h2>
-      <div className="error-list">
-        {errors.map((e, i) => (
-          <div key={i} className="error-item">
-            <span className="error-time">
-              {new Date(e.timestamp).toLocaleTimeString()}
-            </span>
-            <span>{e.message}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ── API Keys Tab ──
 function ApiKeysTab() {
   const [keys, setKeys] = useState([])
@@ -1513,7 +826,6 @@ function ApiKeysTab() {
         Use the <code>X-API-Key</code> header or <code>?api_key=</code> query param.
       </p>
 
-      {/* Generate form */}
       <form className="api-key-form" onSubmit={handleGenerate}>
         <input
           type="text"
@@ -1524,7 +836,6 @@ function ApiKeysTab() {
         <button type="submit" className="btn btn-primary">Generate Key</button>
       </form>
 
-      {/* New key display */}
       {newKey && (
         <div className="new-key-box">
           <p><strong>New API key created — copy it now, it won't be shown again:</strong></p>
@@ -1537,7 +848,6 @@ function ApiKeysTab() {
         </div>
       )}
 
-      {/* Endpoints reference */}
       <div className="api-endpoints">
         <h3>Data Endpoints</h3>
         <table>
@@ -1556,7 +866,6 @@ function ApiKeysTab() {
         </table>
       </div>
 
-      {/* Existing keys */}
       {keys.length > 0 && (
         <div className="api-keys-list">
           <h3>Active Keys</h3>
@@ -1600,7 +909,6 @@ function ReportsTab() {
   const [showTemplateSelect, setShowTemplateSelect] = useState(false)
   const reportContentRef = useRef(null)
 
-  // Load templates + reports on mount
   useEffect(() => {
     api('/api/reports/templates').then(data => setTemplates(data.templates || []))
     fetchReports()
@@ -1610,7 +918,6 @@ function ReportsTab() {
     api('/api/reports').then(data => setReports(data.reports || []))
   }
 
-  // Fetch sessions for selected date
   useEffect(() => {
     if (!selectedDate) { setDaySessions([]); return }
     setLoadingSessions(true)
@@ -1630,9 +937,7 @@ function ReportsTab() {
     )
   }
 
-  const handleGenerateReport = () => {
-    setShowTemplateSelect(true)
-  }
+  const handleGenerateReport = () => { setShowTemplateSelect(true) }
 
   const handleConfirmGenerate = async () => {
     if (selectedSessionIds.length === 0) return
@@ -1677,20 +982,19 @@ function ReportsTab() {
 <html><head>
 <title>${viewingReport?.title || 'CHIMERA Report'}</title>
 <style>
-  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.7; max-width: 900px; margin: 0 auto; }
-  h1 { font-size: 22px; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; color: #0a0f1e; }
-  h2 { font-size: 18px; color: #0a0f1e; margin-top: 28px; }
-  h3 { font-size: 15px; color: #333; margin-top: 24px; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
-  th { background: #0a0f1e; color: #fff; padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
-  tr:nth-child(even) td { background: #f8f9fa; }
-  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
-  ul { padding-left: 20px; }
-  li { margin-bottom: 6px; }
-  hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
-  em { color: #666; }
-  strong { color: #0a0f1e; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; padding: 40px; color: #1a1a2e; line-height: 1.7; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+  h2 { font-size: 16px; color: #1a1a2e; margin-top: 24px; }
+  h3 { font-size: 14px; color: #4a4a5a; margin-top: 20px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+  th { background: #f8f9fa; color: #4a4a5a; padding: 8px 12px; text-align: left; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  ul { padding-left: 18px; }
+  li { margin-bottom: 4px; }
+  hr { border: none; border-top: 1px solid #e5e7eb; margin: 20px 0; }
+  em { color: #8a8a9a; }
+  strong { color: #1a1a2e; }
   @media print { body { padding: 20px; } }
 </style>
 </head><body>${content}</body></html>`)
@@ -1698,26 +1002,18 @@ function ReportsTab() {
     setTimeout(() => { printWindow.print() }, 500)
   }
 
-  // Simple markdown to HTML converter
   const renderMarkdown = (md) => {
     if (!md) return ''
     let html = md
-      // Headers
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
       .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      // Bold & italic
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Code
       .replace(/`(.+?)`/g, '<code>$1</code>')
-      // Horizontal rule
       .replace(/^---$/gm, '<hr/>')
-      // Bullet lists
       .replace(/^- (.+)$/gm, '<li>$1</li>')
-    // Wrap consecutive <li> in <ul>
     html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
-    // Tables
     html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, (match, headerRow, bodyRows) => {
       const headers = headerRow.split('|').map(h => h.trim()).filter(Boolean)
       const rows = bodyRows.trim().split('\n').map(row =>
@@ -1730,12 +1026,10 @@ function ReportsTab() {
       table += '</tbody></table>'
       return table
     })
-    // Paragraphs (lines not already wrapped)
     html = html.replace(/^(?!<[hultdor])((?!<).+)$/gm, '<p>$1</p>')
     return html
   }
 
-  // Render structured ChimeraReport JSON as HTML
   const renderJsonReport = (data) => {
     if (!data) return ''
     const fmtPL = (v) => v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}`
@@ -1743,13 +1037,11 @@ function ReportsTab() {
     const fmtOdds = (v) => v?.toFixed(2) ?? '—'
     let h = ''
 
-    // Meta & Title
     const m = data.meta || {}
     h += `<h1>CHIMERA Lay Engine Performance Report</h1>`
     h += `<h2>Day ${m.day_number || '?'} — ${m.trading_date || ''}</h2>`
     h += `<p><em>Prepared by ${m.prepared_by || 'CHIMERA AI Agent'} | ${m.engine_version || ''} | ${m.dry_run_disabled ? 'LIVE' : 'DRY RUN'}</em></p>`
 
-    // Executive Summary
     const es = data.executive_summary
     if (es) {
       h += `<h2>Executive Summary</h2>`
@@ -1760,7 +1052,6 @@ function ReportsTab() {
       }
     }
 
-    // Day Performance
     const dp = data.day_performance
     if (dp?.slices?.length) {
       h += `<h2>Performance Summary</h2>`
@@ -1772,7 +1063,6 @@ function ReportsTab() {
       if (dp.narrative) h += `<p><em>${dp.narrative}</em></p>`
     }
 
-    // Odds Band Analysis
     const ob = data.odds_band_analysis
     if (ob?.bands?.length) {
       h += `<h2>Odds Band Analysis</h2>`
@@ -1784,7 +1074,6 @@ function ReportsTab() {
       if (ob.narrative) h += `<p><em>${ob.narrative}</em></p>`
     }
 
-    // Discipline Analysis
     const da = data.discipline_analysis
     if (da?.rows?.length) {
       h += `<h2>Discipline Analysis</h2>`
@@ -1796,7 +1085,6 @@ function ReportsTab() {
       if (da.narrative) h += `<p><em>${da.narrative}</em></p>`
     }
 
-    // Venue Analysis
     const va = data.venue_analysis
     if (va?.rows?.length) {
       h += `<h2>Venue Analysis</h2>`
@@ -1808,19 +1096,17 @@ function ReportsTab() {
       if (va.narrative) h += `<p><em>${va.narrative}</em></p>`
     }
 
-    // Individual Bets (exclude VOID/NR — only show confirmed WIN/LOSS)
     const confirmedBets = (data.bets || []).filter(b => b.result === 'WIN' || b.result === 'LOSS')
     if (confirmedBets.length) {
       h += `<h2>Individual Bet Breakdown</h2>`
       h += '<table><thead><tr><th>Time</th><th>Runner</th><th>Venue</th><th>Market</th><th>Odds</th><th>Stake</th><th>Liability</th><th>P/L</th><th>Result</th><th>Band</th><th>Rule</th></tr></thead><tbody>'
       confirmedBets.forEach(b => {
-        const resultClass = b.result === 'WIN' ? 'color:#22c55e' : b.result === 'LOSS' ? 'color:#ef4444' : ''
+        const resultClass = b.result === 'WIN' ? 'color:#16a34a' : b.result === 'LOSS' ? 'color:#dc2626' : ''
         h += `<tr><td>${b.race_time || ''}</td><td>${b.selection}</td><td>${b.venue}</td><td>${b.market || ''}</td><td>${fmtOdds(b.odds)}</td><td>£${b.stake?.toFixed(2)}</td><td>£${b.liability?.toFixed(2)}</td><td>${fmtPL(b.pl)}</td><td style="${resultClass}"><strong>${b.result}</strong></td><td>${b.band_label || ''}</td><td>${b.rule || ''}</td></tr>`
       })
       h += '</tbody></table>'
     }
 
-    // Cumulative Performance
     const cp = data.cumulative_performance
     if (cp?.by_day?.length) {
       h += `<h2>Cumulative Performance — By Day</h2>`
@@ -1840,7 +1126,6 @@ function ReportsTab() {
       h += '</tbody></table>'
     }
 
-    // Conclusions
     const cc = data.conclusions
     if (cc) {
       if (cc.findings?.length) {
@@ -1859,7 +1144,6 @@ function ReportsTab() {
       }
     }
 
-    // Appendix
     const ap = data.appendix
     if (ap?.data_sources?.length) {
       h += `<hr/><h3>Data Sources</h3><ul>`
@@ -1873,14 +1157,11 @@ function ReportsTab() {
     return h
   }
 
-  // Render report content — handles both JSON and markdown formats
   const renderReportContent = (report) => {
     if (!report?.content) return ''
     let content = report.content
-    // If content is a string, try to parse as JSON first
     if (typeof content === 'string') {
       let trimmed = content.trim()
-      // Strip markdown code fences (```json ... ```) if present
       if (trimmed.startsWith('```')) {
         trimmed = trimmed.replace(/^```\w*\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
       }
@@ -1892,9 +1173,7 @@ function ReportsTab() {
         }
       }
     }
-    // JSON structured report
     if (typeof content === 'object') return renderJsonReport(content)
-    // Legacy markdown report
     return renderMarkdown(content)
   }
 
@@ -1904,7 +1183,7 @@ function ReportsTab() {
       <div>
         <div className="tab-toolbar">
           <button className="btn btn-secondary btn-back" onClick={() => setViewingReport(null)}>
-            ← Back to Reports
+            Back to Reports
           </button>
           <h2>{viewingReport.title}</h2>
           <button className="btn btn-primary" onClick={handleDownloadPDF}>
@@ -1918,14 +1197,12 @@ function ReportsTab() {
     )
   }
 
-  // Get available dates from all sessions (for the date picker)
   const today = new Date().toISOString().slice(0, 10)
 
   return (
     <div>
       <h2>Reports</h2>
 
-      {/* ── Date & Session Selector ── */}
       <div className="report-controls">
         <div className="report-date-row">
           <label>Select Date:</label>
@@ -1973,7 +1250,6 @@ function ReportsTab() {
                   ))}
                 </div>
 
-                {/* Template selection overlay */}
                 {showTemplateSelect && (
                   <div className="report-template-select">
                     <h3>Choose Template</h3>
@@ -2017,7 +1293,6 @@ function ReportsTab() {
         )}
       </div>
 
-      {/* ── Report List ── */}
       <div className="report-list-section">
         <h3>Generated Reports</h3>
         {reports.length === 0 ? (
@@ -2049,11 +1324,201 @@ function ReportsTab() {
   )
 }
 
+// ── Dashboard ──
+function Dashboard() {
+  const [state, setState] = useState(null)
+  const [tab, setTab] = useState('live')
+  const intervalRef = useRef(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatInitialDate, setChatInitialDate] = useState(null)
+  const [chatInitialMessage, setChatInitialMessage] = useState(null)
+
+  const fetchState = useCallback(async () => {
+    try {
+      const s = await api('/api/state')
+      setState(s)
+    } catch (e) {
+      console.error('Failed to fetch state:', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchState()
+    intervalRef.current = setInterval(fetchState, 10000)
+    return () => clearInterval(intervalRef.current)
+  }, [fetchState])
+
+  const handleStart = async () => {
+    await api('/api/engine/start', { method: 'POST' })
+    fetchState()
+  }
+  const handleStop = async () => {
+    await api('/api/engine/stop', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleDryRun = async () => {
+    await api('/api/engine/dry-run', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleSpreadControl = async () => {
+    await api('/api/engine/spread-control', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleJofsControl = async () => {
+    await api('/api/engine/jofs-control', { method: 'POST' })
+    fetchState()
+  }
+  const handleSetPointValue = async (value) => {
+    await api('/api/engine/point-value', {
+      method: 'POST',
+      body: JSON.stringify({ value: parseFloat(value) }),
+    })
+    fetchState()
+  }
+  const handleSetProcessWindow = async (minutes) => {
+    await api('/api/engine/process-window', {
+      method: 'POST',
+      body: JSON.stringify({ minutes }),
+    })
+    fetchState()
+  }
+  const handleResetBets = async () => {
+    if (!confirm('Clear all bets and re-process all markets?')) return
+    await api('/api/engine/reset-bets', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleCountry = async (country) => {
+    const current = state.countries || ['GB', 'IE']
+    const updated = current.includes(country)
+      ? current.filter(c => c !== country)
+      : [...current, country]
+    if (updated.length === 0) return
+    await api('/api/engine/countries', {
+      method: 'POST',
+      body: JSON.stringify({ countries: updated }),
+    })
+    fetchState()
+  }
+  const handleLogout = async () => {
+    await api('/api/logout', { method: 'POST' })
+    window.location.reload()
+  }
+
+  const openChat = (date = null, initialMessage = null) => {
+    setChatInitialDate(date)
+    setChatInitialMessage(initialMessage)
+    setChatOpen(true)
+  }
+  const closeChat = () => {
+    setChatOpen(false)
+    setChatInitialMessage(null)
+  }
+
+  if (!state) return <div className="loading">Loading engine state...</div>
+
+  const s = state.summary || {}
+
+  const TAB_CONFIG = [
+    { id: 'engine', label: 'Engine' },
+    { id: 'live', label: 'Live' },
+    { id: 'history', label: 'History' },
+    { id: 'backtest', label: 'Backtest' },
+    { id: 'reports', label: 'Reports' },
+    { id: 'api', label: 'API Keys' },
+  ]
+
+  return (
+    <div className="dashboard">
+      {/* ── Header ── */}
+      <header>
+        <div className="header-left">
+          <h1>CHIMERA</h1>
+          <Badge status={state.status} />
+          {state.dry_run && <span className="badge dry-run">DRY RUN</span>}
+        </div>
+        <div className="header-right">
+          {state.balance != null && (
+            <span className="balance">£{state.balance?.toFixed(2)}</span>
+          )}
+          <span className="date">{state.date}</span>
+          <button className="btn-chat-icon" onClick={() => openChat()}>AI Chat</button>
+          <button className="btn-logout" onClick={handleLogout}>Logout</button>
+        </div>
+      </header>
+
+      {/* ── Stats Ribbon ── */}
+      <div className="stats-ribbon">
+        <div className="stats-ribbon-left">
+          <span className="stat">Markets: <strong>{s.total_markets || 0}</strong></span>
+          <span className="stat">Bets: <strong>{s.bets_placed || 0}</strong></span>
+          {s.spread_rejections > 0 && <span className="stat">Rejected: <strong>{s.spread_rejections}</strong></span>}
+          {s.jofs_splits > 0 && <span className="stat">JOFS: <strong>{s.jofs_splits}</strong></span>}
+          <span className="stat">Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
+          <span className="stat">Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
+        </div>
+        <div className="stats-ribbon-right">
+          {state.next_race && (
+            <span className="next-race-compact">
+              Next: {state.next_race.venue}{' '}
+              {new Date(state.next_race.race_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+              {' — '}{state.next_race.minutes_to_off > 0
+                ? `${Math.round(state.next_race.minutes_to_off)}m`
+                : 'OFF'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <nav className="tabs">
+        {TAB_CONFIG.map(t => (
+          <button
+            key={t.id}
+            className={tab === t.id ? 'active' : ''}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.id === 'engine' && state.errors?.length > 0 && <span className="tab-dot red" />}
+          </button>
+        ))}
+      </nav>
+
+      {/* ── Tab Content ── */}
+      <div className="tab-content">
+        {tab === 'engine' && (
+          <EngineTab state={state}
+            onStart={handleStart} onStop={handleStop}
+            onToggleDryRun={handleToggleDryRun}
+            onResetBets={handleResetBets}
+            onToggleCountry={handleToggleCountry}
+            onToggleJofs={handleToggleJofsControl}
+            onToggleSpread={handleToggleSpreadControl}
+            onSetProcessWindow={handleSetProcessWindow}
+            onSetPointValue={handleSetPointValue}
+          />
+        )}
+        {tab === 'live' && <LiveTab bets={state.recent_bets} results={state.recent_results} errors={state.errors} />}
+        {tab === 'history' && <HistoryTab openChat={openChat} />}
+        {tab === 'backtest' && <BacktestTab />}
+        {tab === 'reports' && <ReportsTab />}
+        {tab === 'api' && <ApiKeysTab />}
+      </div>
+
+      {/* ── Chat Drawer ── */}
+      <ChatDrawer
+        isOpen={chatOpen}
+        onClose={closeChat}
+        initialDate={chatInitialDate}
+        initialMessage={chatInitialMessage}
+      />
+    </div>
+  )
+}
+
 // ── App Root ──
 export default function App() {
   const [authed, setAuthed] = useState(false)
 
-  // Check if already authenticated (e.g. after cold start recovery)
   useEffect(() => {
     api('/api/state')
       .then(s => {

@@ -2,6 +2,24 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [2.0.0] — 2026-02-26
+
+### Changed
+- **Full UI redesign** — Replaced dark glassmorphism theme with clean, corporate white financial terminal aesthetic inspired by Allen Gray Investment. White backgrounds, Inter font, 12px body text, minimal decoration, corporate blue (#2563eb) accent.
+- **Tab restructure** — Reorganised from 8 tabs to 6: Engine | Live | History | Backtest | Reports | API Keys. Default tab changed to Live.
+- **Stats ribbon** — Replaced the bulky controls section with a compact single-line stats ribbon between header and tabs showing engine status, markets, bets, staked, liability, and next race.
+- **Engine tab** — All controls (start/stop, dry run, processing window, countries, JOFS, spread control, point value) moved into a dedicated Engine tab with clean section layout. Errors shown as collapsible section with red dot indicator on tab.
+- **Live tab** — New primary view showing current session bets in real-time with collapsible rule evaluations and error alert bar.
+- **Backtest tab** — New placeholder tab for upcoming backtesting module.
+- **Login panel** — Clean white card on light background, removed emoji and gradient decorations.
+- **Chat drawer** — White background with blue left border, light message bubbles, clean input bar.
+
+### Removed
+- All `backdrop-filter: blur()`, gradient backgrounds, glow animations, and glassmorphism effects.
+- Standalone Market, Matched, Settled, Rules, and Errors tabs (functionality preserved via API and folded into other tabs).
+- Lexend/Poppins fonts replaced with Inter.
+- Horse emoji from header and login.
+
 ## [1.9.0] — 2026-02-26
 
 ### Added
