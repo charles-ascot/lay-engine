@@ -1203,13 +1203,21 @@ def generate_report(req: GenerateReportRequest):
         clean_text = re.sub(r'\n?```\s*$', '', clean_text)
         clean_text = clean_text.strip()
 
+        report_json = None
         try:
             report_json = json.loads(clean_text)
-        except json.JSONDecodeError as je:
-            logging.error(f"Failed to parse AI report JSON: {je}")
-            logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
-            # Fall back to storing raw text
-            report_json = None
+        except json.JSONDecodeError:
+            # Try extracting JSON object from surrounding text
+            match = re.search(r'(\{[\s\S]*\})', clean_text)
+            if match:
+                try:
+                    report_json = json.loads(match.group(1))
+                except json.JSONDecodeError as je2:
+                    logging.error(f"Failed to parse AI report JSON: {je2}")
+                    logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
+            else:
+                logging.error("No JSON object found in AI response")
+                logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
 
         report_id = f"rpt_{now.strftime('%Y%m%d_%H%M%S')}"
         template_info = REPORT_TEMPLATES[req.template]

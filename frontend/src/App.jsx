@@ -1346,8 +1346,8 @@ function ReportsTab() {
 
   const renderJsonReport = (data) => {
     if (!data) return ''
-    const fmtPL = (v) => v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}`
-    const fmtPct = (v) => `${(v * 100).toFixed(1)}%`
+    const fmtPL = (v) => v == null ? '—' : v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}`
+    const fmtPct = (v) => v == null ? '—' : `${(v * 100).toFixed(1)}%`
     const fmtOdds = (v) => v?.toFixed(2) ?? '—'
     let h = ''
     const m = data.meta || {}
@@ -1421,8 +1421,11 @@ function ReportsTab() {
     let content = report.content
     if (typeof content === 'string') {
       let trimmed = content.trim()
-      if (trimmed.startsWith('```')) trimmed = trimmed.replace(/^```\w*\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
-      if (trimmed.startsWith('{')) { try { content = JSON.parse(trimmed) } catch (e) { /* not json */ } }
+      // Strip markdown code fences
+      trimmed = trimmed.replace(/^```\w*\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
+      // Extract JSON object even if surrounded by text
+      const jsonMatch = trimmed.match(/(\{[\s\S]*\})/)
+      if (jsonMatch) { try { content = JSON.parse(jsonMatch[1]) } catch (e) { /* not json */ } }
     }
     if (typeof content === 'object') return renderJsonReport(content)
     return renderMarkdown(content)
