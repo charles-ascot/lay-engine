@@ -1,7 +1,7 @@
 {
   "name": "chimera-lay-engine-ui",
   "private": true,
-  "version": "1.7.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

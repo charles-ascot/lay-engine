@@ -1130,11 +1130,15 @@ function EngineTab({ state, onStart, onStop, onToggleDryRun, onResetBets, onTogg
   const [newKey, setNewKey] = useState(null)
   const [loadingKeys, setLoadingKeys] = useState(true)
   const [copied, setCopied] = useState(false)
+  const [recorder, setRecorder] = useState(null)
 
   const fetchKeys = () => {
     api('/api/keys').then(data => { setKeys(data.keys || []); setLoadingKeys(false) }).catch(() => setLoadingKeys(false))
   }
-  useEffect(() => { fetchKeys() }, [])
+  useEffect(() => {
+    fetchKeys()
+    api('/api/data-recorder/status').then(setRecorder).catch(() => setRecorder({ status: 'error', error: 'Failed to check' }))
+  }, [])
 
   const handleGenerate = async (e) => {
     e.preventDefault()
@@ -1267,6 +1271,31 @@ function EngineTab({ state, onStart, onStop, onToggleDryRun, onResetBets, onTogg
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* ── Data Recorder Section ── */}
+      <div className="api-section" style={{ marginTop: 16 }}>
+        <h3>Data Recorder</h3>
+        <p className="api-description">Live market data feed from the CHIMERA Data Recorder.</p>
+        <table>
+          <tbody>
+            <tr>
+              <td>Feed URL</td>
+              <td><code>{recorder?.url || 'https://datarec.thync.online/api/feed/'}</code></td>
+              <td>
+                <span className={`badge ${recorder?.status === 'connected' ? 'badge-live' : recorder?.status === 'disabled' ? 'badge-monitoring' : 'badge-error'}`}>
+                  {recorder?.status || 'checking...'}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {recorder?.status === 'error' && (
+          <p style={{ color: 'var(--danger)', fontSize: 11, marginTop: 8 }}>{recorder.error}</p>
+        )}
+        {recorder?.status === 'disabled' && (
+          <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 8 }}>Set <code>DATA_RECORDER_ENABLED=true</code> in environment to enable.</p>
+        )}
       </div>
     </div>
   )

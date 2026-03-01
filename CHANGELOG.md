@@ -2,6 +2,18 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [2.2.0] — 2026-03-01
+
+### Added
+- **Data Recorder integration** — New `/api/data-recorder/status` endpoint checks connectivity to the CHIMERA Data Recorder feed at `datarec.thync.online`. Configurable via `DATA_RECORDER_URL` and `DATA_RECORDER_ENABLED` environment variables.
+- **Data Recorder UI** — Engine tab now shows Data Recorder connection status with feed URL, live/disabled/error badge, and configuration guidance.
+
+### Fixed
+- **Report rendering** — More robust JSON extraction from AI responses using regex fallback; handles cases where the AI wraps JSON in preamble text. Both backend and frontend now try harder to find valid JSON.
+- **Report value formatting** — `fmtPL` and `fmtPct` helpers now handle null/undefined values gracefully instead of crashing.
+- **History tab charts** — Added Cumulative P/L and Win/Loss charts to the History tab. History tab now fetches settled data for chart rendering.
+- **Odds drift chart** — Requires 3+ monitoring snapshots before rendering; shows "Collecting odds data" message for markets with fewer snapshots.
+
 ## [2.1.0] — 2026-02-26
 
 ### Added

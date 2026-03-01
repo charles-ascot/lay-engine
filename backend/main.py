@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import tempfile
+import requests as http_requests
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -380,6 +381,21 @@ def get_monitoring_data(market_id: str):
     """Return odds monitoring snapshots for a specific market."""
     snapshots = engine.monitoring.get(market_id, [])
     return {"market_id": market_id, "snapshots": snapshots}
+
+
+@app.get("/api/data-recorder/status")
+def data_recorder_status():
+    """Check connectivity to the CHIMERA Data Recorder feed."""
+    url = os.environ.get("DATA_RECORDER_URL", "https://datarec.thync.online/api/feed/")
+    enabled = os.environ.get("DATA_RECORDER_ENABLED", "false").lower() == "true"
+    if not enabled:
+        return {"status": "disabled", "url": url}
+    try:
+        resp = http_requests.get(url, timeout=5)
+        resp.raise_for_status()
+        return {"status": "connected", "url": url, "data": resp.json()}
+    except Exception as e:
+        return {"status": "error", "url": url, "error": str(e)}
 
 
 @app.post("/api/engine/countries")
