@@ -374,21 +374,26 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   )
 }
 
-// ── Live Tab — Racing Card + Auto Betting ──
-function LiveTab({ state, onStart, onStop }) {
+// ── Shared Racing Card Tab (used by both Live and Dry Run tabs) ──
+function LiveTab({ state, onStart, onStop, onResetBets, mode = 'live' }) {
   const [markets, setMarkets] = useState([])
   const [selectedMarketId, setSelectedMarketId] = useState(null)
   const [book, setBook] = useState(null)
   const [loadingBook, setLoadingBook] = useState(false)
   const [countryFilter, setCountryFilter] = useState('all')
+  const [rulesOpen, setRulesOpen] = useState(false)
   const [settingsConfirmed, setSettingsConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
   )
 
+  const isDryRunMode = mode === 'dryrun'
   const isRunning = state.status === 'RUNNING'
   const isLiveRunning = isRunning && !state.dry_run
+  const isDryRunning = isRunning && state.dry_run
+  const isThisModeRunning = isDryRunMode ? isDryRunning : isLiveRunning
   const errors = state.errors || []
   const s = state.summary || {}
+  const results = state.recent_results || []
 
   // Poll markets list every 30s
   useEffect(() => {
@@ -427,11 +432,11 @@ function LiveTab({ state, onStart, onStop }) {
     byVenue[m.venue].push(m)
   })
 
-  // Bets indexed by market_id
+  // Bets indexed by market_id — only show bets relevant to this mode
   const betsByMarket = {}
-  ;(state.recent_bets || []).forEach(b => {
-    if (b.market_id) betsByMarket[b.market_id] = b
-  })
+  ;(state.recent_bets || [])
+    .filter(b => isDryRunMode ? b.dry_run : !b.dry_run)
+    .forEach(b => { if (b.market_id) betsByMarket[b.market_id] = b })
 
   const availableCountries = [...new Set(markets.map(m => m.country))].filter(Boolean)
 
@@ -449,43 +454,87 @@ function LiveTab({ state, onStart, onStop }) {
   return (
     <div className="live-racing-tab">
 
-      {/* ── Auto Bet Control Bar ── */}
+      {/* ── Control Bar ── */}
       <div className="live-control-bar">
         <div className="live-control-left">
-          {isLiveRunning ? (
-            <>
-              <button className="btn btn-danger" onClick={onStop}>⏹ Stop Auto Betting</button>
-              <span className="live-active-badge">● AUTO BETTING ACTIVE</span>
-              {state.last_scan && (
-                <span className="live-scan-time">
-                  Last scan: {new Date(state.last_scan).toLocaleTimeString()}
-                  {s.monitoring > 0 && ` · ${s.monitoring} monitoring`}
-                  {s.processed != null && ` · ${s.processed} processed`}
-                </span>
-              )}
-            </>
+          {isDryRunMode ? (
+            // ── Dry Run controls ──
+            isThisModeRunning ? (
+              <>
+                <button className="btn btn-danger" onClick={onStop}>Stop Dry Run</button>
+                {onResetBets && (
+                  <button className="btn btn-secondary" onClick={onResetBets}>Clear &amp; Re-process</button>
+                )}
+                <span className="badge badge-warning" style={{ fontSize: 11 }}>PAPER BETS ONLY</span>
+                {state.last_scan && (
+                  <span className="live-scan-time">
+                    Last scan: {new Date(state.last_scan).toLocaleTimeString()}
+                    {s.monitoring > 0 && ` · ${s.monitoring} monitoring`}
+                    {s.processed != null && ` · ${s.processed} processed`}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn btn-warning btn-auto-bet"
+                  onClick={() => onStart('dryrun')}
+                  disabled={!settingsConfirmed}
+                  title={!settingsConfirmed ? 'Confirm your parameters in Bet Settings first' : 'Start dry run simulation'}
+                >
+                  Start Dry Run
+                </button>
+                <span className="badge badge-warning" style={{ fontSize: 11 }}>PAPER BETS ONLY — No real money at risk</span>
+                {!settingsConfirmed ? (
+                  <span className="live-settings-note">
+                    Go to <strong>Bet Settings</strong> and confirm your parameters first.
+                  </span>
+                ) : isRunning && !state.dry_run ? (
+                  <span className="live-settings-note warn">
+                    Engine running in Live mode — stop it in the Live tab first.
+                  </span>
+                ) : (
+                  <span className="live-settings-note ready">Settings confirmed — ready to simulate</span>
+                )}
+              </>
+            )
           ) : (
-            <>
-              <button
-                className="btn btn-primary btn-auto-bet"
-                onClick={() => onStart('live')}
-                disabled={!settingsConfirmed}
-                title={!settingsConfirmed ? 'Confirm your parameters in Bet Settings first' : 'Start auto live betting'}
-              >
-                ▶ Auto Live Bet
-              </button>
-              {!settingsConfirmed ? (
-                <span className="live-settings-note">
-                  ⚠ Go to <strong>Bet Settings</strong> and confirm your parameters before enabling auto betting.
-                </span>
-              ) : isRunning && state.dry_run ? (
-                <span className="live-settings-note warn">
-                  Engine running in Dry Run mode — stop it in the Dry Run tab first.
-                </span>
-              ) : (
-                <span className="live-settings-note ready">✓ Settings confirmed — ready to auto bet</span>
-              )}
-            </>
+            // ── Live controls ──
+            isThisModeRunning ? (
+              <>
+                <button className="btn btn-danger" onClick={onStop}>Stop Auto Betting</button>
+                <span className="live-active-badge">AUTO BETTING ACTIVE</span>
+                {state.last_scan && (
+                  <span className="live-scan-time">
+                    Last scan: {new Date(state.last_scan).toLocaleTimeString()}
+                    {s.monitoring > 0 && ` · ${s.monitoring} monitoring`}
+                    {s.processed != null && ` · ${s.processed} processed`}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn btn-primary btn-auto-bet"
+                  onClick={() => onStart('live')}
+                  disabled={!settingsConfirmed}
+                  title={!settingsConfirmed ? 'Confirm your parameters in Bet Settings first' : 'Start auto live betting'}
+                >
+                  Auto Live Bet
+                </button>
+                {!settingsConfirmed ? (
+                  <span className="live-settings-note">
+                    Go to <strong>Bet Settings</strong> and confirm your parameters before enabling auto betting.
+                  </span>
+                ) : isRunning && state.dry_run ? (
+                  <span className="live-settings-note warn">
+                    Engine running in Dry Run mode — stop it in the Dry Run tab first.
+                  </span>
+                ) : (
+                  <span className="live-settings-note ready">Settings confirmed — ready to auto bet</span>
+                )}
+              </>
+            )
           )}
         </div>
         <div className="live-control-right">
@@ -514,6 +563,22 @@ function LiveTab({ state, onStart, onStop }) {
         <div className="live-error-bar">
           <strong>{errors.length} error{errors.length !== 1 ? 's' : ''}</strong>{' '}
           {errors[errors.length - 1]?.message}
+        </div>
+      )}
+
+      {/* Dry Run P&L summary strip */}
+      {isDryRunMode && s.dry_run_bets > 0 && (
+        <div className="dryrun-pnl-strip">
+          <span>Paper Bets: <strong>{s.dry_run_bets}</strong></span>
+          <span>Wins: <strong style={{ color: '#16a34a' }}>{s.dry_run_wins || 0}</strong></span>
+          <span>Losses: <strong style={{ color: '#dc2626' }}>{s.dry_run_losses || 0}</strong></span>
+          <span>Pending: <strong>{s.dry_run_pending || 0}</strong></span>
+          <span>
+            Paper P&amp;L:{' '}
+            <strong style={{ color: (s.dry_run_pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
+              {(s.dry_run_pnl || 0) >= 0 ? '+' : ''}£{(s.dry_run_pnl || 0).toFixed(2)}
+            </strong>
+          </span>
         </div>
       )}
 
@@ -563,7 +628,7 @@ function LiveTab({ state, onStart, onStop }) {
                             ? <span className={`race-bet-result ${bet.outcome === 'WIN' ? 'result-won' : 'result-lost'}`}>
                                 {bet.outcome === 'WIN' ? '+' : ''}£{(bet.pnl || 0).toFixed(2)}
                               </span>
-                            : <span className="race-bet-pending">placed</span>
+                            : <span className="race-bet-pending">{isDryRunMode ? 'paper' : 'placed'}</span>
                           }
                         </div>
                       )}
@@ -579,7 +644,7 @@ function LiveTab({ state, onStart, onStop }) {
         <div className="live-book-panel">
           {!selectedMarketId && (
             <div className="live-book-empty">
-              <span>← Select a race to view market prices</span>
+              <span>Select a race to view market prices</span>
             </div>
           )}
           {selectedMarketId && loadingBook && !book && (
@@ -604,13 +669,14 @@ function LiveTab({ state, onStart, onStop }) {
                 </div>
               </div>
 
-              {/* Our bet on this race */}
+              {/* Our bet / paper bet on this race */}
               {betsByMarket[selectedMarketId] && (() => {
                 const b = betsByMarket[selectedMarketId]
                 const cls = b.outcome === 'WIN' ? 'bet-won' : b.outcome === 'LOSS' ? 'bet-lost' : 'bet-active'
                 return (
                   <div className={`live-our-bet ${cls}`}>
-                    <span>Our Lay: <strong>{b.runner_name}</strong></span>
+                    {isDryRunMode && <span className="badge badge-warning" style={{ fontSize: 9, marginRight: 4 }}>PAPER</span>}
+                    <span>{isDryRunMode ? 'Paper Lay' : 'Our Lay'}: <strong>{b.runner_name}</strong></span>
                     <span>@ {b.price?.toFixed(2)}</span>
                     <span>Stake £{b.size?.toFixed(2)}</span>
                     <span>Liability £{b.liability?.toFixed(2)}</span>
@@ -645,7 +711,7 @@ function LiveTab({ state, onStart, onStop }) {
                           <div style={{ display: 'flex', alignItems: 'center' }}>
                             <span className="runner-cloth">{runner.sort_priority}</span>
                             <span className="runner-name">{runner.runner_name}</span>
-                            {isOurBet && <span className="runner-lay-badge">OUR LAY</span>}
+                            {isOurBet && <span className="runner-lay-badge">{isDryRunMode ? 'PAPER LAY' : 'OUR LAY'}</span>}
                           </div>
                           {runner.status !== 'ACTIVE' && <div className="runner-jockey">Non-runner</div>}
                         </td>
@@ -665,209 +731,61 @@ function LiveTab({ state, onStart, onStop }) {
         </div>
 
       </div>
-    </div>
-  )
-}
 
-// ── Dry Run Tab ──
-function DryRunControlTab({ state, onStart, onStop, onResetBets }) {
-  const bets = state.recent_bets || []
-  const results = state.recent_results || []
-  const errors = state.errors || []
-  const s = state.summary || {}
-  const [rulesOpen, setRulesOpen] = useState(false)
-
-  const isRunning = state.status === 'RUNNING'
-  const isDryRun = state.dry_run
-  const isDryRunning = isRunning && isDryRun
-
-  const fname = `chimera_dryrun_${new Date().toISOString().slice(0, 10)}`
-
-  return (
-    <div>
-      {/* Controls */}
-      <div className="engine-section">
-        <div className="engine-row">
+      {/* Rule Evaluations — dry run only, below the racing layout */}
+      {isDryRunMode && (
+        <div className="collapsible-section" style={{ borderTop: '1px solid #e5e7eb', marginTop: 0 }}>
           <button
-            className={`btn ${isDryRunning ? 'btn-danger' : 'btn-warning'}`}
-            onClick={isRunning ? onStop : () => onStart('dryrun')}
+            className="collapsible-header"
+            onClick={() => setRulesOpen(o => !o)}
           >
-            {isDryRunning ? 'Stop Dry Run' : isRunning ? 'Switch to Dry Run & Restart' : 'Start Dry Run'}
+            <span>Rule Evaluations</span>
+            <span className="collapsible-count">{results.length}</span>
+            <span className="collapsible-chevron">{rulesOpen ? '-' : '+'}</span>
           </button>
-          {isDryRunning && (
-            <button className="btn btn-secondary" onClick={onResetBets}>
-              Clear &amp; Re-process
-            </button>
-          )}
-          <span className="badge badge-warning" style={{ fontSize: 11 }}>PAPER BETS ONLY — No real money at risk</span>
-        </div>
-        {isRunning && (
-          <div className="engine-info" style={{ marginTop: 8 }}>
-            {state.session_start && (
-              <span>Started: {new Date(state.session_start).toLocaleTimeString()}</span>
-            )}
-            {state.last_scan && (
-              <span>Last scan: {new Date(state.last_scan).toLocaleTimeString()}</span>
-            )}
-            {s.processed != null && (
-              <span>Markets processed: <strong>{s.processed}</strong></span>
-            )}
-            {s.monitoring > 0 && (
-              <span>Monitoring: <strong>{s.monitoring}</strong> markets</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Paper P&L summary */}
-      {isDryRun && s.dry_run_bets > 0 && (
-        <div className="engine-section">
-          <h3>Paper P&amp;L</h3>
-          <div className="engine-row">
-            <span className="stat">Bets: <strong>{s.dry_run_bets || 0}</strong></span>
-            <span className="stat">Settled: <strong>{s.dry_run_settled || 0}</strong></span>
-            <span className="stat">Pending: <strong>{s.dry_run_pending || 0}</strong></span>
-            <span className="stat">Wins: <strong style={{ color: '#16a34a' }}>{s.dry_run_wins || 0}</strong></span>
-            <span className="stat">Losses: <strong style={{ color: '#dc2626' }}>{s.dry_run_losses || 0}</strong></span>
-            <span className="stat">
-              Paper P&amp;L:{' '}
-              <strong style={{ color: (s.dry_run_pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
-                {(s.dry_run_pnl || 0) >= 0 ? '+' : ''}£{(s.dry_run_pnl || 0).toFixed(2)}
-              </strong>
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Error bar */}
-      {errors.length > 0 && (
-        <div className="live-error-bar">
-          <strong>{errors.length} error{errors.length !== 1 ? 's' : ''}</strong>{' '}
-          {errors[errors.length - 1]?.message}
-        </div>
-      )}
-
-      {/* Paper bets table */}
-      <div className="tab-toolbar">
-        <h2>Paper Bets — Current Session</h2>
-        {bets.length > 0 && (
-          <SnapshotButton tableId="dryrun-bets-table" filename={fname} />
-        )}
-      </div>
-
-      {bets.length === 0 ? (
-        <p className="empty">
-          {isDryRunning
-            ? 'No paper bets placed yet. Engine is scanning markets within the processing window.'
-            : isRunning
-            ? 'Engine is running in Live mode. Go to the Live tab to see live bets.'
-            : 'Start a Dry Run to simulate live betting without real money. Settings (bet timing, JOFS, etc.) are configured in Bet Settings.'}
-        </p>
-      ) : (
-        <div className="table-scroll">
-          <table id="dryrun-bets-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Country</th>
-                <th>Runner</th>
-                <th>Odds</th>
-                <th>Stake</th>
-                <th>Liability</th>
-                <th>Rule</th>
-                <th>Outcome</th>
-                <th>Paper P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bets.map((b, i) => {
-                const outcome = b.outcome
-                const rowClass = outcome === 'WIN' ? 'row-win' : outcome === 'LOSS' ? 'row-loss' : 'row-dry'
-                return (
-                  <tr key={i} className={rowClass}>
-                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                    <td>{b.country || '—'}</td>
-                    <td>{b.runner_name}</td>
-                    <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
-                    <td>£{b.size?.toFixed(2)}</td>
-                    <td>£{b.liability?.toFixed(2)}</td>
-                    <td><code>{b.rule_applied}</code></td>
-                    <td>
-                      {outcome
-                        ? <span className={outcome === 'WIN' ? 'text-success' : outcome === 'LOSS' ? 'text-danger' : 'text-muted'}>
-                            {outcome}
-                          </span>
-                        : <span className="text-muted">pending</span>
-                      }
-                    </td>
-                    <td>
-                      {b.pnl != null
-                        ? <span className={b.pnl >= 0 ? 'text-success' : 'text-danger'}>
-                            {b.pnl >= 0 ? '+' : ''}£{b.pnl.toFixed(2)}
-                          </span>
-                        : <span className="text-muted">—</span>
-                      }
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Collapsible: Rule Evaluations */}
-      <div className="collapsible-section">
-        <button
-          className="collapsible-header"
-          onClick={() => setRulesOpen(o => !o)}
-        >
-          <span>Rule Evaluations</span>
-          <span className="collapsible-count">{results.length}</span>
-          <span className="collapsible-chevron">{rulesOpen ? '▲' : '▼'}</span>
-        </button>
-        {rulesOpen && (
-          <div className="collapsible-body">
-            {results.length === 0 ? (
-              <p className="empty">No markets evaluated yet.</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Venue</th>
-                    <th>Race</th>
-                    <th>Favourite</th>
-                    <th>Odds</th>
-                    <th>2nd Fav</th>
-                    <th>Odds</th>
-                    <th>Rule</th>
-                    <th>Bets</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((r, i) => (
-                    <tr key={i} className={r.skipped ? 'row-skip' : ''}>
-                      <td>{r.venue}</td>
-                      <td>{r.market_name}</td>
-                      <td>{r.favourite?.name || '—'}</td>
-                      <td>{r.favourite?.odds?.toFixed(2) || '—'}</td>
-                      <td>{r.second_favourite?.name || '—'}</td>
-                      <td>{r.second_favourite?.odds?.toFixed(2) || '—'}</td>
-                      <td>
-                        {r.skipped
-                          ? <span className="skip">{r.skip_reason}</span>
-                          : <code>{r.rule_applied}</code>
-                        }
-                      </td>
-                      <td>{r.instructions?.length || 0}</td>
+          {rulesOpen && (
+            <div className="collapsible-body">
+              {results.length === 0 ? (
+                <p className="empty">No markets evaluated yet.</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Venue</th>
+                      <th>Race</th>
+                      <th>Favourite</th>
+                      <th>Odds</th>
+                      <th>2nd Fav</th>
+                      <th>Odds</th>
+                      <th>Rule</th>
+                      <th>Bets</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
+                  </thead>
+                  <tbody>
+                    {results.map((r, i) => (
+                      <tr key={i} className={r.skipped ? 'row-skip' : ''}>
+                        <td>{r.venue}</td>
+                        <td>{r.market_name}</td>
+                        <td>{r.favourite?.name || '—'}</td>
+                        <td>{r.favourite?.odds?.toFixed(2) || '—'}</td>
+                        <td>{r.second_favourite?.name || '—'}</td>
+                        <td>{r.second_favourite?.odds?.toFixed(2) || '—'}</td>
+                        <td>
+                          {r.skipped
+                            ? <span className="skip">{r.skip_reason}</span>
+                            : <code>{r.rule_applied}</code>
+                          }
+                        </td>
+                        <td>{r.instructions?.length || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -2610,11 +2528,12 @@ function Dashboard() {
           />
         )}
         {tab === 'dryrun' && (
-          <DryRunControlTab
+          <LiveTab
             state={state}
             onStart={handleStart}
             onStop={handleStop}
             onResetBets={handleResetBets}
+            mode="dryrun"
           />
         )}
         {tab === 'backtest' && <BacktestTab />}
