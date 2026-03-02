@@ -393,7 +393,12 @@ def data_recorder_status():
     try:
         resp = http_requests.get(url, timeout=5)
         resp.raise_for_status()
-        return {"status": "connected", "url": url, "data": resp.json()}
+        # Try JSON, but connectivity is confirmed either way
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"content_type": resp.headers.get("content-type", "unknown"), "length": len(resp.content)}
+        return {"status": "connected", "url": url, "data": data}
     except Exception as e:
         return {"status": "error", "url": url, "error": str(e)}
 
