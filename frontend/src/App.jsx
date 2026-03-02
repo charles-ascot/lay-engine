@@ -374,178 +374,61 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   )
 }
 
-// ── Engine Tab ──
-function EngineTab({ state, onStart, onStop, onToggleDryRun, onResetBets, onToggleCountry, onToggleJofs, onToggleSpread, onSetProcessWindow, onSetPointValue }) {
-  const s = state.summary || {}
-  const errors = state.errors || []
-
-  return (
-    <div className="engine-tab">
-
-      {/* Power */}
-      <div className="engine-section">
-        <h3>Power</h3>
-        <div className="engine-row">
-          <button
-            className={`btn ${state.status === 'RUNNING' ? 'btn-danger' : 'btn-primary'}`}
-            onClick={state.status === 'RUNNING' ? onStop : onStart}
-          >
-            {state.status === 'RUNNING' ? 'Stop Engine' : 'Start Engine'}
-          </button>
-          <button
-            className={`btn ${state.dry_run ? 'btn-warning' : 'btn-success'}`}
-            onClick={onToggleDryRun}
-          >
-            {state.dry_run ? 'Dry Run ON → Go Live' : 'LIVE → Switch to Dry Run'}
-          </button>
-          <button className="btn btn-secondary" onClick={onResetBets}>
-            Clear &amp; Re-process
-          </button>
-        </div>
-      </div>
-
-      {/* Processing */}
-      <div className="engine-section">
-        <h3>Processing</h3>
-        <div className="engine-row">
-          <label className="engine-label">
-            Window:
-            <select
-              value={state.process_window || 12}
-              onChange={e => onSetProcessWindow(+e.target.value)}
-            >
-              {[5, 8, 10, 12, 15, 20, 30].map(v => (
-                <option key={v} value={v}>{v} min before off</option>
-              ))}
-            </select>
-          </label>
-          <label className="engine-label">
-            Stake pts (£):
-            <select
-              value={state.point_value || 1}
-              onChange={e => onSetPointValue(e.target.value)}
-            >
-              {[1, 2, 5, 10, 20, 50].map(v => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-          <div className="country-toggles">
-            <span className="engine-label">Markets:</span>
-            {ALL_COUNTRIES.map(c => (
-              <button
-                key={c}
-                className={`btn-toggle ${(state.countries || ['GB', 'IE']).includes(c) ? 'active' : ''}`}
-                onClick={() => onToggleCountry(c)}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Risk Controls */}
-      <div className="engine-section">
-        <h3>Risk Controls</h3>
-        <div className="engine-row">
-          <span className="engine-label">JOFS (Joint Favourite Split):</span>
-          <button
-            className={`btn-toggle ${state.jofs_control ? 'active' : ''}`}
-            onClick={onToggleJofs}
-            title="When gap between 1st and 2nd favourite is ≤ 0.2, stake is split evenly across both"
-          >
-            {state.jofs_control ? 'ON' : 'OFF'}
-          </button>
-          <span className="engine-label" style={{ marginLeft: 16 }}>Spread Control:</span>
-          <button
-            className={`btn-toggle ${state.spread_control ? 'active' : ''}`}
-            onClick={onToggleSpread}
-            title="Validates back-lay spreads to reject bets in illiquid markets"
-          >
-            {state.spread_control ? 'ON' : 'OFF'}
-          </button>
-        </div>
-      </div>
-
-      {/* Dry Run Stats (only when in dry run mode with settled bets) */}
-      {state.dry_run && (s.dry_run_bets > 0) && (
-        <div className="engine-section">
-          <h3>Paper P&amp;L</h3>
-          <div className="engine-row">
-            <span className="stat">Bets: <strong>{s.dry_run_bets || 0}</strong></span>
-            <span className="stat">Settled: <strong>{s.dry_run_settled || 0}</strong></span>
-            <span className="stat">Pending: <strong>{s.dry_run_pending || 0}</strong></span>
-            <span className="stat">Wins: <strong style={{ color: '#16a34a' }}>{s.dry_run_wins || 0}</strong></span>
-            <span className="stat">Losses: <strong style={{ color: '#dc2626' }}>{s.dry_run_losses || 0}</strong></span>
-            <span className="stat">
-              Paper P&amp;L:{' '}
-              <strong style={{ color: (s.dry_run_pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
-                {(s.dry_run_pnl || 0) >= 0 ? '+' : ''}£{(s.dry_run_pnl || 0).toFixed(2)}
-              </strong>
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Session Info */}
-      <div className="engine-section">
-        <h3>Session</h3>
-        <div className="engine-info">
-          <span>Session: <code>{state.session_id || '—'}</code></span>
-          <span>Mode: <strong>{state.session_mode || (state.dry_run ? 'DRY_RUN' : 'LIVE')}</strong></span>
-          {state.session_start && (
-            <span>Started: {new Date(state.session_start).toLocaleTimeString()}</span>
-          )}
-          {state.last_scan && (
-            <span>Last scan: {new Date(state.last_scan).toLocaleTimeString()}</span>
-          )}
-          {s.processed != null && (
-            <span>Markets processed: <strong>{s.processed}</strong></span>
-          )}
-          {(s.spread_rejections > 0) && (
-            <span>Spread rejected: <strong style={{ color: '#d97706' }}>{s.spread_rejections}</strong></span>
-          )}
-          {(s.jofs_splits > 0) && (
-            <span>JOFS splits: <strong style={{ color: '#7c3aed' }}>{s.jofs_splits}</strong></span>
-          )}
-          {(s.monitoring > 0) && (
-            <span>Monitoring (pre-window): <strong>{s.monitoring}</strong> markets</span>
-          )}
-        </div>
-      </div>
-
-      {/* Errors (folded in) */}
-      {errors.length > 0 && (
-        <div className="engine-section">
-          <h3>Recent Errors <span className="tab-dot red" style={{ display: 'inline-block', marginLeft: 4 }} /></h3>
-          <div className="error-list">
-            {errors.slice(-10).map((e, i) => (
-              <div key={i} className="error-item">
-                <span className="error-time">{new Date(e.timestamp).toLocaleTimeString()}</span>
-                <span>{e.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Live Tab ──
-function LiveTab({ state }) {
+function LiveControlTab({ state, onStart, onStop, onResetBets }) {
   const bets = state.recent_bets || []
   const results = state.recent_results || []
   const errors = state.errors || []
   const [rulesOpen, setRulesOpen] = useState(false)
   const [marketOpen, setMarketOpen] = useState(false)
+  const s = state.summary || {}
+
+  const isRunning = state.status === 'RUNNING'
   const isDryRun = state.dry_run
+  const isLiveRunning = isRunning && !isDryRun
 
   const fname = `chimera_live_${new Date().toISOString().slice(0, 10)}`
 
   return (
     <div>
+      {/* Engine Controls */}
+      <div className="engine-section">
+        <div className="engine-row">
+          <button
+            className={`btn ${isLiveRunning ? 'btn-danger' : 'btn-primary'}`}
+            onClick={isRunning ? onStop : () => onStart('live')}
+          >
+            {isLiveRunning ? 'Stop Engine' : isRunning ? 'Switch to Live & Restart' : 'Start Live Engine'}
+          </button>
+          {isRunning && (
+            <button className="btn btn-secondary" onClick={onResetBets}>
+              Clear &amp; Re-process
+            </button>
+          )}
+          {isRunning && (
+            <span className={`badge ${isDryRun ? 'badge-dry' : 'badge-live'}`}>
+              {isDryRun ? 'DRY RUN MODE' : 'LIVE MODE'}
+            </span>
+          )}
+        </div>
+        {isRunning && (
+          <div className="engine-info" style={{ marginTop: 8 }}>
+            {state.session_start && (
+              <span>Started: {new Date(state.session_start).toLocaleTimeString()}</span>
+            )}
+            {state.last_scan && (
+              <span>Last scan: {new Date(state.last_scan).toLocaleTimeString()}</span>
+            )}
+            {s.processed != null && (
+              <span>Markets processed: <strong>{s.processed}</strong></span>
+            )}
+            {s.monitoring > 0 && (
+              <span>Monitoring: <strong>{s.monitoring}</strong> markets</span>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Error bar */}
       {errors.length > 0 && (
         <div className="live-error-bar">
@@ -554,24 +437,9 @@ function LiveTab({ state }) {
         </div>
       )}
 
-      {/* Dry run P&L header */}
-      {isDryRun && (() => {
-        const s = state.summary || {}
-        const settled = s.dry_run_settled || 0
-        if (settled === 0) return null
-        const pnl = s.dry_run_pnl || 0
-        return (
-          <div className={`live-pnl-bar ${pnl >= 0 ? 'pnl-pos' : 'pnl-neg'}`}>
-            Paper P&amp;L: <strong>{pnl >= 0 ? '+' : ''}£{pnl.toFixed(2)}</strong>
-            {' · '}{s.dry_run_wins || 0}W / {s.dry_run_losses || 0}L
-            {' · '}{settled} settled of {s.dry_run_bets || 0}
-          </div>
-        )
-      })()}
-
       {/* Bets table */}
       <div className="tab-toolbar">
-        <h2>Current Session Bets</h2>
+        <h2>Current Session — Live Bets</h2>
         {bets.length > 0 && (
           <SnapshotButton tableId="live-bets-table" filename={fname} />
         )}
@@ -579,9 +447,11 @@ function LiveTab({ state }) {
 
       {bets.length === 0 ? (
         <p className="empty">
-          {state.status === 'RUNNING'
+          {isLiveRunning
             ? 'No bets placed yet this session. Engine is running — bets will appear here within the processing window.'
-            : 'Engine is stopped. Start the engine to begin placing bets.'}
+            : isDryRun && isRunning
+            ? 'Engine is running in Dry Run mode. Go to the Dry Run tab to see paper bets.'
+            : 'Start the Live Engine to begin placing real bets.'}
         </p>
       ) : (
         <div className="table-scroll">
@@ -596,54 +466,25 @@ function LiveTab({ state }) {
                 <th>Liability</th>
                 <th>Rule</th>
                 <th>Status</th>
-                {isDryRun && <th>Outcome</th>}
-                {isDryRun && <th>Paper P&amp;L</th>}
               </tr>
             </thead>
             <tbody>
-              {bets.map((b, i) => {
-                const outcome = b.outcome
-                const rowClass = outcome === 'WIN' ? 'row-win' : outcome === 'LOSS' ? 'row-loss' : (b.dry_run ? 'row-dry' : '')
-                return (
-                  <tr key={i} className={rowClass}>
-                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                    <td>{b.country || '—'}</td>
-                    <td>{b.runner_name}</td>
-                    <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
-                    <td>£{b.size?.toFixed(2)}</td>
-                    <td>£{b.liability?.toFixed(2)}</td>
-                    <td><code>{b.rule_applied}</code></td>
-                    <td>
-                      {b.dry_run
-                        ? <span className="badge-dry">DRY</span>
-                        : <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                            {b.betfair_response?.status || '?'}
-                          </span>
-                      }
-                    </td>
-                    {isDryRun && (
-                      <td>
-                        {outcome
-                          ? <span className={outcome === 'WIN' ? 'text-success' : outcome === 'LOSS' ? 'text-danger' : 'text-muted'}>
-                              {outcome}
-                            </span>
-                          : <span className="text-muted">pending</span>
-                        }
-                      </td>
-                    )}
-                    {isDryRun && (
-                      <td>
-                        {b.pnl != null
-                          ? <span className={b.pnl >= 0 ? 'text-success' : 'text-danger'}>
-                              {b.pnl >= 0 ? '+' : ''}£{b.pnl.toFixed(2)}
-                            </span>
-                          : <span className="text-muted">—</span>
-                        }
-                      </td>
-                    )}
-                  </tr>
-                )
-              })}
+              {bets.map((b, i) => (
+                <tr key={i}>
+                  <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+                  <td>{b.country || '—'}</td>
+                  <td>{b.runner_name}</td>
+                  <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
+                  <td>£{b.size?.toFixed(2)}</td>
+                  <td>£{b.liability?.toFixed(2)}</td>
+                  <td><code>{b.rule_applied}</code></td>
+                  <td>
+                    <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
+                      {b.betfair_response?.status || '?'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -717,6 +558,303 @@ function LiveTab({ state }) {
   )
 }
 
+// ── Dry Run Tab ──
+function DryRunControlTab({ state, onStart, onStop, onResetBets }) {
+  const bets = state.recent_bets || []
+  const results = state.recent_results || []
+  const errors = state.errors || []
+  const s = state.summary || {}
+  const [rulesOpen, setRulesOpen] = useState(false)
+
+  const isRunning = state.status === 'RUNNING'
+  const isDryRun = state.dry_run
+  const isDryRunning = isRunning && isDryRun
+
+  const fname = `chimera_dryrun_${new Date().toISOString().slice(0, 10)}`
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="engine-section">
+        <div className="engine-row">
+          <button
+            className={`btn ${isDryRunning ? 'btn-danger' : 'btn-warning'}`}
+            onClick={isRunning ? onStop : () => onStart('dryrun')}
+          >
+            {isDryRunning ? 'Stop Dry Run' : isRunning ? 'Switch to Dry Run & Restart' : 'Start Dry Run'}
+          </button>
+          {isDryRunning && (
+            <button className="btn btn-secondary" onClick={onResetBets}>
+              Clear &amp; Re-process
+            </button>
+          )}
+          <span className="badge badge-warning" style={{ fontSize: 11 }}>PAPER BETS ONLY — No real money at risk</span>
+        </div>
+        {isRunning && (
+          <div className="engine-info" style={{ marginTop: 8 }}>
+            {state.session_start && (
+              <span>Started: {new Date(state.session_start).toLocaleTimeString()}</span>
+            )}
+            {state.last_scan && (
+              <span>Last scan: {new Date(state.last_scan).toLocaleTimeString()}</span>
+            )}
+            {s.processed != null && (
+              <span>Markets processed: <strong>{s.processed}</strong></span>
+            )}
+            {s.monitoring > 0 && (
+              <span>Monitoring: <strong>{s.monitoring}</strong> markets</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Paper P&L summary */}
+      {isDryRun && s.dry_run_bets > 0 && (
+        <div className="engine-section">
+          <h3>Paper P&amp;L</h3>
+          <div className="engine-row">
+            <span className="stat">Bets: <strong>{s.dry_run_bets || 0}</strong></span>
+            <span className="stat">Settled: <strong>{s.dry_run_settled || 0}</strong></span>
+            <span className="stat">Pending: <strong>{s.dry_run_pending || 0}</strong></span>
+            <span className="stat">Wins: <strong style={{ color: '#16a34a' }}>{s.dry_run_wins || 0}</strong></span>
+            <span className="stat">Losses: <strong style={{ color: '#dc2626' }}>{s.dry_run_losses || 0}</strong></span>
+            <span className="stat">
+              Paper P&amp;L:{' '}
+              <strong style={{ color: (s.dry_run_pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
+                {(s.dry_run_pnl || 0) >= 0 ? '+' : ''}£{(s.dry_run_pnl || 0).toFixed(2)}
+              </strong>
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Error bar */}
+      {errors.length > 0 && (
+        <div className="live-error-bar">
+          <strong>{errors.length} error{errors.length !== 1 ? 's' : ''}</strong>{' '}
+          {errors[errors.length - 1]?.message}
+        </div>
+      )}
+
+      {/* Paper bets table */}
+      <div className="tab-toolbar">
+        <h2>Paper Bets — Current Session</h2>
+        {bets.length > 0 && (
+          <SnapshotButton tableId="dryrun-bets-table" filename={fname} />
+        )}
+      </div>
+
+      {bets.length === 0 ? (
+        <p className="empty">
+          {isDryRunning
+            ? 'No paper bets placed yet. Engine is scanning markets within the processing window.'
+            : isRunning
+            ? 'Engine is running in Live mode. Go to the Live tab to see live bets.'
+            : 'Start a Dry Run to simulate live betting without real money. Settings (bet timing, JOFS, etc.) are configured in Bet Settings.'}
+        </p>
+      ) : (
+        <div className="table-scroll">
+          <table id="dryrun-bets-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Country</th>
+                <th>Runner</th>
+                <th>Odds</th>
+                <th>Stake</th>
+                <th>Liability</th>
+                <th>Rule</th>
+                <th>Outcome</th>
+                <th>Paper P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bets.map((b, i) => {
+                const outcome = b.outcome
+                const rowClass = outcome === 'WIN' ? 'row-win' : outcome === 'LOSS' ? 'row-loss' : 'row-dry'
+                return (
+                  <tr key={i} className={rowClass}>
+                    <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
+                    <td>{b.country || '—'}</td>
+                    <td>{b.runner_name}</td>
+                    <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
+                    <td>£{b.size?.toFixed(2)}</td>
+                    <td>£{b.liability?.toFixed(2)}</td>
+                    <td><code>{b.rule_applied}</code></td>
+                    <td>
+                      {outcome
+                        ? <span className={outcome === 'WIN' ? 'text-success' : outcome === 'LOSS' ? 'text-danger' : 'text-muted'}>
+                            {outcome}
+                          </span>
+                        : <span className="text-muted">pending</span>
+                      }
+                    </td>
+                    <td>
+                      {b.pnl != null
+                        ? <span className={b.pnl >= 0 ? 'text-success' : 'text-danger'}>
+                            {b.pnl >= 0 ? '+' : ''}£{b.pnl.toFixed(2)}
+                          </span>
+                        : <span className="text-muted">—</span>
+                      }
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Collapsible: Rule Evaluations */}
+      <div className="collapsible-section">
+        <button
+          className="collapsible-header"
+          onClick={() => setRulesOpen(o => !o)}
+        >
+          <span>Rule Evaluations</span>
+          <span className="collapsible-count">{results.length}</span>
+          <span className="collapsible-chevron">{rulesOpen ? '▲' : '▼'}</span>
+        </button>
+        {rulesOpen && (
+          <div className="collapsible-body">
+            {results.length === 0 ? (
+              <p className="empty">No markets evaluated yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Venue</th>
+                    <th>Race</th>
+                    <th>Favourite</th>
+                    <th>Odds</th>
+                    <th>2nd Fav</th>
+                    <th>Odds</th>
+                    <th>Rule</th>
+                    <th>Bets</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.map((r, i) => (
+                    <tr key={i} className={r.skipped ? 'row-skip' : ''}>
+                      <td>{r.venue}</td>
+                      <td>{r.market_name}</td>
+                      <td>{r.favourite?.name || '—'}</td>
+                      <td>{r.favourite?.odds?.toFixed(2) || '—'}</td>
+                      <td>{r.second_favourite?.name || '—'}</td>
+                      <td>{r.second_favourite?.odds?.toFixed(2) || '—'}</td>
+                      <td>
+                        {r.skipped
+                          ? <span className="skip">{r.skip_reason}</span>
+                          : <code>{r.rule_applied}</code>
+                        }
+                      </td>
+                      <td>{r.instructions?.length || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Bet Settings Tab ──
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onSetProcessWindow, onSetPointValue }) {
+  const s = state.summary || {}
+  return (
+    <div className="engine-tab">
+
+      <div className="engine-section">
+        <h3>Timing</h3>
+        <p style={{ color: '#8a8a9a', fontSize: 13, marginBottom: 10 }}>
+          How many minutes before the scheduled off time should the engine place bets. This applies to both Live and Dry Run modes.
+        </p>
+        <div className="engine-row">
+          <label className="engine-label">
+            Bet time before off:
+            <select
+              value={state.process_window || 12}
+              onChange={e => onSetProcessWindow(+e.target.value)}
+            >
+              {[5, 8, 10, 12, 15, 20, 30].map(v => (
+                <option key={v} value={v}>{v} min before off</option>
+              ))}
+            </select>
+          </label>
+          <label className="engine-label">
+            Stake point value (£):
+            <select
+              value={state.point_value || 1}
+              onChange={e => onSetPointValue(e.target.value)}
+            >
+              {[1, 2, 5, 10, 20, 50].map(v => (
+                <option key={v} value={v}>£{v} per point</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div className="engine-section">
+        <h3>Markets</h3>
+        <div className="engine-row">
+          <div className="country-toggles">
+            <span className="engine-label">Countries:</span>
+            {ALL_COUNTRIES.map(c => (
+              <button
+                key={c}
+                className={`btn-toggle ${(state.countries || ['GB', 'IE']).includes(c) ? 'active' : ''}`}
+                onClick={() => onToggleCountry(c)}
+              >
+                {COUNTRY_LABELS[c] || c}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="engine-section">
+        <h3>Risk Controls</h3>
+        <div className="engine-row">
+          <span className="engine-label">JOFS (Joint Favourite Split):</span>
+          <button
+            className={`btn-toggle ${state.jofs_control ? 'active' : ''}`}
+            onClick={onToggleJofs}
+            title="When gap between 1st and 2nd favourite is ≤ 0.2, stake is split evenly across both"
+          >
+            {state.jofs_control ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>Spread Control:</span>
+          <button
+            className={`btn-toggle ${state.spread_control ? 'active' : ''}`}
+            onClick={onToggleSpread}
+            title="Validates back-lay spreads to reject bets in illiquid markets"
+          >
+            {state.spread_control ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div className="engine-info" style={{ marginTop: 8 }}>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            JOFS: splits stake evenly when 1st/2nd favourite gap ≤ 0.2 odds
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Spread Control: rejects bets when back-lay spread indicates illiquid market
+          </span>
+          {s.spread_rejections > 0 && (
+            <span>Spread rejected this session: <strong style={{ color: '#d97706' }}>{s.spread_rejections}</strong></span>
+          )}
+          {s.jofs_splits > 0 && (
+            <span>JOFS splits this session: <strong style={{ color: '#7c3aed' }}>{s.jofs_splits}</strong></span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Backtest Tab ──
 function BacktestTab() {
   return (
@@ -738,6 +876,33 @@ function BacktestTab() {
         <div className="placeholder-section">
           <h3>Output</h3>
           <p>Simulated P&amp;L · Strike rate by parameter · Optimal configuration recommendations</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Strategy Tab ──
+function StrategyTab() {
+  return (
+    <div className="backtest-tab">
+      <h2>Strategy</h2>
+      <p className="empty-state">
+        Strategy builder coming soon. Define and manage custom rule sets, configure betting
+        strategies by odds bands, venue filters, and race types.
+      </p>
+      <div className="backtest-placeholder">
+        <div className="placeholder-section">
+          <h3>Rule Builder</h3>
+          <p>Create custom rules · Odds band targeting · Favourite gap thresholds · Time-of-day filters</p>
+        </div>
+        <div className="placeholder-section">
+          <h3>Venue &amp; Race Filters</h3>
+          <p>Include/exclude venues · Race discipline filters · Going conditions · Field size limits</p>
+        </div>
+        <div className="placeholder-section">
+          <h3>Stake Management</h3>
+          <p>Level stakes · Percentage of bank · Stop-loss triggers · Daily limits</p>
         </div>
       </div>
     </div>
@@ -1660,6 +1825,29 @@ function ApiKeysTab() {
   )
 }
 
+// ── Settings Tab ──
+function SettingsTab() {
+  return (
+    <div>
+      <div className="engine-section">
+        <h2>Betfair Connection</h2>
+        <p className="api-description">
+          Betfair API credentials are configured via environment variables on the server.
+          Use the login screen to authenticate your Betfair account session.
+        </p>
+        <div className="engine-info">
+          <span>Authentication: <strong>Betfair SSO (session-based)</strong></span>
+          <span>API: <strong>Betfair Exchange API v1.0</strong></span>
+          <span>Data feed: <strong>REST polling (5s market refresh)</strong></span>
+        </div>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <ApiKeysTab />
+      </div>
+    </div>
+  )
+}
+
 // ── Reports Tab ──
 function ReportsTab() {
   const [selectedDate, setSelectedDate] = useState('')
@@ -2088,12 +2276,14 @@ function ReportsTab() {
 
 // ── Tab config ──
 const TAB_CONFIG = [
-  { id: 'engine', label: 'Engine' },
   { id: 'live', label: 'Live' },
-  { id: 'history', label: 'History' },
+  { id: 'dryrun', label: 'Dry Run' },
   { id: 'backtest', label: 'Backtest' },
+  { id: 'strategy', label: 'Strategy' },
+  { id: 'history', label: 'History' },
+  { id: 'bet-settings', label: 'Bet Settings' },
+  { id: 'settings', label: 'Settings' },
   { id: 'reports', label: 'Reports' },
-  { id: 'api', label: 'API Keys' },
 ]
 
 // ── Dashboard ──
@@ -2120,16 +2310,27 @@ function Dashboard() {
     return () => clearInterval(intervalRef.current)
   }, [fetchState])
 
-  const handleStart = async () => {
+  const handleStart = async (mode = 'live') => {
+    if (state.status === 'RUNNING') {
+      const currentMode = state.dry_run ? 'Dry Run' : 'Live'
+      const newMode = mode === 'live' ? 'Live' : 'Dry Run'
+      if (currentMode !== newMode) {
+        if (!confirm(`Engine is currently running in ${currentMode} mode. Stop and switch to ${newMode}?`)) return
+        await api('/api/engine/stop', { method: 'POST' })
+      } else {
+        return
+      }
+    }
+    if (mode === 'live' && state.dry_run) {
+      await api('/api/engine/dry-run', { method: 'POST' })
+    } else if (mode === 'dryrun' && !state.dry_run) {
+      await api('/api/engine/dry-run', { method: 'POST' })
+    }
     await api('/api/engine/start', { method: 'POST' })
     fetchState()
   }
   const handleStop = async () => {
     await api('/api/engine/stop', { method: 'POST' })
-    fetchState()
-  }
-  const handleToggleDryRun = async () => {
-    await api('/api/engine/dry-run', { method: 'POST' })
     fetchState()
   }
   const handleToggleSpreadControl = async () => {
@@ -2260,20 +2461,35 @@ function Dashboard() {
             onClick={() => setTab(t.id)}
           >
             {t.label}
-            {t.id === 'engine' && hasErrors && <span className="tab-dot red" />}
+            {(t.id === 'live' || t.id === 'dryrun') && hasErrors && <span className="tab-dot red" />}
           </button>
         ))}
       </nav>
 
       {/* ── Tab Content ── */}
       <div className="tab-content">
-        {tab === 'engine' && (
-          <EngineTab
+        {tab === 'live' && (
+          <LiveControlTab
             state={state}
             onStart={handleStart}
             onStop={handleStop}
-            onToggleDryRun={handleToggleDryRun}
             onResetBets={handleResetBets}
+          />
+        )}
+        {tab === 'dryrun' && (
+          <DryRunControlTab
+            state={state}
+            onStart={handleStart}
+            onStop={handleStop}
+            onResetBets={handleResetBets}
+          />
+        )}
+        {tab === 'backtest' && <BacktestTab />}
+        {tab === 'strategy' && <StrategyTab />}
+        {tab === 'history' && <HistoryTab openChat={openChat} />}
+        {tab === 'bet-settings' && (
+          <BetSettingsTab
+            state={state}
             onToggleCountry={handleToggleCountry}
             onToggleJofs={handleToggleJofsControl}
             onToggleSpread={handleToggleSpreadControl}
@@ -2281,11 +2497,8 @@ function Dashboard() {
             onSetPointValue={handleSetPointValue}
           />
         )}
-        {tab === 'live' && <LiveTab state={state} />}
-        {tab === 'history' && <HistoryTab openChat={openChat} />}
-        {tab === 'backtest' && <BacktestTab />}
+        {tab === 'settings' && <SettingsTab />}
         {tab === 'reports' && <ReportsTab />}
-        {tab === 'api' && <ApiKeysTab />}
       </div>
 
       {/* ── Chat Drawer ── */}
