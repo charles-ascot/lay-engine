@@ -35,8 +35,8 @@ DRY_RUN = os.environ.get("DRY_RUN", "true").lower() == "true"
 # Poll interval in seconds
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 
-# Processing window: only place bets within this many minutes of race start
-# This prevents placing bets hours early with meaningless prices
+# Processing window: only place bets within this many minutes of race start.
+# Prevents placing bets hours early with meaningless early-morning prices.
 PROCESS_WINDOW_MINUTES = int(os.environ.get("PROCESS_WINDOW_MINUTES", "12"))
 
 # State file for Cloud Run cold-start recovery
@@ -121,8 +121,8 @@ class LayEngine:
 
         # ── Processing window ──
         self.process_window: int = PROCESS_WINDOW_MINUTES  # Configurable at runtime
-        self.monitoring: dict[str, list[dict]] = {}  # market_id → list of odds snapshots
-        self.next_race: Optional[dict] = None  # The next race approaching its window
+        self.monitoring: dict = {}      # market_id → list of odds snapshots
+        self.next_race: Optional[dict] = None  # Nearest unprocessed race
 
         # ── Credentials for re-auth after cold start ──
         self._username: Optional[str] = None
@@ -180,11 +180,23 @@ class LayEngine:
                 session_bets = self.bets_placed[self._session_bets_start_index:]
                 self.current_session["bets"] = session_bets
                 self.current_session["_last_saved"] = datetime.now(timezone.utc).isoformat()
-                self.current_session["summary"]["total_bets"] = len(session_bets)
-                self.current_session["summary"]["total_stake"] = round(
+                summary = self.current_session.setdefault("summary", {})
+                summary["total_bets"] = len(session_bets)
+                summary["total_stake"] = round(
                     sum(b.get("size", 0) for b in session_bets), 2)
-                self.current_session["summary"]["total_liability"] = round(
+                summary["total_liability"] = round(
                     sum(b.get("liability", 0) for b in session_bets), 2)
+                if self.current_session.get("mode") == "DRY_RUN":
+                    dry_settled = [
+                        b for b in session_bets
+                        if b.get("dry_run") and b.get("outcome") in ("WIN", "LOSS")
+                    ]
+                    summary["paper_pnl"] = round(
+                        sum(b.get("pnl", 0) for b in dry_settled), 2)
+                    summary["paper_wins"] = sum(
+                        1 for b in dry_settled if b.get("outcome") == "WIN")
+                    summary["paper_losses"] = sum(
+                        1 for b in dry_settled if b.get("outcome") == "LOSS")
                 self._save_sessions()
         except Exception as e:
             logger.warning(f"Failed to save state: {e}")
@@ -283,7 +295,11 @@ class LayEngine:
         countries = sorted(set(
             b.get("country") for b in session_bets if b.get("country")
         ))
-        self.current_session["summary"] = {
+        dry_settled = [
+            b for b in session_bets
+            if b.get("dry_run") and b.get("outcome") in ("WIN", "LOSS")
+        ]
+        summary = {
             "total_bets": len(session_bets),
             "total_stake": round(sum(b.get("size", 0) for b in session_bets), 2),
             "total_liability": round(sum(b.get("liability", 0) for b in session_bets), 2),
@@ -292,6 +308,11 @@ class LayEngine:
             )),
             "countries": countries,
         }
+        if self.current_session.get("mode") == "DRY_RUN":
+            summary["paper_pnl"] = round(sum(b.get("pnl", 0) for b in dry_settled), 2)
+            summary["paper_wins"] = sum(1 for b in dry_settled if b.get("outcome") == "WIN")
+            summary["paper_losses"] = sum(1 for b in dry_settled if b.get("outcome") == "LOSS")
+        self.current_session["summary"] = summary
         self.current_session = None
         self._save_sessions()
 
@@ -534,29 +555,29 @@ class LayEngine:
 
     def _scan_and_process(self):
         """
-        Discover markets and process them within the betting window.
+        Discover markets, monitor odds outside the window, and process
+        within the betting window.
+
+        TIMING FIX: The engine previously placed bets the moment markets
+        were discovered (e.g. 07:00 prices for a 16:30 race). Now it only
+        processes markets within `process_window` minutes of race start.
+        Outside the window, odds snapshots are logged for drift analysis.
 
         BEHAVIOUR:
-          - Fetches today's market catalogue from Betfair (discovery)
-          - For each unprocessed market, calculates minutes to race
-          - If race has started (minutes < 0): mark as missed
-          - If race is within process_window: fetch prices, apply rules, place bets
-          - If race is outside window: take an odds snapshot for monitoring
-          - The engine cycles continuously — start once, runs all day
+          - Fetches today's market catalogue from Betfair (every scan)
+          - If minutes_to_off > process_window  → take odds snapshot (monitoring)
+          - If 0 < minutes_to_off ≤ process_window → fetch prices, apply rules, place bets
+          - If minutes_to_off ≤ 0 → missed, mark processed
+          - Engine can be started once at 08:00 and runs all day unattended
         """
         now = datetime.now(timezone.utc)
         self.last_scan = now.isoformat()
 
-        # ── Refresh market catalogue ──
         if not self.client.ensure_session():
             self._add_error("Session expired during scan")
             return
 
         self.markets = self.client.get_todays_win_markets(countries=self.countries)
-
-        # ── Identify next race for dashboard display ──
-        self.next_race = None
-        nearest_minutes = float('inf')
 
         logger.info(
             f"Scan: {len(self.markets)} markets, "
@@ -564,6 +585,10 @@ class LayEngine:
             f"{len(self.bets_placed)} bets placed, "
             f"window={self.process_window}m"
         )
+
+        # Reset next_race tracker each scan
+        self.next_race = None
+        nearest_minutes = float("inf")
 
         for market in self.markets:
             market_id = market["market_id"]
@@ -582,7 +607,7 @@ class LayEngine:
 
             minutes_to_race = (race_time - now).total_seconds() / 60
 
-            # ── Race has started — mark as missed ──
+            # ── Race has started — mark missed ──
             if minutes_to_race < 0:
                 self.processed_markets.add(market_id)
                 if market_id in self.monitoring:
@@ -606,48 +631,48 @@ class LayEngine:
                     "status": "IN_WINDOW" if minutes_to_race <= self.process_window else "MONITORING",
                 }
 
-            # ── INSIDE processing window — fetch prices, apply rules, place bets ──
+            # ── INSIDE window — fetch prices, apply rules, place bets ──
             if minutes_to_race <= self.process_window:
                 logger.info(
-                    f"WINDOW HIT: {market['venue']} {market['market_name']} "
+                    f"⏰ WINDOW HIT: {market['venue']} {market['market_name']} "
                     f"({minutes_to_race:.1f}m to off) — processing now"
                 )
                 self._process_market(market)
-
                 # Clean up monitoring data for this market
                 if market_id in self.monitoring:
                     del self.monitoring[market_id]
 
-            # ── OUTSIDE window — monitor odds for drift tracking ──
+            # ── OUTSIDE window — take an odds snapshot for monitoring ──
             else:
                 self._monitor_market(market, minutes_to_race)
 
-        # Update session summary with monitoring count
+        # ── Update session monitoring count ──
         if self.current_session:
-            self.current_session["summary"]["markets_monitoring"] = len(self.monitoring)
+            self.current_session.setdefault("summary", {})["markets_monitoring"] = len(self.monitoring)
+
+        # ── Settle any dry-run bets whose races have now finished ──
+        self._settle_dry_run_bets()
 
     def _monitor_market(self, market: dict, minutes_to_race: float):
         """
-        Take an odds snapshot for a market that's outside the processing window.
-        These snapshots feed drift analysis in reports.
+        Take an odds snapshot for a market outside the processing window.
+        Snapshots feed drift analysis in reports and the AI agent.
+        Only fires every 5 minutes per market to avoid API spam.
         """
         market_id = market["market_id"]
 
-        # Only snapshot every ~5 minutes to avoid hammering the API
-        if market_id in self.monitoring:
-            last_snapshot = self.monitoring[market_id][-1]
-            last_time = datetime.fromisoformat(last_snapshot["timestamp"])
-            elapsed = (datetime.now(timezone.utc) - last_time).total_seconds()
-            if elapsed < 300:  # 5 minutes
+        # Rate-limit: only one snapshot per 5 minutes per market
+        if market_id in self.monitoring and self.monitoring[market_id]:
+            last_ts = self.monitoring[market_id][-1]["timestamp"]
+            last_time = datetime.fromisoformat(last_ts)
+            if (datetime.now(timezone.utc) - last_time).total_seconds() < 300:
                 return
 
-        # Fetch current prices
         try:
             runners_with_prices, is_valid = self.client.get_market_prices(market_id)
             if not is_valid or not runners_with_prices:
                 return
 
-            # Merge runner names
             name_map = {
                 r["selection_id"]: r["runner_name"]
                 for r in market.get("runners", [])
@@ -671,14 +696,14 @@ class LayEngine:
                 self.monitoring[market_id] = []
             self.monitoring[market_id].append(snapshot)
 
-            # Keep only last 20 snapshots per market (avoid memory bloat)
+            # Cap at 20 snapshots per market
             if len(self.monitoring[market_id]) > 20:
                 self.monitoring[market_id] = self.monitoring[market_id][-20:]
 
+            fav_odds = snapshot["runners"][0]["lay_odds"] if snapshot["runners"] else "?"
             logger.debug(
-                f"MONITORING: {market['venue']} {market['market_name']} "
-                f"({minutes_to_race:.0f}m to off) — "
-                f"fav @ {snapshot['runners'][0]['lay_odds'] if snapshot['runners'] else '?'}"
+                f"📊 MONITORING: {market['venue']} {market['market_name']} "
+                f"({minutes_to_race:.0f}m to off) — fav @ {fav_odds}"
             )
 
         except Exception as e:
@@ -787,15 +812,21 @@ class LayEngine:
                         self.processed_runners.add(runner_key)
                         continue
 
-            self._place_bet(instruction, venue=market["venue"], country=market.get("country", ""))
+            self._place_bet(
+                instruction,
+                venue=market["venue"],
+                country=market.get("country", ""),
+                race_time=market.get("race_time", ""),
+            )
             self.processed_runners.add(runner_key)
 
-    def _place_bet(self, instruction, venue: str = "", country: str = ""):
+    def _place_bet(self, instruction, venue: str = "", country: str = "", race_time: str = ""):
         """
         Place a single lay bet via the Betfair API.
 
         FIX: In DRY_RUN mode, logs everything but doesn't call placeOrders.
         Previously, DRY_RUN prevented markets and prices from even being fetched.
+        race_time is stored so dry-run settlement can look up results later.
         """
         logger.info(
             f"{'[DRY RUN] ' if self.dry_run else ''}"
@@ -809,6 +840,7 @@ class LayEngine:
                 **instruction.to_dict(),
                 "venue": venue,
                 "country": country,
+                "race_time": race_time,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "dry_run": True,
                 "betfair_response": {"status": "DRY_RUN"},
@@ -850,6 +882,101 @@ class LayEngine:
             )
 
     # ──────────────────────────────────────────────
+    #  DRY RUN SETTLEMENT
+    # ──────────────────────────────────────────────
+
+    def _settle_dry_run_bets(self):
+        """
+        For each unsettled dry-run bet whose race has finished, look up the
+        Betfair market result and record WIN / LOSS / UNKNOWN + paper P&L.
+
+        Called every scan cycle.  One API call per unsettled market.
+        Dry-run settlement works even when the engine is currently in LIVE
+        mode (i.e. covers bets placed during an earlier dry-run session today).
+
+        Outcome from the LAYER's perspective:
+          WIN  — the horse we laid did NOT win → we keep the stake (pnl = +size)
+          LOSS — the horse we laid WON         → we pay out (pnl = -liability)
+        """
+        if self.client is None:
+            return
+
+        now = datetime.now(timezone.utc)
+
+        # Collect all dry-run bets that have no outcome yet
+        unsettled = [
+            b for b in self.bets_placed
+            if b.get("dry_run") and "outcome" not in b
+        ]
+        if not unsettled:
+            return
+
+        # Group by market_id — one result lookup per market
+        markets_to_check: dict[str, datetime] = {}
+        for bet in unsettled:
+            market_id = bet.get("market_id")
+            race_time_str = bet.get("race_time")
+            if not market_id or not race_time_str:
+                continue
+            try:
+                race_time = datetime.fromisoformat(
+                    race_time_str.replace("Z", "+00:00")
+                )
+            except ValueError:
+                continue
+            minutes_since = (now - race_time).total_seconds() / 60
+            if minutes_since < 10:
+                continue  # Race hasn't started + 10-min settlement buffer
+            if market_id not in markets_to_check:
+                markets_to_check[market_id] = race_time
+
+        if not markets_to_check:
+            return
+
+        changed = False
+        for market_id, race_time in markets_to_check.items():
+            minutes_since = (now - race_time).total_seconds() / 60
+            result = self.client.get_race_result(market_id)
+
+            if result is None:
+                # API returned nothing (market too old or not found)
+                if minutes_since > 120:
+                    # Give up after 2 hours — mark unknown
+                    for bet in self.bets_placed:
+                        if (bet.get("dry_run") and "outcome" not in bet
+                                and bet.get("market_id") == market_id):
+                            bet["outcome"] = "UNKNOWN"
+                            bet["pnl"] = 0.0
+                            changed = True
+                continue
+
+            if not result.get("settled"):
+                continue  # Market not yet closed — try again next scan
+
+            winner_id = result.get("winner_selection_id")
+            for bet in self.bets_placed:
+                if (bet.get("dry_run") and "outcome" not in bet
+                        and bet.get("market_id") == market_id):
+                    if winner_id is None:
+                        bet["outcome"] = "UNKNOWN"
+                        bet["pnl"] = 0.0
+                    elif bet.get("selection_id") == winner_id:
+                        bet["outcome"] = "LOSS"
+                        bet["pnl"] = round(-bet.get("liability", 0), 2)
+                    else:
+                        bet["outcome"] = "WIN"
+                        bet["pnl"] = round(bet.get("size", 0), 2)
+                    changed = True
+                    logger.info(
+                        f"[DRY RUN SETTLED] {bet.get('runner_name')} "
+                        f"@ {bet.get('venue', '?')}: {bet['outcome']} "
+                        f"(P&L: £{bet['pnl']:+.2f})"
+                    )
+
+        if changed:
+            self._save_state()
+
+    # ──────────────────────────────────────────────
     #  STATE ACCESS (for API)
     # ──────────────────────────────────────────────
 
@@ -868,7 +995,7 @@ class LayEngine:
                 except Exception:
                     pass
 
-        # Upcoming = not yet processed, sorted by race time
+        # Upcoming = not yet processed, enriched with window/monitoring state
         upcoming = []
         for m in self.markets:
             if m["market_id"] not in self.processed_markets:
@@ -876,8 +1003,8 @@ class LayEngine:
                     rt = datetime.fromisoformat(m["race_time"].replace("Z", "+00:00"))
                     if rt > now:
                         m_copy = dict(m)
-                        minutes = (rt - now).total_seconds() / 60
-                        m_copy["minutes_to_off"] = round(minutes, 1)
+                        minutes = round((rt - now).total_seconds() / 60, 1)
+                        m_copy["minutes_to_off"] = minutes
                         m_copy["in_window"] = minutes <= self.process_window
                         m_copy["monitoring_snapshots"] = len(
                             self.monitoring.get(m["market_id"], [])
@@ -892,6 +1019,17 @@ class LayEngine:
         total_stake = sum(b.get("size", 0) for b in self.bets_placed)
         total_liability = sum(b.get("liability", 0) for b in self.bets_placed)
 
+        # Dry-run paper P&L
+        dry_run_bets = [b for b in self.bets_placed if b.get("dry_run")]
+        dry_run_settled = [
+            b for b in dry_run_bets
+            if b.get("outcome") in ("WIN", "LOSS")
+        ]
+        dry_run_pending = sum(1 for b in dry_run_bets if "outcome" not in b)
+        dry_run_pnl = round(sum(b.get("pnl", 0) for b in dry_run_settled), 2)
+        dry_run_wins = sum(1 for b in dry_run_settled if b.get("outcome") == "WIN")
+        dry_run_losses = sum(1 for b in dry_run_settled if b.get("outcome") == "LOSS")
+
         return {
             "authenticated": self.is_authenticated,
             "status": self.status,
@@ -905,6 +1043,9 @@ class LayEngine:
             "balance": self.balance,
             "process_window": self.process_window,
             "next_race": self.next_race,
+            "session_id": self.current_session["session_id"] if self.current_session else None,
+            "session_start": self.current_session["start_time"] if self.current_session else None,
+            "session_mode": self.current_session["mode"] if self.current_session else None,
             "summary": {
                 "total_markets": len(self.markets),
                 "processed": len(self.processed_markets),
@@ -917,8 +1058,15 @@ class LayEngine:
                 ),
                 "total_stake": round(total_stake, 2),
                 "total_liability": round(total_liability, 2),
+                # Paper trading stats (dry-run only)
+                "dry_run_bets": len(dry_run_bets),
+                "dry_run_settled": len(dry_run_settled),
+                "dry_run_pending": dry_run_pending,
+                "dry_run_wins": dry_run_wins,
+                "dry_run_losses": dry_run_losses,
+                "dry_run_pnl": dry_run_pnl,
             },
-            "upcoming": upcoming[:15],
+            "upcoming": upcoming[:10],
             "recent_bets": list(reversed(self.bets_placed)),
             "recent_results": list(reversed(self.results)),
             "spread_rejections": list(reversed(self.spread_rejections[-20:])),

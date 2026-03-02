@@ -14,7 +14,6 @@ import io
 import json
 import logging
 import tempfile
-import requests as http_requests
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -87,11 +86,11 @@ class LoginRequest(BaseModel):
 class CountriesRequest(BaseModel):
     countries: list[str]
 
-class PointValueRequest(BaseModel):
-    value: float
-
 class ProcessWindowRequest(BaseModel):
     minutes: int
+
+class PointValueRequest(BaseModel):
+    value: float
 
 class ChatMessage(BaseModel):
     role: str
@@ -195,8 +194,6 @@ def get_markets():
                 **m,
                 "minutes_to_off": round(minutes_to_off, 1),
                 "status": "IN_PLAY" if minutes_to_off < 0 else "PRE_OFF",
-                "in_window": minutes_to_off > 0 and minutes_to_off <= engine.process_window,
-                "monitoring_snapshots": len(engine.monitoring.get(m["market_id"], [])),
             })
         except (ValueError, KeyError):
             pass
@@ -366,43 +363,6 @@ def get_spread_rejections():
     return {"rejections": list(reversed(engine.spread_rejections[-50:]))}
 
 
-@app.post("/api/engine/process-window")
-def set_process_window(req: ProcessWindowRequest):
-    """Set the processing window (minutes before race to place bets)."""
-    if req.minutes < 1 or req.minutes > 60:
-        raise HTTPException(status_code=400, detail="Window must be 1-60 minutes")
-    engine.process_window = req.minutes
-    engine._save_state()
-    return {"status": "ok", "process_window": engine.process_window}
-
-
-@app.get("/api/monitoring/{market_id}")
-def get_monitoring_data(market_id: str):
-    """Return odds monitoring snapshots for a specific market."""
-    snapshots = engine.monitoring.get(market_id, [])
-    return {"market_id": market_id, "snapshots": snapshots}
-
-
-@app.get("/api/data-recorder/status")
-def data_recorder_status():
-    """Check connectivity to the CHIMERA Data Recorder feed."""
-    url = os.environ.get("DATA_RECORDER_URL", "https://datarec.thync.online/api/feed/")
-    enabled = os.environ.get("DATA_RECORDER_ENABLED", "false").lower() == "true"
-    if not enabled:
-        return {"status": "disabled", "url": url}
-    try:
-        resp = http_requests.get(url, timeout=5)
-        resp.raise_for_status()
-        # Try JSON, but connectivity is confirmed either way
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"content_type": resp.headers.get("content-type", "unknown"), "length": len(resp.content)}
-        return {"status": "connected", "url": url, "data": data}
-    except Exception as e:
-        return {"status": "error", "url": url, "error": str(e)}
-
-
 @app.post("/api/engine/countries")
 def set_countries(req: CountriesRequest):
     """Update the market countries filter."""
@@ -416,6 +376,23 @@ def set_countries(req: CountriesRequest):
     engine.countries = filtered
     engine._save_state()
     return {"countries": engine.countries}
+
+
+@app.post("/api/engine/process-window")
+def set_process_window(req: ProcessWindowRequest):
+    """Set the betting window — how many minutes before race start to place bets."""
+    if req.minutes < 1 or req.minutes > 60:
+        raise HTTPException(status_code=400, detail="Window must be 1–60 minutes")
+    engine.process_window = req.minutes
+    engine._save_state()
+    return {"status": "ok", "process_window": engine.process_window}
+
+
+@app.get("/api/monitoring/{market_id}")
+def get_monitoring_data(market_id: str):
+    """Return odds monitoring snapshots for a specific market (for drift analysis)."""
+    snapshots = engine.monitoring.get(market_id, [])
+    return {"market_id": market_id, "snapshots": snapshots, "count": len(snapshots)}
 
 
 @app.post("/api/engine/reset-bets")
@@ -1224,21 +1201,13 @@ def generate_report(req: GenerateReportRequest):
         clean_text = re.sub(r'\n?```\s*$', '', clean_text)
         clean_text = clean_text.strip()
 
-        report_json = None
         try:
             report_json = json.loads(clean_text)
-        except json.JSONDecodeError:
-            # Try extracting JSON object from surrounding text
-            match = re.search(r'(\{[\s\S]*\})', clean_text)
-            if match:
-                try:
-                    report_json = json.loads(match.group(1))
-                except json.JSONDecodeError as je2:
-                    logging.error(f"Failed to parse AI report JSON: {je2}")
-                    logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
-            else:
-                logging.error("No JSON object found in AI response")
-                logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
+        except json.JSONDecodeError as je:
+            logging.error(f"Failed to parse AI report JSON: {je}")
+            logging.error(f"Raw response (first 500 chars): {report_text[:500]}")
+            # Fall back to storing raw text
+            report_json = None
 
         report_id = f"rpt_{now.strftime('%Y%m%d_%H%M%S')}"
         template_info = REPORT_TEMPLATES[req.template]

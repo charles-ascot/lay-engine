@@ -416,6 +416,47 @@ class BetfairClient:
     #  SETTLED BETS
     # ──────────────────────────────────────────────
 
+    def get_race_result(self, market_id: str) -> Optional[dict]:
+        """
+        Check the result of a race market.
+
+        Returns:
+          { "settled": True,  "winner_selection_id": int|None }  — race settled
+          { "settled": False, "market_status": str }              — race not settled yet
+          None                                                     — market not found / API error
+
+        A market is settled when its status is "CLOSED" and at least one
+        runner has status "WINNER".  This typically happens 5–15 minutes
+        after the race starts.
+        """
+        params = {
+            "marketIds": [market_id],
+            "priceProjection": {
+                "priceData": ["EX_BEST_OFFERS"],
+            },
+        }
+        result = self._api_call("listMarketBook", params)
+        if result is None or len(result) == 0:
+            return None
+
+        market = result[0]
+        status = market.get("status")
+
+        if status != "CLOSED":
+            return {"settled": False, "market_status": status}
+
+        winner_id = None
+        for r in market.get("runners", []):
+            if r.get("status") == "WINNER":
+                winner_id = r["selectionId"]
+                break
+
+        return {
+            "settled": True,
+            "winner_selection_id": winner_id,
+            "market_status": status,
+        }
+
     def get_cleared_orders(
         self,
         settled_from: str = None,
