@@ -140,6 +140,10 @@ class LayEngine:
         # ── Reports ──
         self.reports: list[dict] = []
 
+        # ── Background market refresh (runs when authenticated but engine stopped) ──
+        self._market_thread: Optional[threading.Thread] = None
+        self._market_refresh_active: bool = False
+
         # Try to reload state from disk (Cloud Run cold-start recovery)
         self._load_state()
         self._load_sessions()
@@ -431,6 +435,14 @@ class LayEngine:
             # Store credentials for re-auth after cold start
             self._username = username
             self._password = password
+            # Fetch markets immediately so the Live tab has data without starting the engine
+            try:
+                self.markets = self.client.get_todays_win_markets(countries=self.countries)
+                logger.info(f"Initial market fetch on login: {len(self.markets)} markets")
+            except Exception as e:
+                logger.warning(f"Initial market fetch failed: {e}")
+            # Start background refresh so markets stay current
+            self._start_market_refresh()
             return True, ""
         error = self.client.last_login_error or "unknown"
         self.client = None
@@ -438,10 +450,36 @@ class LayEngine:
 
     def logout(self):
         """Clear credentials and stop engine."""
+        self._market_refresh_active = False
         self.stop()
         self.client = None
         self._username = None
         self._password = None
+
+    def _start_market_refresh(self):
+        """Spawn a daemon thread that refreshes markets every 3 minutes when not running."""
+        self._market_refresh_active = True
+        if self._market_thread and self._market_thread.is_alive():
+            return
+        self._market_thread = threading.Thread(target=self._market_refresh_loop, daemon=True)
+        self._market_thread.start()
+        logger.info("Background market refresh thread started")
+
+    def _market_refresh_loop(self):
+        """Background thread: refresh markets every 3 minutes while authenticated and engine stopped."""
+        while self._market_refresh_active and self.is_authenticated:
+            time.sleep(180)  # 3 minutes
+            if not self._market_refresh_active or not self.is_authenticated:
+                break
+            if self.running:
+                continue  # engine loop handles its own market fetching
+            try:
+                fresh = self.client.get_todays_win_markets(countries=self.countries)
+                if fresh is not None:
+                    self.markets = fresh
+                    logger.info(f"Background market refresh: {len(fresh)} markets")
+            except Exception as e:
+                logger.warning(f"Background market refresh error: {e}")
 
     @property
     def is_authenticated(self) -> bool:
@@ -1030,6 +1068,13 @@ class LayEngine:
         dry_run_wins = sum(1 for b in dry_run_settled if b.get("outcome") == "WIN")
         dry_run_losses = sum(1 for b in dry_run_settled if b.get("outcome") == "LOSS")
 
+        # General W/L stats (any bets with settled outcomes — dry run or live)
+        all_settled = [b for b in self.bets_placed if b.get("outcome") in ("WIN", "LOSS")]
+        wins = sum(1 for b in all_settled if b.get("outcome") == "WIN")
+        losses = sum(1 for b in all_settled if b.get("outcome") == "LOSS")
+        pnl = round(sum(b.get("pnl", 0) for b in all_settled), 2)
+        strike_rate = round(wins / len(all_settled) * 100, 1) if all_settled else None
+
         return {
             "authenticated": self.is_authenticated,
             "status": self.status,
@@ -1065,6 +1110,11 @@ class LayEngine:
                 "dry_run_wins": dry_run_wins,
                 "dry_run_losses": dry_run_losses,
                 "dry_run_pnl": dry_run_pnl,
+                # General ribbon stats
+                "wins": wins,
+                "losses": losses,
+                "pnl": pnl,
+                "strike_rate": strike_rate,
             },
             "upcoming": upcoming[:10],
             "recent_bets": list(reversed(self.bets_placed)),

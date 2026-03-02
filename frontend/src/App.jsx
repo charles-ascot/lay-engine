@@ -2541,13 +2541,8 @@ function Dashboard() {
       <header className="app-header">
         <div className="header-left">
           <h1>CHIMERA</h1>
-          <Badge status={state.status} />
-          {state.dry_run && <span className="badge badge-warning">DRY RUN</span>}
         </div>
         <div className="header-right">
-          {state.balance != null && (
-            <span className="balance">£{state.balance?.toFixed(2)}</span>
-          )}
           <span className="date">{state.date}</span>
           <button className="btn btn-secondary btn-sm" onClick={() => openChat()}>AI Chat</button>
           <button className="btn-logout" onClick={handleLogout}>Logout</button>
@@ -2557,22 +2552,18 @@ function Dashboard() {
       {/* ── Stats Ribbon ── */}
       <div className="stats-ribbon">
         <div className="stats-ribbon-left">
-          <span className="stat">
-            <span className={`status-dot ${state.status === 'RUNNING' ? 'green' : 'red'}`} />
-            {state.status}
-          </span>
           <span className="stat">Markets: <strong>{s.total_markets || 0}</strong></span>
           <span className="stat">Bets: <strong>{s.bets_placed || 0}</strong></span>
-          <span className="stat">Staked: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
+          <span className="stat">W/L: <strong>{s.wins || 0}/{s.losses || 0}</strong></span>
+          <span className="stat">Strike: <strong>{s.strike_rate != null ? `${s.strike_rate}%` : '—'}</strong></span>
+          <span className="stat">Balance: <strong>{state.balance != null ? `£${state.balance.toFixed(2)}` : '—'}</strong></span>
           <span className="stat">Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
-          {state.dry_run && (s.dry_run_settled > 0) && (
-            <span className="stat">
-              Paper P&amp;L:{' '}
-              <strong style={{ color: (s.dry_run_pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
-                {(s.dry_run_pnl || 0) >= 0 ? '+' : ''}£{(s.dry_run_pnl || 0).toFixed(2)}
-              </strong>
-            </span>
-          )}
+          <span className="stat">
+            P&amp;L:{' '}
+            <strong style={{ color: (s.pnl || 0) >= 0 ? '#16a34a' : '#dc2626' }}>
+              {(s.pnl || 0) >= 0 ? '+' : ''}£{(s.pnl || 0).toFixed(2)}
+            </strong>
+          </span>
         </div>
         <div className="stats-ribbon-right">
           {state.next_race && (
