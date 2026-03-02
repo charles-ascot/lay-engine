@@ -1184,6 +1184,193 @@ h3 { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
   50% { opacity: 0.6; }
 }
 
+/* ── LIVE RACING TAB ── */
+.live-racing-tab {
+  display: flex;
+  flex-direction: column;
+  margin: -20px;
+  padding: 0;
+  height: calc(100vh - 118px);
+}
+
+/* Control bar */
+.live-control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.live-control-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.live-control-right { display: flex; align-items: center; gap: 8px; }
+
+.btn-auto-bet { font-weight: 600; padding: 7px 18px; font-size: 13px; }
+.btn-auto-bet:disabled { background: #93c5fd; cursor: not-allowed; }
+
+.live-active-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #86efac;
+}
+.live-scan-time { font-size: 11px; color: #8a8a9a; }
+
+.live-settings-note { font-size: 12px; color: #d97706; }
+.live-settings-note.ready { color: #15803d; }
+.live-settings-note.warn { color: #d97706; }
+
+.live-country-filter { display: flex; gap: 4px; }
+
+/* Two-column layout */
+.live-racing-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Left: race list */
+.live-racing-list {
+  width: 280px;
+  min-width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.live-venue-group { margin-bottom: 0; }
+.live-venue-header {
+  padding: 6px 12px;
+  background: #f3f4f6;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #4a4a5a;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.live-race-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  gap: 6px;
+  transition: background 0.1s;
+}
+.live-race-row:hover { background: #f9fafb; }
+.live-race-row.selected { background: #eff6ff; border-left: 3px solid #2563eb; padding-left: 7px; }
+.live-race-row.in-play { background: #f0fdf4; }
+.live-race-row.in-window { background: #fefce8; }
+
+.live-race-time {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a2e;
+  min-width: 40px;
+  padding-top: 1px;
+}
+.live-race-info { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.live-race-name { font-size: 12px; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-race-meta { display: flex; align-items: center; gap: 4px; }
+
+.race-badge-window { font-size: 10px; color: #d97706; font-weight: 600; }
+.race-badge-mins { font-size: 10px; color: #9ca3af; }
+
+.live-race-bet-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 10px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.race-bet-runner {
+  color: #4a4a5a;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.race-bet-result { font-weight: 700; font-size: 11px; }
+.race-bet-result.result-won { color: #15803d; }
+.race-bet-result.result-lost { color: #b91c1c; }
+.race-bet-pending { color: #2563eb; font-style: italic; }
+
+/* Right: book panel */
+.live-book-panel {
+  flex: 1;
+  overflow-y: auto;
+  background: #f8f9fa;
+}
+.live-book-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #9ca3af;
+  font-size: 13px;
+}
+.live-book-inner { padding: 16px 20px; background: #f8f9fa; }
+
+/* Our bet highlight */
+.live-our-bet {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.live-our-bet.bet-active { background: #eff6ff; border: 1px solid #bfdbfe; }
+.live-our-bet.bet-won    { background: #f0fdf4; border: 1px solid #86efac; }
+.live-our-bet.bet-lost   { background: #fef2f2; border: 1px solid #fca5a5; }
+
+.runner-our-lay { background: rgba(37,99,235,0.04); }
+.runner-lay-badge {
+  font-size: 9px;
+  background: #2563eb;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* Bet Settings confirm section */
+.bet-settings-confirm {
+  border-top: 2px solid #e5e7eb;
+  margin-top: 4px;
+  padding-top: 16px;
+}
+.bet-settings-confirmed-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-confirmed-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid #86efac;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .tab-content { padding: 12px; }
@@ -1191,4 +1378,6 @@ h3 { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
   .stats-ribbon { flex-direction: column; align-items: flex-start; gap: 8px; }
   .engine-tab { max-width: 100%; }
   .backtest-tab { max-width: 100%; }
+  .live-racing-tab { margin: -12px; height: calc(100vh - 118px); }
+  .live-racing-list { width: 220px; min-width: 200px; }
 }

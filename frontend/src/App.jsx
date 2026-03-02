@@ -374,59 +374,139 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   )
 }
 
-// ── Live Tab ──
-function LiveControlTab({ state, onStart, onStop, onResetBets }) {
-  const bets = state.recent_bets || []
-  const results = state.recent_results || []
-  const errors = state.errors || []
-  const [rulesOpen, setRulesOpen] = useState(false)
-  const [marketOpen, setMarketOpen] = useState(false)
-  const s = state.summary || {}
+// ── Live Tab — Racing Card + Auto Betting ──
+function LiveTab({ state, onStart, onStop }) {
+  const [markets, setMarkets] = useState([])
+  const [selectedMarketId, setSelectedMarketId] = useState(null)
+  const [book, setBook] = useState(null)
+  const [loadingBook, setLoadingBook] = useState(false)
+  const [countryFilter, setCountryFilter] = useState('all')
+  const [settingsConfirmed, setSettingsConfirmed] = useState(
+    () => localStorage.getItem('betSettingsConfirmed') === 'true'
+  )
 
   const isRunning = state.status === 'RUNNING'
-  const isDryRun = state.dry_run
-  const isLiveRunning = isRunning && !isDryRun
+  const isLiveRunning = isRunning && !state.dry_run
+  const errors = state.errors || []
+  const s = state.summary || {}
 
-  const fname = `chimera_live_${new Date().toISOString().slice(0, 10)}`
+  // Poll markets list every 30s
+  useEffect(() => {
+    const fetchMarkets = () =>
+      api('/api/markets').then(d => setMarkets(d.markets || [])).catch(() => {})
+    fetchMarkets()
+    const id = setInterval(fetchMarkets, 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Fetch book when a market is selected
+  useEffect(() => {
+    if (!selectedMarketId) { setBook(null); return }
+    setLoadingBook(true)
+    api(`/api/markets/${selectedMarketId}/book`)
+      .then(d => { setBook(d); setLoadingBook(false) })
+      .catch(() => setLoadingBook(false))
+  }, [selectedMarketId])
+
+  // Auto-refresh selected book every 5s
+  useEffect(() => {
+    if (!selectedMarketId) return
+    const id = setInterval(() => {
+      api(`/api/markets/${selectedMarketId}/book`).then(d => setBook(d)).catch(() => {})
+    }, 5000)
+    return () => clearInterval(id)
+  }, [selectedMarketId])
+
+  // Group markets by venue (filtered by country)
+  const filtered = countryFilter === 'all'
+    ? markets
+    : markets.filter(m => m.country === countryFilter)
+  const byVenue = {}
+  filtered.forEach(m => {
+    if (!byVenue[m.venue]) byVenue[m.venue] = []
+    byVenue[m.venue].push(m)
+  })
+
+  // Bets indexed by market_id
+  const betsByMarket = {}
+  ;(state.recent_bets || []).forEach(b => {
+    if (b.market_id) betsByMarket[b.market_id] = b
+  })
+
+  const availableCountries = [...new Set(markets.map(m => m.country))].filter(Boolean)
+
+  const bookPercent = book?.runners?.reduce((sum, r) => {
+    const bp = r.back?.[0]?.price
+    return sum + (bp ? (1 / bp) * 100 : 0)
+  }, 0) || 0
+  const bookPctClass = bookPercent <= 101 ? 'tight' : bookPercent <= 103 ? 'normal' : 'wide'
+
+  const fmtTime = iso => {
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    catch { return '' }
+  }
 
   return (
-    <div>
-      {/* Engine Controls */}
-      <div className="engine-section">
-        <div className="engine-row">
-          <button
-            className={`btn ${isLiveRunning ? 'btn-danger' : 'btn-primary'}`}
-            onClick={isRunning ? onStop : () => onStart('live')}
-          >
-            {isLiveRunning ? 'Stop Engine' : isRunning ? 'Switch to Live & Restart' : 'Start Live Engine'}
-          </button>
-          {isRunning && (
-            <button className="btn btn-secondary" onClick={onResetBets}>
-              Clear &amp; Re-process
-            </button>
-          )}
-          {isRunning && (
-            <span className={`badge ${isDryRun ? 'badge-dry' : 'badge-live'}`}>
-              {isDryRun ? 'DRY RUN MODE' : 'LIVE MODE'}
-            </span>
+    <div className="live-racing-tab">
+
+      {/* ── Auto Bet Control Bar ── */}
+      <div className="live-control-bar">
+        <div className="live-control-left">
+          {isLiveRunning ? (
+            <>
+              <button className="btn btn-danger" onClick={onStop}>⏹ Stop Auto Betting</button>
+              <span className="live-active-badge">● AUTO BETTING ACTIVE</span>
+              {state.last_scan && (
+                <span className="live-scan-time">
+                  Last scan: {new Date(state.last_scan).toLocaleTimeString()}
+                  {s.monitoring > 0 && ` · ${s.monitoring} monitoring`}
+                  {s.processed != null && ` · ${s.processed} processed`}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                className="btn btn-primary btn-auto-bet"
+                onClick={() => onStart('live')}
+                disabled={!settingsConfirmed}
+                title={!settingsConfirmed ? 'Confirm your parameters in Bet Settings first' : 'Start auto live betting'}
+              >
+                ▶ Auto Live Bet
+              </button>
+              {!settingsConfirmed ? (
+                <span className="live-settings-note">
+                  ⚠ Go to <strong>Bet Settings</strong> and confirm your parameters before enabling auto betting.
+                </span>
+              ) : isRunning && state.dry_run ? (
+                <span className="live-settings-note warn">
+                  Engine running in Dry Run mode — stop it in the Dry Run tab first.
+                </span>
+              ) : (
+                <span className="live-settings-note ready">✓ Settings confirmed — ready to auto bet</span>
+              )}
+            </>
           )}
         </div>
-        {isRunning && (
-          <div className="engine-info" style={{ marginTop: 8 }}>
-            {state.session_start && (
-              <span>Started: {new Date(state.session_start).toLocaleTimeString()}</span>
-            )}
-            {state.last_scan && (
-              <span>Last scan: {new Date(state.last_scan).toLocaleTimeString()}</span>
-            )}
-            {s.processed != null && (
-              <span>Markets processed: <strong>{s.processed}</strong></span>
-            )}
-            {s.monitoring > 0 && (
-              <span>Monitoring: <strong>{s.monitoring}</strong> markets</span>
-            )}
-          </div>
-        )}
+        <div className="live-control-right">
+          {availableCountries.length > 0 && (
+            <div className="live-country-filter">
+              <button
+                className={`btn-filter ${countryFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setCountryFilter('all')}
+              >All</button>
+              {availableCountries.map(c => (
+                <button
+                  key={c}
+                  className={`btn-filter ${countryFilter === c ? 'active' : ''}`}
+                  onClick={() => setCountryFilter(c)}
+                >
+                  {COUNTRY_LABELS[c] || c}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Error bar */}
@@ -437,122 +517,153 @@ function LiveControlTab({ state, onStart, onStop, onResetBets }) {
         </div>
       )}
 
-      {/* Bets table */}
-      <div className="tab-toolbar">
-        <h2>Current Session — Live Bets</h2>
-        {bets.length > 0 && (
-          <SnapshotButton tableId="live-bets-table" filename={fname} />
-        )}
-      </div>
+      {/* ── Two-column racing layout ── */}
+      <div className="live-racing-layout">
 
-      {bets.length === 0 ? (
-        <p className="empty">
-          {isLiveRunning
-            ? 'No bets placed yet this session. Engine is running — bets will appear here within the processing window.'
-            : isDryRun && isRunning
-            ? 'Engine is running in Dry Run mode. Go to the Dry Run tab to see paper bets.'
-            : 'Start the Live Engine to begin placing real bets.'}
-        </p>
-      ) : (
-        <div className="table-scroll">
-          <table id="live-bets-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Country</th>
-                <th>Runner</th>
-                <th>Odds</th>
-                <th>Stake</th>
-                <th>Liability</th>
-                <th>Rule</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bets.map((b, i) => (
-                <tr key={i}>
-                  <td>{new Date(b.timestamp).toLocaleTimeString()}</td>
-                  <td>{b.country || '—'}</td>
-                  <td>{b.runner_name}</td>
-                  <td className="cell-lay-odds">{b.price?.toFixed(2)}</td>
-                  <td>£{b.size?.toFixed(2)}</td>
-                  <td>£{b.liability?.toFixed(2)}</td>
-                  <td><code>{b.rule_applied}</code></td>
-                  <td>
-                    <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                      {b.betfair_response?.status || '?'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Left: race list */}
+        <div className="live-racing-list">
+          {Object.keys(byVenue).length === 0 ? (
+            <p style={{ padding: '16px 12px', fontSize: 12, color: '#8a8a9a' }}>
+              No markets available. Markets appear once races are scheduled for your selected countries.
+            </p>
+          ) : (
+            Object.entries(byVenue).map(([venue, races]) => (
+              <div key={venue} className="live-venue-group">
+                <div className="live-venue-header">{venue}</div>
+                {races.map(race => {
+                  const bet = betsByMarket[race.market_id]
+                  const isSelected = selectedMarketId === race.market_id
+                  const mins = race.minutes_to_off
+                  const isInPlay = mins != null && mins <= 0
+                  const isInWindow = mins != null && mins > 0 && mins <= (state.process_window || 12)
+                  return (
+                    <div
+                      key={race.market_id}
+                      className={`live-race-row${isSelected ? ' selected' : ''}${isInPlay ? ' in-play' : ''}${isInWindow ? ' in-window' : ''}`}
+                      onClick={() => setSelectedMarketId(prev => prev === race.market_id ? null : race.market_id)}
+                    >
+                      <span className="live-race-time">{fmtTime(race.race_time)}</span>
+                      <div className="live-race-info">
+                        <span className="live-race-name">{race.market_name}</span>
+                        <div className="live-race-meta">
+                          {isInPlay
+                            ? <span className="badge badge-live" style={{ fontSize: 9, padding: '1px 5px' }}>IN PLAY</span>
+                            : isInWindow
+                            ? <span className="race-badge-window">in window · {Math.round(mins)}m</span>
+                            : mins != null && mins > 0
+                            ? <span className="race-badge-mins">{Math.round(mins)}m</span>
+                            : null
+                          }
+                        </div>
+                      </div>
+                      {bet && (
+                        <div className="live-race-bet-col">
+                          <span className="race-bet-runner" title={bet.runner_name}>{bet.runner_name}</span>
+                          {bet.outcome
+                            ? <span className={`race-bet-result ${bet.outcome === 'WIN' ? 'result-won' : 'result-lost'}`}>
+                                {bet.outcome === 'WIN' ? '+' : ''}£{(bet.pnl || 0).toFixed(2)}
+                              </span>
+                            : <span className="race-bet-pending">placed</span>
+                          }
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))
+          )}
         </div>
-      )}
 
-      {/* Collapsible: Rule Evaluations */}
-      <div className="collapsible-section">
-        <button
-          className="collapsible-header"
-          onClick={() => setRulesOpen(o => !o)}
-        >
-          <span>Rule Evaluations</span>
-          <span className="collapsible-count">{results.length}</span>
-          <span className="collapsible-chevron">{rulesOpen ? '▲' : '▼'}</span>
-        </button>
-        {rulesOpen && (
-          <div className="collapsible-body">
-            {results.length === 0 ? (
-              <p className="empty">No markets evaluated yet.</p>
-            ) : (
-              <table>
+        {/* Right: market book */}
+        <div className="live-book-panel">
+          {!selectedMarketId && (
+            <div className="live-book-empty">
+              <span>← Select a race to view market prices</span>
+            </div>
+          )}
+          {selectedMarketId && loadingBook && !book && (
+            <p style={{ padding: 20, color: '#8a8a9a', fontSize: 12 }}>Loading market...</p>
+          )}
+          {book && (
+            <div className="live-book-inner">
+              <div className="market-header">
+                <div className="market-title">
+                  {fmtTime(book.race_time)} {book.venue} — {book.market_name}
+                </div>
+                <div className="market-meta">
+                  <span>{book.number_of_runners} runners</span>
+                  <span className={`book-percent ${bookPctClass}`}>{bookPercent.toFixed(1)}%</span>
+                  <span className="market-matched">
+                    Matched: GBP {(book.total_matched || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                  {book.in_play && <span className="badge badge-live">IN PLAY</span>}
+                  {book.status && book.status !== 'OPEN' && (
+                    <span className="badge badge-crashed">{book.status}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Our bet on this race */}
+              {betsByMarket[selectedMarketId] && (() => {
+                const b = betsByMarket[selectedMarketId]
+                const cls = b.outcome === 'WIN' ? 'bet-won' : b.outcome === 'LOSS' ? 'bet-lost' : 'bet-active'
+                return (
+                  <div className={`live-our-bet ${cls}`}>
+                    <span>Our Lay: <strong>{b.runner_name}</strong></span>
+                    <span>@ {b.price?.toFixed(2)}</span>
+                    <span>Stake £{b.size?.toFixed(2)}</span>
+                    <span>Liability £{b.liability?.toFixed(2)}</span>
+                    <code>{b.rule_applied}</code>
+                    {b.outcome
+                      ? <strong className={b.outcome === 'WIN' ? 'text-success' : 'text-danger'}>
+                          {b.outcome} {b.pnl != null ? `${b.pnl >= 0 ? '+' : ''}£${b.pnl.toFixed(2)}` : ''}
+                        </strong>
+                      : <span className="text-muted">awaiting result</span>
+                    }
+                  </div>
+                )
+              })()}
+
+              <table className="market-table">
                 <thead>
                   <tr>
-                    <th>Venue</th>
-                    <th>Race</th>
-                    <th>Favourite</th>
-                    <th>Odds</th>
-                    <th>2nd Fav</th>
-                    <th>Odds</th>
-                    <th>Rule</th>
-                    <th>Bets</th>
+                    <th style={{ width: '35%' }}></th>
+                    <th className="bf-back-header" colSpan={3}>Back all</th>
+                    <th className="bf-lay-header" colSpan={3}>Lay all</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((r, i) => (
-                    <tr key={i} className={r.skipped ? 'row-skip' : ''}>
-                      <td>{r.venue}</td>
-                      <td>{r.market_name}</td>
-                      <td>{r.favourite?.name || '—'}</td>
-                      <td>{r.favourite?.odds?.toFixed(2) || '—'}</td>
-                      <td>{r.second_favourite?.name || '—'}</td>
-                      <td>{r.second_favourite?.odds?.toFixed(2) || '—'}</td>
-                      <td>
-                        {r.skipped
-                          ? <span className="skip">{r.skip_reason}</span>
-                          : <code>{r.rule_applied}</code>
-                        }
-                      </td>
-                      <td>{r.instructions?.length || 0}</td>
-                    </tr>
-                  ))}
+                  {book.runners.map(runner => {
+                    const isOurBet = betsByMarket[selectedMarketId]?.runner_name === runner.runner_name
+                    return (
+                      <tr
+                        key={runner.selection_id}
+                        className={`${runner.status !== 'ACTIVE' ? 'runner-removed' : ''}${isOurBet ? ' runner-our-lay' : ''}`}
+                      >
+                        <td className="runner-cell">
+                          <div style={{ display: 'flex', alignItems: 'center' }}>
+                            <span className="runner-cloth">{runner.sort_priority}</span>
+                            <span className="runner-name">{runner.runner_name}</span>
+                            {isOurBet && <span className="runner-lay-badge">OUR LAY</span>}
+                          </div>
+                          {runner.status !== 'ACTIVE' && <div className="runner-jockey">Non-runner</div>}
+                        </td>
+                        <PriceCell price={runner.back?.[2]?.price} size={runner.back?.[2]?.size} type="back" level={3} />
+                        <PriceCell price={runner.back?.[1]?.price} size={runner.back?.[1]?.size} type="back" level={2} />
+                        <PriceCell price={runner.back?.[0]?.price} size={runner.back?.[0]?.size} type="back" level={1} />
+                        <PriceCell price={runner.lay?.[0]?.price} size={runner.lay?.[0]?.size} type="lay" level={1} />
+                        <PriceCell price={runner.lay?.[1]?.price} size={runner.lay?.[1]?.size} type="lay" level={2} />
+                        <PriceCell price={runner.lay?.[2]?.price} size={runner.lay?.[2]?.size} type="lay" level={3} />
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
 
-      {/* Collapsible: Live Market View */}
-      <div className="collapsible-section">
-        <button
-          className="collapsible-header"
-          onClick={() => setMarketOpen(o => !o)}
-        >
-          <span>Live Market Prices</span>
-          <span className="collapsible-chevron">{marketOpen ? '▲' : '▼'}</span>
-        </button>
-        {marketOpen && <MarketTab />}
       </div>
     </div>
   )
@@ -764,6 +875,19 @@ function DryRunControlTab({ state, onStart, onStop, onResetBets }) {
 // ── Bet Settings Tab ──
 function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onSetProcessWindow, onSetPointValue }) {
   const s = state.summary || {}
+  const [confirmed, setConfirmed] = useState(
+    () => localStorage.getItem('betSettingsConfirmed') === 'true'
+  )
+
+  const handleConfirm = () => {
+    localStorage.setItem('betSettingsConfirmed', 'true')
+    setConfirmed(true)
+  }
+
+  const handleReset = () => {
+    localStorage.removeItem('betSettingsConfirmed')
+    setConfirmed(false)
+  }
   return (
     <div className="engine-tab">
 
@@ -850,6 +974,25 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
             <span>JOFS splits this session: <strong style={{ color: '#7c3aed' }}>{s.jofs_splits}</strong></span>
           )}
         </div>
+      </div>
+
+      {/* Confirm Settings */}
+      <div className="engine-section bet-settings-confirm">
+        <h3>Confirm Settings</h3>
+        <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12, lineHeight: 1.6 }}>
+          Review your parameters above, then confirm to enable the <strong>Auto Live Bet</strong> button on the Live tab.
+          If you change settings later, re-confirm to keep Auto Betting enabled.
+        </p>
+        {confirmed ? (
+          <div className="bet-settings-confirmed-row">
+            <span className="settings-confirmed-badge">✓ Settings Confirmed</span>
+            <button className="btn btn-secondary btn-sm" onClick={handleReset}>Reset</button>
+          </div>
+        ) : (
+          <button className="btn btn-primary" onClick={handleConfirm}>
+            ✓ Confirm &amp; Save Settings
+          </button>
+        )}
       </div>
     </div>
   )
@@ -2469,11 +2612,10 @@ function Dashboard() {
       {/* ── Tab Content ── */}
       <div className="tab-content">
         {tab === 'live' && (
-          <LiveControlTab
+          <LiveTab
             state={state}
             onStart={handleStart}
             onStop={handleStop}
-            onResetBets={handleResetBets}
           />
         )}
         {tab === 'dryrun' && (
