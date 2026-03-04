@@ -157,6 +157,9 @@ def apply_rules(
     race_time: str,
     runners: list[Runner],
     jofs_enabled: bool = True,
+    mark_ceiling_enabled: bool = False,
+    mark_floor_enabled: bool = False,
+    mark_uplift_enabled: bool = False,
 ) -> RuleResult:
     """
     Apply the lay betting rules to a market.
@@ -194,6 +197,18 @@ def apply_rules(
     if odds > MAX_LAY_ODDS:
         result.skipped = True
         result.skip_reason = f"Favourite odds {odds} exceed max threshold ({MAX_LAY_ODDS})"
+        return result
+
+    # ─── Mark Rule: Hard ceiling — no lays above 8.0 ───
+    if mark_ceiling_enabled and odds > 8.0:
+        result.skipped = True
+        result.skip_reason = f"Favourite odds {odds} exceed hard ceiling of 8.0 (Mark Rule)"
+        return result
+
+    # ─── Mark Rule: Hard floor — no lays below 1.5 ───
+    if mark_floor_enabled and odds < 1.5:
+        result.skipped = True
+        result.skip_reason = f"Favourite odds {odds} below hard floor of 1.5 (Mark Rule)"
         return result
 
     # ─── Joint/Close-odds detection ───
@@ -244,18 +259,22 @@ def apply_rules(
 
     # ─── RULE 2: Favourite odds 2.0–5.0 ───
     if 2.0 <= odds <= 5.0:
+        # Mark Rule: 2.5–3.5 band uplift to 5 points
+        in_uplift_band = mark_uplift_enabled and 2.5 <= odds <= 3.5
         if close_odds:
-            # Joint/close favourite — split £2 as £1 each
+            # Joint/close favourite — split stake evenly
+            half = 2.5 if in_uplift_band else 1.0
+            uplift_tag = " [UPLIFT]" if in_uplift_band else ""
             result.rule_applied = (
                 f"RULE_2_JOINT: Fav {odds} in 2.0–5.0, 2nd fav {second_fav.best_available_to_lay} "
-                f"(gap {fav_gap:.2f} ≤ {CLOSE_ODDS_THRESHOLD}) → £1 fav + £1 2nd fav"
+                f"(gap {fav_gap:.2f} ≤ {CLOSE_ODDS_THRESHOLD}) → £{half} fav + £{half} 2nd fav{uplift_tag}"
             )
             result.instructions.append(LayInstruction(
                 market_id=market_id,
                 selection_id=fav.selection_id,
                 runner_name=fav.runner_name,
                 price=odds,
-                size=1.0,
+                size=half,
                 rule_applied="RULE_2_JOINT_FAV",
             ))
             result.instructions.append(LayInstruction(
@@ -263,17 +282,19 @@ def apply_rules(
                 selection_id=second_fav.selection_id,
                 runner_name=second_fav.runner_name,
                 price=second_fav.best_available_to_lay,
-                size=1.0,
+                size=half,
                 rule_applied="RULE_2_JOINT_2ND",
             ))
         else:
-            result.rule_applied = f"RULE_2: Fav odds {odds} in 2.0–5.0 → £2 lay"
+            stake = 5.0 if in_uplift_band else 2.0
+            uplift_tag = " [UPLIFT]" if in_uplift_band else ""
+            result.rule_applied = f"RULE_2: Fav odds {odds} in 2.0–5.0 → £{stake} lay{uplift_tag}"
             result.instructions.append(LayInstruction(
                 market_id=market_id,
                 selection_id=fav.selection_id,
                 runner_name=fav.runner_name,
                 price=odds,
-                size=2.0,
+                size=stake,
                 rule_applied="RULE_2_ODDS_2_TO_5",
             ))
         return result

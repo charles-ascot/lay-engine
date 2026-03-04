@@ -791,7 +791,7 @@ function LiveTab({ state, onStart, onStop, onResetBets, mode = 'live' }) {
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onSetProcessWindow, onSetPointValue }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetProcessWindow, onSetPointValue }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -891,6 +891,37 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           {s.jofs_splits > 0 && (
             <span>JOFS splits this session: <strong style={{ color: '#7c3aed' }}>{s.jofs_splits}</strong></span>
           )}
+        </div>
+      </div>
+
+      {/* Mark Rules */}
+      <div className="engine-section">
+        <h3>Mark Rules</h3>
+        <div className="engine-row">
+          <span className="engine-label">Hard Ceiling (&gt;8.0 skip):</span>
+          <button
+            className={`btn-toggle ${state.mark_ceiling_enabled ? 'active' : ''}`}
+            onClick={onToggleMarkCeiling}
+            title="No lays above 8.0 odds — skip market entirely"
+          >
+            {state.mark_ceiling_enabled ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>Hard Floor (&lt;1.5 skip):</span>
+          <button
+            className={`btn-toggle ${state.mark_floor_enabled ? 'active' : ''}`}
+            onClick={onToggleMarkFloor}
+            title="No lays below 1.5 odds — skip market entirely"
+          >
+            {state.mark_floor_enabled ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>2.5–3.5 Uplift (5 pts):</span>
+          <button
+            className={`btn-toggle ${state.mark_uplift_enabled ? 'active' : ''}`}
+            onClick={onToggleMarkUplift}
+            title="When favourite odds are 2.5–3.5, increase stake to 5 points"
+          >
+            {state.mark_uplift_enabled ? 'ON' : 'OFF'}
+          </button>
         </div>
       </div>
 
@@ -2402,6 +2433,18 @@ function Dashboard() {
     await api('/api/engine/jofs-control', { method: 'POST' })
     fetchState()
   }
+  const handleToggleMarkCeiling = async () => {
+    await api('/api/engine/mark-ceiling', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleMarkFloor = async () => {
+    await api('/api/engine/mark-floor', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleMarkUplift = async () => {
+    await api('/api/engine/mark-uplift', { method: 'POST' })
+    fetchState()
+  }
   const handleSetPointValue = async (value) => {
     await api('/api/engine/point-value', {
       method: 'POST',
@@ -2545,6 +2588,9 @@ function Dashboard() {
             onToggleCountry={handleToggleCountry}
             onToggleJofs={handleToggleJofsControl}
             onToggleSpread={handleToggleSpreadControl}
+            onToggleMarkCeiling={handleToggleMarkCeiling}
+            onToggleMarkFloor={handleToggleMarkFloor}
+            onToggleMarkUplift={handleToggleMarkUplift}
             onSetProcessWindow={handleSetProcessWindow}
             onSetPointValue={handleSetPointValue}
           />

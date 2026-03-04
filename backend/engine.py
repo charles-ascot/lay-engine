@@ -118,6 +118,9 @@ class LayEngine:
         self.spread_rejections: list[dict] = []  # Log of rejected bets
         self.point_value: float = 1.0  # £ per point (multiplier for all stakes)
         self.jofs_control: bool = True   # Joint/Close-Odds Favourite Split on by default
+        self.mark_ceiling_enabled: bool = False  # Mark Rule: no lays above 8.0
+        self.mark_floor_enabled: bool = False    # Mark Rule: no lays below 1.5
+        self.mark_uplift_enabled: bool = False   # Mark Rule: 2.5–3.5 band stake to 5 pts
 
         # ── Processing window ──
         self.process_window: int = PROCESS_WINDOW_MINUTES  # Configurable at runtime
@@ -169,6 +172,9 @@ class LayEngine:
                 "countries": self.countries,
                 "spread_control": self.spread_control,
                 "jofs_control": self.jofs_control,
+                "mark_ceiling_enabled": self.mark_ceiling_enabled,
+                "mark_floor_enabled": self.mark_floor_enabled,
+                "mark_uplift_enabled": self.mark_uplift_enabled,
                 "point_value": self.point_value,
                 "process_window": self.process_window,
                 "status": self.status,
@@ -236,6 +242,9 @@ class LayEngine:
             self.countries = data.get("countries", ["GB", "IE"])
             self.spread_control = data.get("spread_control", False)
             self.jofs_control = data.get("jofs_control", True)
+            self.mark_ceiling_enabled = data.get("mark_ceiling_enabled", False)
+            self.mark_floor_enabled = data.get("mark_floor_enabled", False)
+            self.mark_uplift_enabled = data.get("mark_uplift_enabled", False)
             self.point_value = data.get("point_value", 1.0)
             self.process_window = data.get("process_window", PROCESS_WINDOW_MINUTES)
             self.balance = data.get("balance")
@@ -792,6 +801,9 @@ class LayEngine:
             race_time=market["race_time"],
             runners=runners_with_prices,
             jofs_enabled=self.jofs_control,
+            mark_ceiling_enabled=self.mark_ceiling_enabled,
+            mark_floor_enabled=self.mark_floor_enabled,
+            mark_uplift_enabled=self.mark_uplift_enabled,
         )
 
         # Apply point value multiplier to stakes
@@ -1082,6 +1094,9 @@ class LayEngine:
             "countries": self.countries,
             "spread_control": self.spread_control,
             "jofs_control": self.jofs_control,
+            "mark_ceiling_enabled": self.mark_ceiling_enabled,
+            "mark_floor_enabled": self.mark_floor_enabled,
+            "mark_uplift_enabled": self.mark_uplift_enabled,
             "point_value": self.point_value,
             "date": self.day_started,
             "last_scan": self.last_scan,

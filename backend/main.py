@@ -344,6 +344,30 @@ def toggle_jofs_control():
     return {"jofs_control": engine.jofs_control}
 
 
+@app.post("/api/engine/mark-ceiling")
+def toggle_mark_ceiling():
+    """Toggle Mark Rule: hard ceiling — no lays above 8.0 odds."""
+    engine.mark_ceiling_enabled = not engine.mark_ceiling_enabled
+    engine._save_state()
+    return {"mark_ceiling_enabled": engine.mark_ceiling_enabled}
+
+
+@app.post("/api/engine/mark-floor")
+def toggle_mark_floor():
+    """Toggle Mark Rule: hard floor — no lays below 1.5 odds."""
+    engine.mark_floor_enabled = not engine.mark_floor_enabled
+    engine._save_state()
+    return {"mark_floor_enabled": engine.mark_floor_enabled}
+
+
+@app.post("/api/engine/mark-uplift")
+def toggle_mark_uplift():
+    """Toggle Mark Rule: 2.5–3.5 band stake uplift to 5 points."""
+    engine.mark_uplift_enabled = not engine.mark_uplift_enabled
+    engine._save_state()
+    return {"mark_uplift_enabled": engine.mark_uplift_enabled}
+
+
 @app.post("/api/engine/point-value")
 def set_point_value(req: PointValueRequest):
     """Set the point value (£ per point). Multiplies all rule stakes."""
