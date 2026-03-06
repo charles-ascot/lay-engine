@@ -1374,6 +1374,12 @@ class LayEngine:
             "rule_breakdown": rule_breakdown,
             "countries": self.countries,
             "point_value": self.point_value,
+            "jofs_control": self.jofs_control,
+            "spread_control": getattr(self, 'spread_control', False),
+            "mark_ceiling_enabled": self.mark_ceiling_enabled,
+            "mark_floor_enabled": self.mark_floor_enabled,
+            "mark_uplift_enabled": self.mark_uplift_enabled,
+            "process_window": getattr(self, 'process_window', 12),
             "results": per_market_results,
         }
 

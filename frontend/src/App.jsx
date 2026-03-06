@@ -375,7 +375,13 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 }
 
 // ── Shared Racing Card Tab (used by both Live and Dry Run tabs) ──
-function LiveTab({ state, onStart, onStop, mode = 'live' }) {
+const EMPTY_SET = new Set()
+const NOOP = () => {}
+function LiveTab({ state, onStart, onStop, mode = 'live',
+  checkedMarkets = EMPTY_SET, setCheckedMarkets = NOOP, snapshotLoading = false, setSnapshotLoading = NOOP,
+  snapshotResult = null, setSnapshotResult = NOOP, snapshotHistory = [], setSnapshotHistory = NOOP,
+  expandedSnapshotId = null, setExpandedSnapshotId = NOOP, snapshotDetail = null, setSnapshotDetail = NOOP,
+}) {
   const [markets, setMarkets] = useState([])
   const [selectedMarketId, setSelectedMarketId] = useState(null)
   const [book, setBook] = useState(null)
@@ -384,14 +390,6 @@ function LiveTab({ state, onStart, onStop, mode = 'live' }) {
   const [settingsConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
   )
-
-  // ── Dry Run snapshot state ──
-  const [checkedMarkets, setCheckedMarkets] = useState(new Set())
-  const [snapshotLoading, setSnapshotLoading] = useState(false)
-  const [snapshotResult, setSnapshotResult] = useState(null)
-  const [snapshotHistory, setSnapshotHistory] = useState([])
-  const [expandedSnapshotId, setExpandedSnapshotId] = useState(null)
-  const [snapshotDetail, setSnapshotDetail] = useState(null)
 
   const isDryRunMode = mode === 'dryrun'
   const isRunning = state.status === 'RUNNING'
@@ -719,6 +717,17 @@ function LiveTab({ state, onStart, onStop, mode = 'live' }) {
           )}
           {isDryRunMode && snapshotResult && !snapshotLoading && (
             <div className="live-book-inner snapshot-results">
+              <div className="snapshot-strategy-bar">
+                <span className="snapshot-strategy-title">Strategy</span>
+                <span>{(snapshotResult.countries || []).map(c => COUNTRY_LABELS[c] || c).join(' ')}</span>
+                <span>£{snapshotResult.point_value || 1}/pt</span>
+                <span>Window: {snapshotResult.process_window || 12}m</span>
+                <span className={snapshotResult.jofs_control ? 'tag-on' : 'tag-off'}>JOFS {snapshotResult.jofs_control ? 'ON' : 'OFF'}</span>
+                <span className={snapshotResult.spread_control ? 'tag-on' : 'tag-off'}>Spread {snapshotResult.spread_control ? 'ON' : 'OFF'}</span>
+                <span className={snapshotResult.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotResult.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
+                <span className={snapshotResult.mark_floor_enabled ? 'tag-on' : 'tag-off'}>Floor {snapshotResult.mark_floor_enabled ? 'ON' : 'OFF'}</span>
+                <span className={snapshotResult.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotResult.mark_uplift_enabled ? 'ON' : 'OFF'}</span>
+              </div>
               <div className="snapshot-results-header">
                 <h3>Snapshot Results</h3>
                 <div className="snapshot-results-summary">
@@ -900,6 +909,15 @@ function LiveTab({ state, onStart, onStop, mode = 'live' }) {
                     </div>
                     {isExpanded && snapshotDetail && snapshotDetail.snapshot_id === snap.snapshot_id && (
                       <div className="snapshot-card-body">
+                        <div className="snapshot-strategy-bar">
+                          <span className="snapshot-strategy-title">Strategy</span>
+                          <span>{(snapshotDetail.countries || []).map(c => COUNTRY_LABELS[c] || c).join(' ')}</span>
+                          <span>£{snapshotDetail.point_value || 1}/pt</span>
+                          <span className={snapshotDetail.jofs_control ? 'tag-on' : 'tag-off'}>JOFS {snapshotDetail.jofs_control ? 'ON' : 'OFF'}</span>
+                          <span className={snapshotDetail.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotDetail.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
+                          <span className={snapshotDetail.mark_floor_enabled ? 'tag-on' : 'tag-off'}>Floor {snapshotDetail.mark_floor_enabled ? 'ON' : 'OFF'}</span>
+                          <span className={snapshotDetail.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotDetail.mark_uplift_enabled ? 'ON' : 'OFF'}</span>
+                        </div>
                         <table className="snapshot-results-table">
                           <thead>
                             <tr>
@@ -2552,6 +2570,14 @@ function Dashboard() {
   const [chatInitialDate, setChatInitialDate] = useState(null)
   const [chatInitialMessage, setChatInitialMessage] = useState(null)
 
+  // ── Dry Run snapshot state (lifted for tab persistence) ──
+  const [checkedMarkets, setCheckedMarkets] = useState(new Set())
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [snapshotResult, setSnapshotResult] = useState(null)
+  const [snapshotHistory, setSnapshotHistory] = useState([])
+  const [expandedSnapshotId, setExpandedSnapshotId] = useState(null)
+  const [snapshotDetail, setSnapshotDetail] = useState(null)
+
   const fetchState = useCallback(async () => {
     try {
       const s = await api('/api/state')
@@ -2736,6 +2762,12 @@ function Dashboard() {
             onStart={handleStart}
             onStop={handleStop}
             mode="dryrun"
+            checkedMarkets={checkedMarkets} setCheckedMarkets={setCheckedMarkets}
+            snapshotLoading={snapshotLoading} setSnapshotLoading={setSnapshotLoading}
+            snapshotResult={snapshotResult} setSnapshotResult={setSnapshotResult}
+            snapshotHistory={snapshotHistory} setSnapshotHistory={setSnapshotHistory}
+            expandedSnapshotId={expandedSnapshotId} setExpandedSnapshotId={setExpandedSnapshotId}
+            snapshotDetail={snapshotDetail} setSnapshotDetail={setSnapshotDetail}
           />
         )}
         {tab === 'backtest' && <BacktestTab />}
