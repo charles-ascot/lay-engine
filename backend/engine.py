@@ -17,7 +17,7 @@ import time
 import secrets
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -50,6 +50,9 @@ API_KEYS_FILE = Path(os.environ.get("API_KEYS_FILE", "/tmp/chimera_api_keys.json
 
 # Reports file
 REPORTS_FILE = Path(os.environ.get("REPORTS_FILE", "/tmp/chimera_reports.json"))
+
+# Dry-run snapshots file
+SNAPSHOTS_FILE = Path(os.environ.get("SNAPSHOTS_FILE", "/tmp/chimera_snapshots.json"))
 
 # ── GCS persistence (survives container restarts) ──
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
@@ -143,6 +146,9 @@ class LayEngine:
         # ── Reports ──
         self.reports: list[dict] = []
 
+        # ── Dry-run snapshots ──
+        self.dry_run_snapshots: list[dict] = []
+
         # ── Background market refresh (runs when authenticated but engine stopped) ──
         self._market_thread: Optional[threading.Thread] = None
         self._market_refresh_active: bool = False
@@ -152,6 +158,7 @@ class LayEngine:
         self._load_sessions()
         self._load_api_keys()
         self._load_reports()
+        self._load_snapshots()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -380,6 +387,46 @@ class LayEngine:
             _gcs_write("chimera_reports.json", reports_json)
         except Exception as e:
             logger.warning(f"Failed to save reports: {e}")
+
+    # ──────────────────────────────────────────────
+    #  SNAPSHOT PERSISTENCE
+    # ──────────────────────────────────────────────
+
+    def _load_snapshots(self):
+        """Load dry-run snapshots from GCS (preferred) or disk. Purge entries older than 90 days."""
+        try:
+            raw = _gcs_read("chimera_snapshots.json")
+            if raw:
+                self.dry_run_snapshots = json.loads(raw)
+            elif SNAPSHOTS_FILE.exists():
+                self.dry_run_snapshots = json.loads(SNAPSHOTS_FILE.read_text())
+            else:
+                self.dry_run_snapshots = []
+
+            # 90-day retention: purge old entries
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+            before = len(self.dry_run_snapshots)
+            self.dry_run_snapshots = [
+                s for s in self.dry_run_snapshots
+                if s.get("created_at", "") >= cutoff
+            ]
+            if len(self.dry_run_snapshots) < before:
+                logger.info(f"Purged {before - len(self.dry_run_snapshots)} snapshots older than 90 days")
+                self._save_snapshots()
+
+            logger.info(f"Loaded {len(self.dry_run_snapshots)} dry-run snapshots")
+        except Exception as e:
+            logger.warning(f"Failed to load snapshots: {e}")
+            self.dry_run_snapshots = []
+
+    def _save_snapshots(self):
+        """Persist dry-run snapshots to disk + GCS."""
+        try:
+            snapshots_json = json.dumps(self.dry_run_snapshots, default=str)
+            SNAPSHOTS_FILE.write_text(snapshots_json)
+            _gcs_write("chimera_snapshots.json", snapshots_json)
+        except Exception as e:
+            logger.warning(f"Failed to save snapshots: {e}")
 
     def generate_api_key(self, label: str = "") -> dict:
         """Generate a new API key. Returns the full key (only shown once)."""
@@ -1183,3 +1230,158 @@ class LayEngine:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": msg,
         })
+
+    # ──────────────────────────────────────────────
+    #  INSTANT DRY-RUN SNAPSHOT
+    # ──────────────────────────────────────────────
+
+    def run_instant_snapshot(self, market_ids: list[str]) -> dict:
+        """Run a one-shot snapshot for selected markets: fetch prices, apply rules, return results.
+
+        Does NOT start the engine loop, place bets, or mutate processed_markets/bets_placed.
+        """
+        if not self.client or not self.is_authenticated:
+            raise RuntimeError("Not authenticated")
+
+        now = datetime.now(timezone.utc)
+        per_market_results = []
+        total_stake = 0.0
+        total_liability = 0.0
+        total_bets = 0
+        rule_breakdown: dict[str, int] = {}
+
+        # Build lookup from in-memory markets
+        market_lookup = {m["market_id"]: m for m in self.markets}
+
+        for market_id in market_ids:
+            market = market_lookup.get(market_id)
+            if not market:
+                per_market_results.append({
+                    "market_id": market_id,
+                    "venue": "?",
+                    "race_time": "",
+                    "market_name": "",
+                    "skipped": True,
+                    "skip_reason": "Market not found in catalogue",
+                    "favourite_name": None,
+                    "favourite_odds": None,
+                    "rule_applied": "",
+                    "bets": [],
+                })
+                continue
+
+            # Fetch live prices
+            try:
+                runners_with_prices, is_valid = self.client.get_market_prices(market_id)
+            except Exception as e:
+                per_market_results.append({
+                    "market_id": market_id,
+                    "venue": market.get("venue", ""),
+                    "race_time": market.get("race_time", ""),
+                    "market_name": market.get("market_name", ""),
+                    "skipped": True,
+                    "skip_reason": f"Price fetch failed: {e}",
+                    "favourite_name": None,
+                    "favourite_odds": None,
+                    "rule_applied": "",
+                    "bets": [],
+                })
+                continue
+
+            if not is_valid or not runners_with_prices:
+                per_market_results.append({
+                    "market_id": market_id,
+                    "venue": market.get("venue", ""),
+                    "race_time": market.get("race_time", ""),
+                    "market_name": market.get("market_name", ""),
+                    "skipped": True,
+                    "skip_reason": "No prices available, market closed, or in-play",
+                    "favourite_name": None,
+                    "favourite_odds": None,
+                    "rule_applied": "",
+                    "bets": [],
+                })
+                continue
+
+            # Merge runner names from catalogue into price data
+            name_map = {
+                r["selection_id"]: r["runner_name"]
+                for r in market.get("runners", [])
+            }
+            for runner in runners_with_prices:
+                if runner.selection_id in name_map:
+                    runner.runner_name = name_map[runner.selection_id]
+
+            # Apply rules
+            result = apply_rules(
+                market_id=market_id,
+                market_name=market.get("market_name", ""),
+                venue=market.get("venue", ""),
+                race_time=market.get("race_time", ""),
+                runners=runners_with_prices,
+                jofs_enabled=self.jofs_control,
+                mark_ceiling_enabled=self.mark_ceiling_enabled,
+                mark_floor_enabled=self.mark_floor_enabled,
+                mark_uplift_enabled=self.mark_uplift_enabled,
+            )
+
+            # Apply point value multiplier
+            if self.point_value != 1.0:
+                for instruction in result.instructions:
+                    instruction.size = round(instruction.size * self.point_value, 2)
+
+            # Build per-market result dict
+            bets_list = []
+            for inst in result.instructions:
+                bets_list.append({
+                    "runner_name": inst.runner_name,
+                    "price": inst.price,
+                    "size": inst.size,
+                    "liability": inst.liability,
+                    "rule_applied": inst.rule_applied,
+                })
+                total_stake += inst.size
+                total_liability += inst.liability
+                total_bets += 1
+
+            # Track rule breakdown
+            if result.rule_applied and not result.skipped:
+                # Extract short rule tag (e.g. "RULE_1" from "RULE_1: Fav odds ...")
+                short_rule = result.rule_applied.split(":")[0].strip()
+                rule_breakdown[short_rule] = rule_breakdown.get(short_rule, 0) + 1
+
+            per_market_results.append({
+                "market_id": market_id,
+                "venue": market.get("venue", ""),
+                "race_time": market.get("race_time", ""),
+                "market_name": market.get("market_name", ""),
+                "skipped": result.skipped,
+                "skip_reason": result.skip_reason if result.skipped else "",
+                "favourite_name": result.favourite.runner_name if result.favourite else None,
+                "favourite_odds": result.favourite.best_available_to_lay if result.favourite else None,
+                "rule_applied": result.rule_applied,
+                "bets": bets_list,
+            })
+
+        # Build snapshot record
+        snapshot = {
+            "snapshot_id": f"drs_{now.strftime('%Y%m%d_%H%M%S')}",
+            "created_at": now.isoformat(),
+            "markets_evaluated": len(market_ids),
+            "bets_would_place": total_bets,
+            "total_stake": round(total_stake, 2),
+            "total_liability": round(total_liability, 2),
+            "rule_breakdown": rule_breakdown,
+            "countries": self.countries,
+            "point_value": self.point_value,
+            "results": per_market_results,
+        }
+
+        self.dry_run_snapshots.append(snapshot)
+        self._save_snapshots()
+        logger.info(
+            f"Instant snapshot {snapshot['snapshot_id']}: "
+            f"{len(market_ids)} markets, {total_bets} bets, "
+            f"£{round(total_stake, 2)} stake"
+        )
+        return snapshot

@@ -104,6 +104,9 @@ class ChatRequest(BaseModel):
 class GenerateKeyRequest(BaseModel):
     label: str = ""
 
+class SnapshotRequest(BaseModel):
+    market_ids: list[str]
+
 
 # ──────────────────────────────────────────────
 #  API KEY AUTHENTICATION
@@ -442,6 +445,52 @@ def get_session_detail(session_id: str):
             content={"status": "error", "message": "Session not found"},
         )
     return detail
+
+
+# ──────────────────────────────────────────────
+#  DRY-RUN SNAPSHOTS
+# ──────────────────────────────────────────────
+
+@app.post("/api/engine/snapshot")
+def run_snapshot(req: SnapshotRequest):
+    """Run an instant dry-run snapshot for selected markets."""
+    if not engine.is_authenticated:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not req.market_ids:
+        raise HTTPException(status_code=400, detail="No market_ids provided")
+    try:
+        snapshot = engine.run_instant_snapshot(req.market_ids)
+        return snapshot
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/snapshots")
+def list_snapshots():
+    """List all dry-run snapshots (summaries only, no full results)."""
+    summaries = []
+    for s in reversed(engine.dry_run_snapshots):
+        summaries.append({
+            "snapshot_id": s["snapshot_id"],
+            "created_at": s["created_at"],
+            "markets_evaluated": s["markets_evaluated"],
+            "bets_would_place": s["bets_would_place"],
+            "total_stake": s["total_stake"],
+            "total_liability": s["total_liability"],
+            "rule_breakdown": s.get("rule_breakdown", {}),
+            "countries": s.get("countries", []),
+            "point_value": s.get("point_value", 1.0),
+        })
+    return {"snapshots": summaries}
+
+
+@app.get("/api/snapshots/{snapshot_id}")
+def get_snapshot(snapshot_id: str):
+    """Return full snapshot including per-market results."""
+    for s in engine.dry_run_snapshots:
+        if s["snapshot_id"] == snapshot_id:
+            return s
+    raise HTTPException(status_code=404, detail="Snapshot not found")
 
 
 # ──────────────────────────────────────────────

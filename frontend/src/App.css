@@ -1381,6 +1381,147 @@ h3 { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
   border: 1px solid #86efac;
 }
 
+/* ── Dry Run Checkboxes ── */
+.dryrun-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  font-size: 11px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.dryrun-select-all label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #4a4a5a;
+}
+.dryrun-select-all input[type="checkbox"] {
+  accent-color: #d97706;
+}
+.dryrun-checked-count {
+  color: #d97706;
+  font-weight: 600;
+}
+.dryrun-checkbox {
+  accent-color: #d97706;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+/* ── Snapshot Results Panel ── */
+.snapshot-results-header {
+  margin-bottom: 12px;
+}
+.snapshot-results-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 6px 0;
+}
+.snapshot-results-summary {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #4a4a5a;
+}
+.snapshot-results-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.snapshot-results-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+  border-bottom: 2px solid #e5e7eb;
+}
+.snapshot-results-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+.snapshot-bets-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.snapshot-bet-line {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+/* ── Snapshot History Catalogue ── */
+.snapshot-history {
+  padding: 0;
+  overflow-y: auto;
+  max-height: 300px;
+}
+.snapshot-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.snapshot-history-header h3 {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0;
+}
+.snapshot-history-list {
+  padding: 0;
+}
+.snapshot-card {
+  border-bottom: 1px solid #f3f4f6;
+}
+.snapshot-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #4a4a5a;
+  transition: background 0.1s;
+}
+.snapshot-card-header:hover {
+  background: #f9fafb;
+}
+.snapshot-card.expanded .snapshot-card-header {
+  background: #eff6ff;
+}
+.snapshot-card-time {
+  font-weight: 600;
+  color: #1a1a2e;
+  min-width: 90px;
+}
+.snapshot-rules-summary {
+  color: #9ca3af;
+  font-size: 10px;
+}
+.snapshot-card-body {
+  padding: 8px 16px 12px;
+  background: #fafbfc;
+  border-top: 1px solid #e5e7eb;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .tab-content { padding: 12px; }
