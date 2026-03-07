@@ -1130,6 +1130,17 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
   )
 }
 
+// ── Backtest History helpers ──
+const BT_HISTORY_KEY = 'chimera_backtest_history'
+const BT_HISTORY_MAX = 50
+
+function btHistLoad() {
+  try { return JSON.parse(localStorage.getItem(BT_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function btHistSave(entries) {
+  try { localStorage.setItem(BT_HISTORY_KEY, JSON.stringify(entries.slice(0, BT_HISTORY_MAX))) } catch {}
+}
+
 // ── Backtest Tab ──
 function BacktestTab() {
   const [datesLoading, setDatesLoading] = useState(true)
@@ -1149,6 +1160,9 @@ function BacktestTab() {
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+
+  const [history, setHistory] = useState(() => btHistLoad())
+  const [expandedHistId, setExpandedHistId] = useState(null)
 
   // Load available dates on mount
   useEffect(() => {
@@ -1226,7 +1240,36 @@ function BacktestTab() {
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
-      setResult(await r.json())
+      const data = await r.json()
+      setResult(data)
+      // Persist to history
+      const entry = {
+        id: Date.now().toString(),
+        run_at: new Date().toISOString(),
+        date: selectedDate,
+        config: {
+          countries,
+          process_window_mins: processWindow,
+          jofs_enabled: jofsEnabled,
+          mark_ceiling_enabled: markCeiling,
+          mark_floor_enabled: markFloor,
+          mark_uplift_enabled: markUplift,
+          market_count: selectedMarketIds.size,
+        },
+        summary: {
+          markets_evaluated: data.markets_evaluated,
+          bets_placed: data.bets_placed,
+          markets_skipped: data.markets_skipped,
+          total_stake: data.total_stake,
+          total_liability: data.total_liability,
+          total_pnl: data.total_pnl,
+          roi: data.roi,
+        },
+        results: data.results,
+      }
+      const next = [entry, ...btHistLoad()]
+      btHistSave(next)
+      setHistory(next)
     } catch (e) {
       setError('Backtest failed: ' + e.message)
     } finally {
@@ -1380,6 +1423,7 @@ function BacktestTab() {
                 ROI <strong>{result.roi >= 0 ? '+' : ''}{result.roi}%</strong>
               </span>
             </div>
+            <SnapshotButton tableId="bt-results-table" filename={`backtest_${selectedDate}`} />
           </div>
 
           <div className="card">
@@ -1437,6 +1481,138 @@ function BacktestTab() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Backtest History ── */}
+      {history.length > 0 && (
+        <div className="bt-hist-section">
+          <div className="bt-hist-section-header">
+            <h3>History</h3>
+            <span className="bt-muted">{history.length} run{history.length !== 1 ? 's' : ''} stored</span>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ marginLeft: 'auto', color: '#dc2626' }}
+              onClick={() => { if (window.confirm('Clear all backtest history?')) { btHistSave([]); setHistory([]) } }}
+            >
+              Clear All
+            </button>
+          </div>
+
+          {history.map(entry => {
+            const isExpanded = expandedHistId === entry.id
+            const pnl = entry.summary.total_pnl
+            const tableId = `bt-hist-tbl-${entry.id}`
+            return (
+              <div key={entry.id} className={`bt-hist-card${isExpanded ? ' expanded' : ''}`}>
+                <div className="bt-hist-card-header" onClick={() => setExpandedHistId(isExpanded ? null : entry.id)}>
+                  <span className="bt-hist-date">{entry.date}</span>
+                  <span className="bt-muted" style={{ fontSize: 10 }}>
+                    {new Date(entry.run_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="bt-hist-stat">Bets <strong>{entry.summary.bets_placed}</strong></span>
+                  <span className="bt-hist-stat">Stake <strong>£{entry.summary.total_stake.toFixed(2)}</strong></span>
+                  <span className={`bt-hist-stat ${pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                    P&amp;L <strong>{pnl >= 0 ? '+' : ''}£{pnl.toFixed(2)}</strong>
+                  </span>
+                  <span className={`bt-hist-stat ${entry.summary.roi >= 0 ? 'text-success' : 'text-danger'}`}>
+                    ROI <strong>{entry.summary.roi >= 0 ? '+' : ''}{entry.summary.roi}%</strong>
+                  </span>
+                  <span className="bt-hist-flags">
+                    {entry.config.jofs_enabled && <span className="tag-on">JOFS</span>}
+                    {entry.config.mark_ceiling_enabled && <span className="tag-on">Ceil</span>}
+                    {entry.config.mark_floor_enabled && <span className="tag-on">Floor</span>}
+                    {entry.config.mark_uplift_enabled && <span className="tag-on">Uplift</span>}
+                  </span>
+                  <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
+                </div>
+
+                {isExpanded && (
+                  <div className="bt-hist-card-body">
+                    <div className="bt-hist-card-meta">
+                      <span className="bt-muted">
+                        {entry.config.countries.join('/')} · {entry.config.process_window_mins}min window ·{' '}
+                        {entry.summary.markets_evaluated} markets · {entry.summary.markets_skipped} skipped
+                      </span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={e => { e.stopPropagation(); downloadTableAsExcel(tableId, `backtest_${entry.date}_${entry.id}`) }}
+                        >
+                          Export XLS
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ color: '#dc2626' }}
+                          onClick={e => {
+                            e.stopPropagation()
+                            const next = history.filter(h => h.id !== entry.id)
+                            btHistSave(next)
+                            setHistory(next)
+                            setExpandedHistId(null)
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="table-scroll">
+                      <table id={tableId}>
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Venue</th>
+                            <th>Favourite</th>
+                            <th>Rule</th>
+                            <th>Stake</th>
+                            <th>Liability</th>
+                            <th>Result</th>
+                            <th>P&amp;L</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(entry.results || []).map(r => {
+                            const time = r.race_time ? r.race_time.slice(11, 16) : '—'
+                            const skipped = r.skipped
+                            const instructions = r.instructions || []
+                            const totalStake = instructions.reduce((s, i) => s + (i.size || 0), 0)
+                            const totalLiab = instructions.reduce((s, i) => s + (i.liability || 0), 0)
+                            const rpnl = r.pnl || 0
+                            const outcomes = [...new Set(instructions.map(i => i.outcome).filter(Boolean))]
+                            const outcomeStr = skipped ? 'SKIPPED' : (outcomes.join('/') || '—')
+                            const outcomeClass = outcomeStr === 'WON' ? 'text-success'
+                              : outcomeStr === 'LOST' ? 'text-danger'
+                              : outcomeStr === 'SKIPPED' ? 'bt-muted' : ''
+                            return (
+                              <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
+                                <td>{time}</td>
+                                <td>{r.venue}</td>
+                                <td>
+                                  {r.favourite
+                                    ? <span>{r.favourite.name} <span className="bt-muted">@ {r.favourite.odds}</span></span>
+                                    : '—'}
+                                </td>
+                                <td className="bt-rule-cell" title={r.rule_applied || r.skip_reason || ''}>
+                                  {skipped ? <span className="bt-muted">{r.skip_reason}</span> : r.rule_applied}
+                                </td>
+                                <td>{skipped ? '—' : `£${totalStake.toFixed(2)}`}</td>
+                                <td>{skipped ? '—' : `£${totalLiab.toFixed(2)}`}</td>
+                                <td className={outcomeClass}>{outcomeStr}</td>
+                                <td className={rpnl > 0 ? 'text-success' : rpnl < 0 ? 'text-danger' : ''}>
+                                  {skipped ? '—' : `${rpnl >= 0 ? '+' : ''}£${rpnl.toFixed(2)}`}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
