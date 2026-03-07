@@ -94,11 +94,47 @@ class FSUClient:
         self.set_virtual_time(iso)
 
     # ──────────────────────────────────────────────
-    #  AUTH STUBS  (no-op — FSU has no auth)
+    #  GCP IDENTITY TOKEN  (Cloud Run → Cloud Run)
+    # ──────────────────────────────────────────────
+
+    def _fetch_identity_token(self) -> Optional[str]:
+        """
+        Fetch a GCP OIDC identity token from the metadata server.
+        Only available when running on Cloud Run / GCE / GKE.
+        Returns None in local dev so requests still go through unauthenticated.
+        """
+        meta_url = (
+            "http://metadata.google.internal/computeMetadata/v1/instance/"
+            f"service-accounts/default/identity?audience={self.base_url}"
+        )
+        try:
+            resp = requests.get(
+                meta_url,
+                headers={"Metadata-Flavor": "Google"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                return resp.text.strip()
+        except Exception:
+            pass
+        return None
+
+    def _refresh_auth_header(self) -> None:
+        """Set (or clear) the Authorization header on the session."""
+        token = self._fetch_identity_token()
+        if token:
+            self._session.headers.update({"Authorization": f"Bearer {token}"})
+            logger.info("FSUClient: GCP identity token set on session")
+        else:
+            logger.info("FSUClient: no metadata server — running unauthenticated (local dev)")
+
+    # ──────────────────────────────────────────────
+    #  AUTH STUBS  (mirrors BetfairClient interface)
     # ──────────────────────────────────────────────
 
     def login(self) -> bool:
-        """No-op. FSU requires no authentication."""
+        """Fetch GCP identity token and attach to session."""
+        self._refresh_auth_header()
         logger.info(f"FSUClient: backtest mode for date={self.date}")
         return True
 

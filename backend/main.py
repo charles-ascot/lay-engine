@@ -1628,6 +1628,25 @@ def data_summary(
 FSU_URL = os.environ.get("FSU_URL", "https://fsu.thync.online")
 
 
+def _fsu_auth_header() -> dict:
+    """
+    Fetch a GCP OIDC identity token for service-to-service Cloud Run auth.
+    Returns empty dict when running locally (no metadata server).
+    """
+    import requests as _r
+    meta_url = (
+        "http://metadata.google.internal/computeMetadata/v1/instance/"
+        f"service-accounts/default/identity?audience={FSU_URL}"
+    )
+    try:
+        resp = _r.get(meta_url, headers={"Metadata-Flavor": "Google"}, timeout=3)
+        if resp.status_code == 200:
+            return {"Authorization": f"Bearer {resp.text.strip()}"}
+    except Exception:
+        pass
+    return {}
+
+
 class BacktestRunRequest(BaseModel):
     date: str
     countries: list[str] = ["GB", "IE"]
@@ -1636,6 +1655,7 @@ class BacktestRunRequest(BaseModel):
     mark_ceiling_enabled: bool = False
     mark_floor_enabled: bool = False
     mark_uplift_enabled: bool = False
+    market_ids: list[str] = []  # empty = run all markets for the date
 
 
 @app.get("/api/backtest/dates")
@@ -1643,7 +1663,27 @@ def backtest_dates():
     """Return available backtest dates from the FSU service."""
     import requests as _requests
     try:
-        r = _requests.get(f"{FSU_URL}/api/dates", timeout=10)
+        r = _requests.get(f"{FSU_URL}/api/dates", headers=_fsu_auth_header(), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"FSU unavailable: {e}")
+
+
+@app.get("/api/backtest/markets")
+def backtest_markets(
+    date: str = Query(..., description="YYYY-MM-DD"),
+    countries: str = Query("GB,IE", description="Comma-separated country codes"),
+):
+    """Return WIN markets for a given date from the FSU (for the market browser)."""
+    import requests as _requests
+    try:
+        r = _requests.get(
+            f"{FSU_URL}/api/markets",
+            params={"date": date, "market_type": "WIN", "countries": countries},
+            headers=_fsu_auth_header(),
+            timeout=30,
+        )
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -1660,7 +1700,10 @@ def backtest_run(req: BacktestRunRequest):
     from datetime import datetime, timezone as _tz
 
     client = FSUClient(base_url=FSU_URL, date=req.date)
+    client.login()  # fetches GCP identity token on Cloud Run
     markets = client.get_todays_win_markets(countries=req.countries)
+    if req.market_ids:
+        markets = [m for m in markets if m["market_id"] in req.market_ids]
 
     if not markets:
         return {

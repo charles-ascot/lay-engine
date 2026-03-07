@@ -1132,6 +1132,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
 
 // ── Backtest Tab ──
 function BacktestTab() {
+  const [datesLoading, setDatesLoading] = useState(true)
   const [dates, setDates] = useState([])
   const [selectedDate, setSelectedDate] = useState('')
   const [processWindow, setProcessWindow] = useState(5)
@@ -1140,32 +1141,79 @@ function BacktestTab() {
   const [markCeiling, setMarkCeiling] = useState(false)
   const [markFloor, setMarkFloor] = useState(false)
   const [markUplift, setMarkUplift] = useState(false)
+
+  const [marketsLoading, setMarketsLoading] = useState(false)
+  const [markets, setMarkets] = useState([])
+  const [selectedMarketIds, setSelectedMarketIds] = useState(new Set())
+
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
+  // Load available dates on mount
   useEffect(() => {
-    api('/api/backtest/dates')
+    setDatesLoading(true)
+    fetch(`${API}/api/backtest/dates`)
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status}`)
+        return r.json()
+      })
       .then(d => {
         const list = d.dates || []
         setDates(list)
         if (list.length > 0) setSelectedDate(list[0])
+        else setError('FSU has no available dates — check service is running')
       })
-      .catch(() => setError('Could not load available dates from FSU'))
+      .catch(e => setError(`Could not connect to FSU (${e.message})`))
+      .finally(() => setDatesLoading(false))
   }, [])
+
+  // Load markets when date or countries change
+  const countriesKey = countries.join(',')
+  useEffect(() => {
+    if (!selectedDate || countries.length === 0) return
+    setMarketsLoading(true)
+    setMarkets([])
+    setSelectedMarketIds(new Set())
+    setResult(null)
+    fetch(`${API}/api/backtest/markets?date=${selectedDate}&countries=${countriesKey}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status}`)
+        return r.json()
+      })
+      .then(d => {
+        const list = d.markets || []
+        setMarkets(list)
+        setSelectedMarketIds(new Set(list.map(m => m.market_id)))
+      })
+      .catch(e => setError(`Could not load markets: ${e.message}`))
+      .finally(() => setMarketsLoading(false))
+  }, [selectedDate, countriesKey])
 
   function toggleCountry(c) {
     setCountries(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
   }
 
+  function toggleMarket(id) {
+    setSelectedMarketIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() { setSelectedMarketIds(new Set(markets.map(m => m.market_id))) }
+  function deselectAll() { setSelectedMarketIds(new Set()) }
+
   async function runBacktest() {
-    if (!selectedDate) return
+    if (!selectedDate || selectedMarketIds.size === 0) return
     setRunning(true)
     setResult(null)
     setError('')
     try {
-      const data = await api('/api/backtest/run', {
+      const r = await fetch(`${API}/api/backtest/run`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: selectedDate,
           countries,
@@ -1174,15 +1222,25 @@ function BacktestTab() {
           mark_ceiling_enabled: markCeiling,
           mark_floor_enabled: markFloor,
           mark_uplift_enabled: markUplift,
+          market_ids: [...selectedMarketIds],
         }),
       })
-      setResult(data)
+      if (!r.ok) throw new Error(`${r.status}`)
+      setResult(await r.json())
     } catch (e) {
       setError('Backtest failed: ' + e.message)
     } finally {
       setRunning(false)
     }
   }
+
+  // Group markets by venue for the browser
+  const marketsByVenue = markets.reduce((acc, m) => {
+    const v = m.venue || 'Unknown'
+    if (!acc[v]) acc[v] = []
+    acc[v].push(m)
+    return acc
+  }, {})
 
   return (
     <div className="backtest-tab bt-wide">
@@ -1198,8 +1256,10 @@ function BacktestTab() {
                 value={selectedDate}
                 onChange={e => setSelectedDate(e.target.value)}
                 className="bt-select"
+                disabled={datesLoading}
               >
-                {dates.length === 0 && <option>Loading…</option>}
+                {datesLoading && <option>Loading…</option>}
+                {!datesLoading && dates.length === 0 && <option>No dates available</option>}
                 {dates.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
@@ -1209,11 +1269,7 @@ function BacktestTab() {
               <div className="bt-checkboxes">
                 {['GB', 'IE'].map(c => (
                   <label key={c} className="bt-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={countries.includes(c)}
-                      onChange={() => toggleCountry(c)}
-                    />
+                    <input type="checkbox" checked={countries.includes(c)} onChange={() => toggleCountry(c)} />
                     {c}
                   </label>
                 ))}
@@ -1236,18 +1292,18 @@ function BacktestTab() {
             <button
               className="btn btn-primary btn-sm"
               onClick={runBacktest}
-              disabled={running || !selectedDate || countries.length === 0}
+              disabled={running || selectedMarketIds.size === 0}
             >
-              {running ? 'Running…' : 'Run Backtest'}
+              {running ? 'Running…' : `Run Backtest${selectedMarketIds.size > 0 ? ` (${selectedMarketIds.size})` : ''}`}
             </button>
           </div>
 
           <div className="bt-toggles">
             {[
-              ['jofsEnabled', jofsEnabled, setJofsEnabled, 'JOFS (Joint/Close Fav)'],
-              ['markCeiling', markCeiling, setMarkCeiling, 'Mark Ceiling (≤8.0)'],
-              ['markFloor', markFloor, setMarkFloor, 'Mark Floor (≥1.5)'],
-              ['markUplift', markUplift, setMarkUplift, 'Mark Uplift (2.5–3.5)'],
+              ['jofs', jofsEnabled, setJofsEnabled, 'JOFS (Joint/Close Fav)'],
+              ['ceil', markCeiling, setMarkCeiling, 'Mark Ceiling (≤8.0)'],
+              ['floor', markFloor, setMarkFloor, 'Mark Floor (≥1.5)'],
+              ['uplift', markUplift, setMarkUplift, 'Mark Uplift (2.5–3.5)'],
             ].map(([key, val, setter, label]) => (
               <label key={key} className="bt-toggle-label">
                 <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />
@@ -1258,17 +1314,58 @@ function BacktestTab() {
         </div>
       </div>
 
-      {error && (
-        <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 12 }}>{error}</div>
+      {error && <div className="bt-error">{error}</div>}
+
+      {/* Market browser */}
+      {selectedDate && !datesLoading && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="engine-section">
+            <div className="bt-browser-header">
+              <span className="engine-label" style={{ fontWeight: 600 }}>
+                Markets — {selectedDate}
+                {marketsLoading ? ' (loading…)' : ` · ${markets.length} found`}
+              </span>
+              {!marketsLoading && markets.length > 0 && (
+                <div className="bt-browser-actions">
+                  <span className="bt-muted">{selectedMarketIds.size}/{markets.length} selected</span>
+                  <button className="btn btn-secondary btn-sm" onClick={selectAll}>All</button>
+                  <button className="btn btn-secondary btn-sm" onClick={deselectAll}>None</button>
+                </div>
+              )}
+            </div>
+
+            {marketsLoading && <div className="bt-muted" style={{ fontSize: 12 }}>Loading markets…</div>}
+            {!marketsLoading && markets.length === 0 && (
+              <div className="bt-muted" style={{ fontSize: 12 }}>No markets found for this date and country selection.</div>
+            )}
+
+            {!marketsLoading && Object.entries(marketsByVenue).sort(([a], [b]) => a.localeCompare(b)).map(([venue, vMarkets]) => (
+              <div key={venue} className="bt-venue-group">
+                <div className="bt-venue-header">{venue}</div>
+                <div className="bt-market-list">
+                  {[...vMarkets].sort((a, b) => a.race_time.localeCompare(b.race_time)).map(m => (
+                    <label key={m.market_id} className="bt-market-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedMarketIds.has(m.market_id)}
+                        onChange={() => toggleMarket(m.market_id)}
+                      />
+                      <span className="bt-market-time">{m.race_time.slice(11, 16)}</span>
+                      <span className="bt-market-name">{m.market_name}</span>
+                      <span className="bt-muted" style={{ fontSize: 10 }}>{m.runners?.length ?? 0} runners</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
-      {running && (
-        <div className="empty-state">Running backtest for {selectedDate}…</div>
-      )}
+      {running && <div className="empty-state">Running backtest for {selectedDate}…</div>}
 
       {result && (
         <>
-          {/* Summary ribbon */}
           <div className="stats-ribbon" style={{ marginBottom: 12 }}>
             <div className="stats-ribbon-left">
               <span className="stat">Markets <strong>{result.markets_evaluated}</strong></span>
@@ -1285,7 +1382,6 @@ function BacktestTab() {
             </div>
           </div>
 
-          {/* Results table */}
           <div className="card">
             <div className="table-scroll">
               <table id="bt-results-table">
@@ -1325,9 +1421,7 @@ function BacktestTab() {
                             : '—'}
                         </td>
                         <td className="bt-rule-cell" title={r.rule_applied || r.skip_reason || ''}>
-                          {skipped
-                            ? <span className="bt-muted">{r.skip_reason}</span>
-                            : r.rule_applied}
+                          {skipped ? <span className="bt-muted">{r.skip_reason}</span> : r.rule_applied}
                         </td>
                         <td>{skipped ? '—' : `£${totalStake.toFixed(2)}`}</td>
                         <td>{skipped ? '—' : `£${totalLiab.toFixed(2)}`}</td>

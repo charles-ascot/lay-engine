@@ -663,6 +663,16 @@ input[type="date"]:focus { outline: none; border-color: #2563eb; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bt-error { color: #dc2626; font-size: 12px; margin-bottom: 12px; }
+.bt-browser-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.bt-browser-actions { display: flex; align-items: center; gap: 8px; }
+.bt-venue-group { margin-bottom: 10px; }
+.bt-venue-header { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #8a8a9a; margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid #f0f0f5; }
+.bt-market-list { display: flex; flex-direction: column; gap: 2px; }
+.bt-market-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #1a1a2e; }
+.bt-market-row:hover { background: #f8f9fa; }
+.bt-market-time { font-variant-numeric: tabular-nums; color: #4a4a5a; min-width: 36px; }
+.bt-market-name { flex: 1; }
 .backtest-tab h2 { font-size: 14px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
 .empty-state { color: #8a8a9a; font-size: 12px; margin-bottom: 20px; }
 .backtest-placeholder { display: flex; flex-direction: column; gap: 12px; }
