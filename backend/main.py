@@ -1663,7 +1663,7 @@ def backtest_dates():
     """Return available backtest dates from the FSU service."""
     import requests as _requests
     try:
-        r = _requests.get(f"{FSU_URL}/api/dates", headers=_fsu_auth_header(), timeout=10)
+        r = _requests.get(f"{FSU_URL}/api/dates", headers=_fsu_auth_header(), timeout=30)
         r.raise_for_status()
         return r.json()
     except Exception as e:
