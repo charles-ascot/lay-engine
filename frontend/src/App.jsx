@@ -1132,27 +1132,218 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
 
 // ── Backtest Tab ──
 function BacktestTab() {
+  const [dates, setDates] = useState([])
+  const [selectedDate, setSelectedDate] = useState('')
+  const [processWindow, setProcessWindow] = useState(5)
+  const [countries, setCountries] = useState(['GB', 'IE'])
+  const [jofsEnabled, setJofsEnabled] = useState(true)
+  const [markCeiling, setMarkCeiling] = useState(false)
+  const [markFloor, setMarkFloor] = useState(false)
+  const [markUplift, setMarkUplift] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    api('/api/backtest/dates')
+      .then(d => {
+        const list = d.dates || []
+        setDates(list)
+        if (list.length > 0) setSelectedDate(list[0])
+      })
+      .catch(() => setError('Could not load available dates from FSU'))
+  }, [])
+
+  function toggleCountry(c) {
+    setCountries(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
+  }
+
+  async function runBacktest() {
+    if (!selectedDate) return
+    setRunning(true)
+    setResult(null)
+    setError('')
+    try {
+      const data = await api('/api/backtest/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: selectedDate,
+          countries,
+          process_window_mins: processWindow,
+          jofs_enabled: jofsEnabled,
+          mark_ceiling_enabled: markCeiling,
+          mark_floor_enabled: markFloor,
+          mark_uplift_enabled: markUplift,
+        }),
+      })
+      setResult(data)
+    } catch (e) {
+      setError('Backtest failed: ' + e.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
   return (
-    <div className="backtest-tab">
+    <div className="backtest-tab bt-wide">
       <h2>Backtest</h2>
-      <p className="empty-state">
-        Backtesting module coming soon. This will allow you to test JOFS thresholds,
-        processing window timings, and rule parameters against historical Betfair data.
-      </p>
-      <div className="backtest-placeholder">
-        <div className="placeholder-section">
-          <h3>Data Sources</h3>
-          <p>Live recorded data (Data Recorder) · Betfair historic data · Engine snapshots</p>
-        </div>
-        <div className="placeholder-section">
-          <h3>Parameters</h3>
-          <p>JOFS threshold · Processing window · Odds bands · Stake sizing · Venue filters</p>
-        </div>
-        <div className="placeholder-section">
-          <h3>Output</h3>
-          <p>Simulated P&amp;L · Strike rate by parameter · Optimal configuration recommendations</p>
+
+      {/* Config panel */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="engine-section">
+          <div className="bt-config-row">
+            <div>
+              <div className="engine-label">Date</div>
+              <select
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bt-select"
+              >
+                {dates.length === 0 && <option>Loading…</option>}
+                {dates.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <div className="engine-label">Countries</div>
+              <div className="bt-checkboxes">
+                {['GB', 'IE'].map(c => (
+                  <label key={c} className="bt-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={countries.includes(c)}
+                      onChange={() => toggleCountry(c)}
+                    />
+                    {c}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="engine-label">Process Window</div>
+              <select
+                value={processWindow}
+                onChange={e => setProcessWindow(Number(e.target.value))}
+                className="bt-select"
+              >
+                {[1, 2, 3, 5, 7, 10, 15].map(m => (
+                  <option key={m} value={m}>{m} min before</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={runBacktest}
+              disabled={running || !selectedDate || countries.length === 0}
+            >
+              {running ? 'Running…' : 'Run Backtest'}
+            </button>
+          </div>
+
+          <div className="bt-toggles">
+            {[
+              ['jofsEnabled', jofsEnabled, setJofsEnabled, 'JOFS (Joint/Close Fav)'],
+              ['markCeiling', markCeiling, setMarkCeiling, 'Mark Ceiling (≤8.0)'],
+              ['markFloor', markFloor, setMarkFloor, 'Mark Floor (≥1.5)'],
+              ['markUplift', markUplift, setMarkUplift, 'Mark Uplift (2.5–3.5)'],
+            ].map(([key, val, setter, label]) => (
+              <label key={key} className="bt-toggle-label">
+                <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />
+                {label}
+              </label>
+            ))}
+          </div>
         </div>
       </div>
+
+      {error && (
+        <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 12 }}>{error}</div>
+      )}
+
+      {running && (
+        <div className="empty-state">Running backtest for {selectedDate}…</div>
+      )}
+
+      {result && (
+        <>
+          {/* Summary ribbon */}
+          <div className="stats-ribbon" style={{ marginBottom: 12 }}>
+            <div className="stats-ribbon-left">
+              <span className="stat">Markets <strong>{result.markets_evaluated}</strong></span>
+              <span className="stat">Bets <strong>{result.bets_placed}</strong></span>
+              <span className="stat">Skipped <strong>{result.markets_skipped}</strong></span>
+              <span className="stat">Stake <strong>£{result.total_stake.toFixed(2)}</strong></span>
+              <span className="stat">Liability <strong>£{result.total_liability.toFixed(2)}</strong></span>
+              <span className={`stat ${result.total_pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                P&amp;L <strong>{result.total_pnl >= 0 ? '+' : ''}£{result.total_pnl.toFixed(2)}</strong>
+              </span>
+              <span className={`stat ${result.roi >= 0 ? 'text-success' : 'text-danger'}`}>
+                ROI <strong>{result.roi >= 0 ? '+' : ''}{result.roi}%</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Results table */}
+          <div className="card">
+            <div className="table-scroll">
+              <table id="bt-results-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Venue</th>
+                    <th>Favourite</th>
+                    <th>Rule</th>
+                    <th>Stake</th>
+                    <th>Liability</th>
+                    <th>Result</th>
+                    <th>P&amp;L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.results.map(r => {
+                    const time = r.race_time ? r.race_time.slice(11, 16) : '—'
+                    const skipped = r.skipped
+                    const instructions = r.instructions || []
+                    const totalStake = instructions.reduce((s, i) => s + (i.size || 0), 0)
+                    const totalLiab = instructions.reduce((s, i) => s + (i.liability || 0), 0)
+                    const pnl = r.pnl || 0
+                    const outcomes = [...new Set(instructions.map(i => i.outcome).filter(Boolean))]
+                    const outcomeStr = skipped ? 'SKIPPED' : (outcomes.join('/') || '—')
+                    const outcomeClass = outcomeStr === 'WON' ? 'text-success'
+                      : outcomeStr === 'LOST' ? 'text-danger'
+                      : outcomeStr === 'SKIPPED' ? 'bt-muted' : ''
+
+                    return (
+                      <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
+                        <td>{time}</td>
+                        <td>{r.venue}</td>
+                        <td>
+                          {r.favourite
+                            ? <span>{r.favourite.name} <span className="bt-muted">@ {r.favourite.odds}</span></span>
+                            : '—'}
+                        </td>
+                        <td className="bt-rule-cell" title={r.rule_applied || r.skip_reason || ''}>
+                          {skipped
+                            ? <span className="bt-muted">{r.skip_reason}</span>
+                            : r.rule_applied}
+                        </td>
+                        <td>{skipped ? '—' : `£${totalStake.toFixed(2)}`}</td>
+                        <td>{skipped ? '—' : `£${totalLiab.toFixed(2)}`}</td>
+                        <td className={outcomeClass}>{outcomeStr}</td>
+                        <td className={pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}>
+                          {skipped ? '—' : `${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)}`}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -618,6 +618,51 @@ input[type="date"]:focus { outline: none; border-color: #2563eb; }
 
 /* ── BACKTEST TAB ── */
 .backtest-tab { max-width: 640px; }
+.bt-wide { max-width: 960px; }
+.bt-config-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.bt-select {
+  height: 30px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  padding: 0 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1a1a2e;
+  background: #fff;
+}
+.bt-checkboxes { display: flex; gap: 10px; margin-top: 4px; }
+.bt-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #1a1a2e;
+}
+.bt-toggles { display: flex; gap: 16px; flex-wrap: wrap; }
+.bt-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #4a4a5a;
+}
+.bt-muted { color: #9ca3af; }
+.bt-row-skipped { opacity: 0.45; }
+.bt-rule-cell {
+  font-size: 10px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .backtest-tab h2 { font-size: 14px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
 .empty-state { color: #8a8a9a; font-size: 12px; margin-bottom: 20px; }
 .backtest-placeholder { display: flex; flex-direction: column; gap: 12px; }
