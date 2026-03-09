@@ -19,10 +19,14 @@ CHIMERA scans Betfair Exchange for horse racing WIN markets across configurable 
 - **Settled bets** — Race results with actual P/L from Betfair cleared orders
 - **Session tracking** — Every engine run is a session with full bet/result history
 - **AI reports** — Structured daily performance reports (JSON) with odds band analysis, venue analysis, cumulative performance, and recommendations
-- **AI chat** — Interactive conversational analysis powered by Gemini with full session data context
+- **AI chat** — Interactive conversational analysis powered by Claude with full session data context
 - **Voice interface** — OpenAI Whisper STT + TTS for hands-free interaction with the AI
 - **API key auth** — External agent access with key-based authentication
 - **State persistence** — Survives Cloud Run cold starts via local disk + GCS bucket
+- **Report recipients** — Add email recipients who automatically receive copies of AI-generated reports via SendGrid
+- **AI data source toggles** — Control which data sets (session data, settled bets, historical summary, engine state, rule definitions, backtest results, GitHub codebase) are exposed to the AI agent
+- **AI capability toggles** — Control what actions (send emails, write reports, fetch files, GitHub access) the AI agent can perform
+- **Email dispatch** — Auto-send reports to recipients after generation, plus manual send button per report
 - **Excel export** — Snapshot any table to `.xls` for offline analysis
 - **Balance auto-refresh** — Account balance updates every 30 seconds
 
@@ -51,7 +55,8 @@ CHIMERA scans Betfair Exchange for horse racing WIN markets across configurable 
 | Backend | FastAPI, Uvicorn, Python 3.12 | Google Cloud Run |
 | Persistence | JSON files on disk + Google Cloud Storage | GCS bucket |
 | Betting API | Betfair Exchange JSON-RPC | betfair.com |
-| AI Analysis | Google Gemini 2.5 Flash | Google AI API |
+| AI Analysis | Anthropic Claude Sonnet 4.6 | Anthropic API |
+| Email | SendGrid REST API | SendGrid |
 | Voice | OpenAI Whisper (STT) + TTS (nova) | OpenAI API |
 
 ## Betting Rules
@@ -116,9 +121,10 @@ chimera-lay-engine/
 | **Snapshots** | Session history grouped by date with drill-down to individual bets |
 | **Matched** | All LIVE bets placed on Betfair with date range filter and Excel export |
 | **Settled** | Race results with P/L from Betfair, Won/Lost filter, AI Report per day |
-| **Reports** | AI-generated daily performance reports with structured tables and PDF export |
+| **Reports** | AI-generated daily performance reports with structured tables, PDF export, and email dispatch |
 | **Rules** | Every market evaluation showing favourite, odds, rule applied |
 | **Errors** | Timestamped error log |
+| **Settings** | Report recipients, AI data source toggles, AI capability toggles |
 | **API Keys** | Generate, list, and revoke API keys for external agents |
 
 ## API Endpoints
@@ -172,10 +178,20 @@ chimera-lay-engine/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/reports/templates` | List available report templates |
-| `POST` | `/api/reports/generate` | Generate AI report for selected sessions |
+| `POST` | `/api/reports/generate` | Generate AI report for selected sessions (auto-emails recipients) |
 | `GET` | `/api/reports` | List all generated reports |
 | `GET` | `/api/reports/{id}` | View report with full content |
 | `DELETE` | `/api/reports/{id}` | Delete a report |
+| `POST` | `/api/reports/{id}/send` | Email a report to all configured recipients |
+
+### Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings` | Get all settings (recipients, data sources, capabilities) |
+| `PUT` | `/api/settings/recipients` | Update report email recipients |
+| `PUT` | `/api/settings/ai-data-sources` | Toggle AI data source access |
+| `PUT` | `/api/settings/ai-capabilities` | Toggle AI agent capabilities |
 
 ### API Keys & Data API
 
@@ -270,8 +286,11 @@ gcloud scheduler jobs create http chimera-keepalive \
 | `STATE_FILE` | Cloud Run | `/tmp/chimera_engine_state.json` | Local state file path |
 | `SESSIONS_FILE` | Cloud Run | `/tmp/chimera_sessions.json` | Session history file path |
 | `GCS_BUCKET` | Cloud Run | — | GCS bucket for persistent state |
-| `GEMINI_API_KEY` | Cloud Run | — | Google Gemini API key for AI reports/chat |
+| `ANTHROPIC_API_KEY` | Cloud Run | — | Anthropic Claude API key for AI reports/chat |
 | `OPENAI_API_KEY` | Cloud Run | — | OpenAI API key for Whisper STT + TTS |
+| `SENDGRID_API_KEY` | Cloud Run | — | SendGrid API key for report email dispatch |
+| `EMAIL_FROM` | Cloud Run | `chimera@thync.online` | Sender email address for reports |
+| `EMAIL_FROM_NAME` | Cloud Run | `CHIMERA Lay Engine` | Sender display name for report emails |
 | `VITE_API_URL` | Cloudflare Pages | — | Backend API URL for frontend |
 
 ## Going Live
@@ -283,8 +302,8 @@ gcloud scheduler jobs create http chimera-keepalive \
 
 The chat drawer (AI Chat button or AI Report in Settled tab) provides:
 
-- Conversational interface powered by Gemini 2.5 Flash with full session data context
-- Access to settled bet outcomes, historical cumulative data, venue/country breakdown
+- Conversational interface powered by Claude Sonnet 4.6 with configurable data context
+- Data access controlled by AI Data Source toggles in Settings (session data, settled bets, historical summary, engine state, rule definitions, backtest results, GitHub codebase)
 - Voice input via OpenAI Whisper (record > transcribe > send)
 - Voice output via OpenAI TTS (nova voice) with browser fallback
 - Sound toggle to mute/unmute voice responses
@@ -303,6 +322,38 @@ Daily performance reports are generated as structured JSON conforming to the Chi
 - Cumulative performance by day and by band
 - Key findings and recommendations
 - Downloadable as PDF via print dialog
+- Auto-emailed to configured recipients after generation
+- Manual email send button per report
+
+## Settings
+
+The Settings tab provides three configuration sections:
+
+### Report Recipients
+Add or remove email addresses that receive automatic copies of AI-generated reports. Recipients are stored server-side and persist across sessions.
+
+### AI Data Sources
+Toggle which data sets the AI agent can access when generating reports or responding in chat:
+
+| Data Source | Description |
+|-------------|-------------|
+| Session Data | Current and historical session records |
+| Settled Bets | Race results with P/L from Betfair |
+| Historical Summary | Aggregated statistics and cumulative performance |
+| Engine State | Current engine configuration and status |
+| Rule Definitions | The 4-rule strategy with spread control parameters |
+| Backtest Results | Historical backtesting analysis data |
+| GitHub Codebase | Access to the app's source code repository |
+
+### AI Capabilities
+Toggle what actions the AI agent is permitted to perform:
+
+| Capability | Description |
+|------------|-------------|
+| Send Emails | Dispatch reports to configured recipients |
+| Write Reports | Generate structured daily performance reports |
+| Fetch Files | Access external files and data sources |
+| GitHub Access | Read and analyse the application codebase |
 
 ## Tagged Versions
 

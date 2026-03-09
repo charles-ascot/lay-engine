@@ -1163,6 +1163,8 @@ function BacktestTab() {
 
   const [history, setHistory] = useState(() => btHistLoad())
   const [expandedHistId, setExpandedHistId] = useState(null)
+  const [selectedHistIds, setSelectedHistIds] = useState(new Set())
+  const [exportingSheets, setExportingSheets] = useState(false)
 
   // Load available dates on mount
   useEffect(() => {
@@ -1274,6 +1276,47 @@ function BacktestTab() {
       setError('Backtest failed: ' + e.message)
     } finally {
       setRunning(false)
+    }
+  }
+
+  function toggleHistSelect(id) {
+    setSelectedHistIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+  function selectAllHist() { setSelectedHistIds(new Set(history.map(h => h.id))) }
+  function deselectAllHist() { setSelectedHistIds(new Set()) }
+
+  function deleteSelected() {
+    if (selectedHistIds.size === 0) return
+    if (!window.confirm(`Delete ${selectedHistIds.size} backtest run${selectedHistIds.size !== 1 ? 's' : ''}?`)) return
+    const next = history.filter(h => !selectedHistIds.has(h.id))
+    btHistSave(next)
+    setHistory(next)
+    setSelectedHistIds(new Set())
+    setExpandedHistId(null)
+  }
+
+  async function exportSelectedToSheets() {
+    if (selectedHistIds.size === 0) return
+    setExportingSheets(true)
+    try {
+      const entries = history.filter(h => selectedHistIds.has(h.id))
+      const r = await fetch(`${API}/api/backtest/export-sheets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries }),
+      })
+      if (!r.ok) throw new Error(`${r.status}`)
+      const data = await r.json()
+      if (data.url) window.open(data.url, '_blank')
+      else setError(data.error || 'Export failed')
+    } catch (e) {
+      setError('Google Sheets export failed: ' + e.message)
+    } finally {
+      setExportingSheets(false)
     }
   }
 
@@ -1489,13 +1532,36 @@ function BacktestTab() {
           <div className="bt-hist-section-header">
             <h3>History</h3>
             <span className="bt-muted">{history.length} run{history.length !== 1 ? 's' : ''} stored</span>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ marginLeft: 'auto', color: '#dc2626' }}
-              onClick={() => { if (window.confirm('Clear all backtest history?')) { btHistSave([]); setHistory([]) } }}
-            >
-              Clear All
-            </button>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+              {selectedHistIds.size > 0 && (
+                <span className="bt-muted" style={{ fontSize: 11 }}>{selectedHistIds.size} selected</span>
+              )}
+              <button className="btn btn-secondary btn-sm" onClick={selectedHistIds.size === history.length ? deselectAllHist : selectAllHist}>
+                {selectedHistIds.size === history.length ? 'Deselect All' : 'Select All'}
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={selectedHistIds.size === 0 || exportingSheets}
+                onClick={exportSelectedToSheets}
+              >
+                {exportingSheets ? 'Exporting…' : `Export to Sheets${selectedHistIds.size > 0 ? ` (${selectedHistIds.size})` : ''}`}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ color: '#dc2626' }}
+                disabled={selectedHistIds.size === 0}
+                onClick={deleteSelected}
+              >
+                Delete{selectedHistIds.size > 0 ? ` (${selectedHistIds.size})` : ''}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ color: '#dc2626' }}
+                onClick={() => { if (window.confirm('Clear all backtest history?')) { btHistSave([]); setHistory([]); setSelectedHistIds(new Set()) } }}
+              >
+                Clear All
+              </button>
+            </div>
           </div>
 
           {history.map(entry => {
@@ -1503,8 +1569,15 @@ function BacktestTab() {
             const pnl = entry.summary.total_pnl
             const tableId = `bt-hist-tbl-${entry.id}`
             return (
-              <div key={entry.id} className={`bt-hist-card${isExpanded ? ' expanded' : ''}`}>
+              <div key={entry.id} className={`bt-hist-card${isExpanded ? ' expanded' : ''}${selectedHistIds.has(entry.id) ? ' selected' : ''}`}>
                 <div className="bt-hist-card-header" onClick={() => setExpandedHistId(isExpanded ? null : entry.id)}>
+                  <input
+                    type="checkbox"
+                    checked={selectedHistIds.has(entry.id)}
+                    onChange={e => { e.stopPropagation(); toggleHistSelect(entry.id) }}
+                    onClick={e => e.stopPropagation()}
+                    style={{ marginRight: 8 }}
+                  />
                   <span className="bt-hist-date">{entry.date}</span>
                   <span className="bt-muted" style={{ fontSize: 10 }}>
                     {new Date(entry.run_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -2798,6 +2871,7 @@ function ReportsTab() {
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [showTemplateSelect, setShowTemplateSelect] = useState(false)
   const [sendingEmail, setSendingEmail] = useState(false)
+  const [savingDrive, setSavingDrive] = useState(false)
   const [emailToast, setEmailToast] = useState('')
   const reportContentRef = useRef(null)
 
@@ -2886,6 +2960,24 @@ function ReportsTab() {
       setEmailToast('Email send failed')
     }
     setSendingEmail(false)
+    setTimeout(() => setEmailToast(''), 4000)
+  }
+
+  const handleSaveDrive = async (reportId) => {
+    setSavingDrive(true)
+    setEmailToast('')
+    try {
+      const res = await api(`/api/reports/${reportId}/save-drive`, { method: 'POST' })
+      if (res.url) {
+        setEmailToast('Saved to Google Drive')
+        window.open(res.url, '_blank')
+      } else {
+        setEmailToast(res.error || res.detail || 'Save failed')
+      }
+    } catch (e) {
+      setEmailToast('Google Drive save failed')
+    }
+    setSavingDrive(false)
     setTimeout(() => setEmailToast(''), 4000)
   }
 
@@ -3104,6 +3196,13 @@ function ReportsTab() {
               disabled={sendingEmail}
             >
               {sendingEmail ? 'Sending...' : '📧 Email'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleSaveDrive(viewingReport.report_id)}
+              disabled={savingDrive}
+            >
+              {savingDrive ? 'Saving...' : 'Save to Drive'}
             </button>
             <button className="btn btn-primary" onClick={handleDownloadPDF}>
               Print / PDF

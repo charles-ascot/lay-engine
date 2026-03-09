@@ -2,6 +2,25 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [2.3.0] — 2026-03-09
+
+### Added
+- **Report Recipients** — Add/remove email addresses in Settings that automatically receive copies of AI-generated reports via SendGrid.
+- **AI Data Source toggles** — Settings section to control which data sets (session data, settled bets, historical summary, engine state, rule definitions, backtest results, GitHub codebase) are exposed to the AI agent in chat and reports.
+- **AI Capability toggles** — Settings section to control what actions (send emails, write reports, fetch files, GitHub access) the AI agent can perform.
+- **Email dispatch** — Reports are auto-emailed to all configured recipients after generation. Manual "Send Email" button on each report for on-demand dispatch.
+- **Settings persistence** — All settings stored in `chimera_settings.json` via GCS + local disk (same pattern as sessions/reports).
+- `GET /api/settings` — Retrieve all settings (recipients, data sources, capabilities).
+- `PUT /api/settings/recipients` — Update report email recipient list.
+- `PUT /api/settings/ai-data-sources` — Toggle AI data source access.
+- `PUT /api/settings/ai-capabilities` — Toggle AI agent capabilities.
+- `POST /api/reports/{id}/send` — Email a report to all configured recipients via SendGrid.
+
+### Changed
+- **Settings tab** — Expanded from basic controls to three sections: Report Recipients, AI Data Sources, AI Capabilities with card-based toggle grids.
+- **AI chat endpoint** — Now respects AI data source toggles; only includes enabled data sets in the system prompt.
+- **Report generation** — Now respects data source toggles and auto-sends email to recipients after generation.
+
 ## [2.2.0] — 2026-03-01
 
 ### Added

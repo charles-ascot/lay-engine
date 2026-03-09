@@ -1438,6 +1438,112 @@ EMAIL_FROM = os.environ.get("EMAIL_FROM", "chimera@thync.online")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "CHIMERA Lay Engine")
 
 
+def _render_report_html(data: dict) -> str:
+    """Render a ChimeraReport JSON structure into styled HTML (mirrors frontend renderJsonReport)."""
+    def fpl(v):
+        if v is None: return "—"
+        return f"+£{v:.2f}" if v >= 0 else f"−£{abs(v):.2f}"
+    def fpct(v):
+        if v is None: return "—"
+        return f"{(v * 100):.1f}%"
+    def fodds(v):
+        return f"{v:.2f}" if v else "—"
+
+    ts = ("border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0;"
+          " border: 1px solid #e5e7eb;")
+    th = "padding: 6px 10px; text-align: left; background: #f1f5f9; border: 1px solid #e5e7eb; font-size: 12px;"
+    td = "padding: 6px 10px; border: 1px solid #e5e7eb; font-size: 12px;"
+    h2s = "color: #1a1a2e; font-size: 18px; margin-top: 28px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px;"
+
+    h = ""
+    m = data.get("meta", {})
+    h += f'<h1 style="color: #2563eb; font-size: 22px;">CHIMERA Lay Engine Performance Report</h1>'
+    h += f'<h2 style="{h2s}">Day {m.get("day_number", "?")} — {m.get("trading_date", "")}</h2>'
+    h += f'<p style="color: #6b7280;"><em>Prepared by {m.get("prepared_by", "CHIMERA AI Agent")} | {m.get("engine_version", "")} | {"LIVE" if m.get("dry_run_disabled") else "DRY RUN"}</em></p>'
+
+    es = data.get("executive_summary")
+    if es:
+        h += f'<h2 style="{h2s}">Executive Summary</h2>'
+        if es.get("headline"): h += f'<p><strong>{es["headline"]}</strong></p>'
+        if es.get("narrative"): h += f'<p>{es["narrative"]}</p>'
+        if es.get("key_findings"):
+            h += "<ul>" + "".join(f"<li>{f}</li>" for f in es["key_findings"]) + "</ul>"
+
+    dp = data.get("day_performance")
+    if dp and dp.get("slices"):
+        h += f'<h2 style="{h2s}">Performance Summary</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Slice</th><th style="{th}">Bets</th><th style="{th}">Record</th><th style="{th}">Strike</th><th style="{th}">Staked</th><th style="{th}">P/L</th><th style="{th}">ROI</th></tr></thead><tbody>'
+        for s in dp["slices"]:
+            h += f'<tr><td style="{td}">{s.get("label","")}</td><td style="{td}">{s.get("total_bets","")}</td><td style="{td}">{s.get("wins",0)}W-{s.get("losses",0)}L</td><td style="{td}">{fpct(s.get("strike_rate"))}</td><td style="{td}">£{s.get("total_staked",0):.2f}</td><td style="{td}">{fpl(s.get("net_pl"))}</td><td style="{td}">{fpct(s.get("roi"))}</td></tr>'
+        h += "</tbody></table>"
+        if dp.get("narrative"): h += f'<p style="color: #6b7280;"><em>{dp["narrative"]}</em></p>'
+
+    ob = data.get("odds_band_analysis")
+    if ob and ob.get("bands"):
+        h += f'<h2 style="{h2s}">Odds Band Analysis</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Band</th><th style="{th}">Bets</th><th style="{th}">Wins</th><th style="{th}">Strike</th><th style="{th}">P/L</th><th style="{th}">ROI</th><th style="{th}">Verdict</th></tr></thead><tbody>'
+        for b in ob["bands"]:
+            h += f'<tr><td style="{td}">{b.get("label","")}</td><td style="{td}">{b.get("bets","")}</td><td style="{td}">{b.get("wins","")}</td><td style="{td}">{fpct(b.get("win_pct"))}</td><td style="{td}">{fpl(b.get("pl"))}</td><td style="{td}">{fpct(b.get("roi"))}</td><td style="{td}"><strong>{b.get("verdict","")}</strong></td></tr>'
+        h += "</tbody></table>"
+        if ob.get("narrative"): h += f'<p style="color: #6b7280;"><em>{ob["narrative"]}</em></p>'
+
+    da = data.get("discipline_analysis")
+    if da and da.get("rows"):
+        h += f'<h2 style="{h2s}">Discipline Analysis</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Discipline</th><th style="{th}">Bets</th><th style="{th}">Record</th><th style="{th}">Strike</th><th style="{th}">P/L</th><th style="{th}">ROI</th></tr></thead><tbody>'
+        for r in da["rows"]:
+            h += f'<tr><td style="{td}">{r.get("discipline","")}</td><td style="{td}">{r.get("bets","")}</td><td style="{td}">{r.get("wins",0)}W-{r.get("losses",0)}L</td><td style="{td}">{fpct(r.get("strike_rate"))}</td><td style="{td}">{fpl(r.get("pl"))}</td><td style="{td}">{fpct(r.get("roi"))}</td></tr>'
+        h += "</tbody></table>"
+
+    va = data.get("venue_analysis")
+    if va and va.get("rows"):
+        h += f'<h2 style="{h2s}">Venue Analysis</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Venue</th><th style="{th}">Country</th><th style="{th}">Disc.</th><th style="{th}">Bets</th><th style="{th}">Record</th><th style="{th}">Strike</th><th style="{th}">P/L</th><th style="{th}">ROI</th><th style="{th}">Rating</th></tr></thead><tbody>'
+        for r in va["rows"]:
+            h += f'<tr><td style="{td}">{r.get("venue","")}</td><td style="{td}">{r.get("country","")}</td><td style="{td}">{r.get("discipline","")}</td><td style="{td}">{r.get("bets","")}</td><td style="{td}">{r.get("wins",0)}W-{r.get("losses",0)}L</td><td style="{td}">{fpct(r.get("strike_rate"))}</td><td style="{td}">{fpl(r.get("pl"))}</td><td style="{td}">{fpct(r.get("roi"))}</td><td style="{td}"><strong>{r.get("rating","")}</strong></td></tr>'
+        h += "</tbody></table>"
+
+    bets = [b for b in data.get("bets", []) if b.get("result") in ("WIN", "LOSS")]
+    if bets:
+        h += f'<h2 style="{h2s}">Individual Bet Breakdown</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Time</th><th style="{th}">Runner</th><th style="{th}">Venue</th><th style="{th}">Odds</th><th style="{th}">Stake</th><th style="{th}">Liability</th><th style="{th}">P/L</th><th style="{th}">Result</th><th style="{th}">Band</th><th style="{th}">Rule</th></tr></thead><tbody>'
+        for b in bets:
+            rc = "color:#16a34a" if b.get("result") == "WIN" else "color:#dc2626"
+            h += f'<tr><td style="{td}">{b.get("race_time","")}</td><td style="{td}">{b.get("selection","")}</td><td style="{td}">{b.get("venue","")}</td><td style="{td}">{fodds(b.get("odds"))}</td><td style="{td}">£{b.get("stake",0):.2f}</td><td style="{td}">£{b.get("liability",0):.2f}</td><td style="{td}">{fpl(b.get("pl"))}</td><td style="{td};{rc}"><strong>{b.get("result","")}</strong></td><td style="{td}">{b.get("band_label","")}</td><td style="{td}">{b.get("rule","")}</td></tr>'
+        h += "</tbody></table>"
+
+    cp = data.get("cumulative_performance")
+    if cp and cp.get("by_day"):
+        h += f'<h2 style="{h2s}">Cumulative Performance — By Day</h2>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Day</th><th style="{th}">Date</th><th style="{th}">Bets</th><th style="{th}">Record</th><th style="{th}">Strike</th><th style="{th}">Day P/L</th><th style="{th}">Cumulative</th></tr></thead><tbody>'
+        for d in cp["by_day"]:
+            h += f'<tr><td style="{td}">{d.get("day_number","")}</td><td style="{td}">{d.get("date","")}</td><td style="{td}">{d.get("bets","")}</td><td style="{td}">{d.get("wins",0)}W-{d.get("losses",0)}L</td><td style="{td}">{fpct(d.get("strike_rate"))}</td><td style="{td}">{fpl(d.get("pl"))}</td><td style="{td}"><strong>{fpl(d.get("cumulative_pl"))}</strong></td></tr>'
+        h += "</tbody></table>"
+    if cp and cp.get("by_band"):
+        h += f'<h3 style="color: #1a1a2e; font-size: 15px; margin-top: 20px;">Cumulative — By Odds Band</h3>'
+        h += f'<table style="{ts}"><thead><tr><th style="{th}">Band</th><th style="{th}">Bets</th><th style="{th}">Record</th><th style="{th}">Strike</th><th style="{th}">P/L</th><th style="{th}">Status</th><th style="{th}">Recommendation</th></tr></thead><tbody>'
+        for b in cp["by_band"]:
+            h += f'<tr><td style="{td}">{b.get("label","")}</td><td style="{td}">{b.get("bets","")}</td><td style="{td}">{b.get("wins",0)}W-{b.get("losses",0)}L</td><td style="{td}">{fpct(b.get("strike_rate"))}</td><td style="{td}">{fpl(b.get("pl"))}</td><td style="{td}"><strong>{b.get("status","")}</strong></td><td style="{td}">{b.get("recommendation","")}</td></tr>'
+        h += "</tbody></table>"
+
+    cc = data.get("conclusions")
+    if cc:
+        if cc.get("findings"):
+            h += f'<h2 style="{h2s}">Key Findings</h2><ol>'
+            for f in cc["findings"]:
+                txt = f.get("text", f) if isinstance(f, dict) else f
+                h += f"<li><strong>{txt}</strong></li>" if (isinstance(f, dict) and f.get("priority")) else f"<li>{txt}</li>"
+            h += "</ol>"
+        if cc.get("recommendations"):
+            h += f'<h2 style="{h2s}">Recommendations</h2><ol>'
+            for r in cc["recommendations"]:
+                txt = r.get("text", r) if isinstance(r, dict) else r
+                h += f"<li><strong>{txt}</strong></li>" if (isinstance(r, dict) and r.get("priority")) else f"<li>{txt}</li>"
+            h += "</ol>"
+
+    return h
+
+
 def _send_report_email(report: dict, recipients: list[dict]):
     """Send an HTML report to all recipients via SendGrid."""
     if not SENDGRID_API_KEY:
@@ -1448,10 +1554,21 @@ def _send_report_email(report: dict, recipients: list[dict]):
 
     import requests as http_requests
 
-    html_content = report.get("content", "")
-    if isinstance(html_content, dict):
-        # JSON report — wrap in basic HTML
-        html_content = f"<pre>{json.dumps(html_content, indent=2)}</pre>"
+    content = report.get("content", "")
+    if isinstance(content, dict):
+        html_content = _render_report_html(content)
+    elif isinstance(content, str):
+        # Try to parse as JSON in case it's a stringified report
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                html_content = _render_report_html(parsed)
+            else:
+                html_content = content
+        except (json.JSONDecodeError, ValueError):
+            html_content = content
+    else:
+        html_content = str(content)
 
     subject = report.get("title", "CHIMERA Report")
     to_list = [{"email": r["email"], "name": r.get("name", "")} for r in recipients]
@@ -1462,7 +1579,6 @@ def _send_report_email(report: dict, recipients: list[dict]):
         "subject": subject,
         "content": [{"type": "text/html", "value": f"""
             <div style="font-family: 'Inter', 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #1a1a2e;">
-                <h1 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 8px;">{subject}</h1>
                 {html_content}
                 <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;"/>
                 <p style="color: #8a8a9a; font-size: 12px;">
@@ -1995,3 +2111,213 @@ def backtest_run(req: BacktestRunRequest):
         "roi": round((total_pnl / total_stake * 100) if total_stake > 0 else 0.0, 1),
         "results": results,
     }
+
+
+# ── Google Drive / Sheets helpers ──
+
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "")
+
+
+def _google_access_token():
+    """Get an OAuth2 access token from the default service account (Cloud Run)."""
+    try:
+        from google.auth import default as _gauth_default
+        from google.auth.transport.requests import Request as _GRequest
+        creds, _ = _gauth_default(scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.file",
+        ])
+        creds.refresh(_GRequest())
+        return creds.token
+    except Exception as e:
+        logging.error(f"Google auth failed: {e}")
+        return None
+
+
+class BacktestExportRequest(BaseModel):
+    entries: list[dict]
+
+
+@app.post("/api/backtest/export-sheets")
+def backtest_export_sheets(req: BacktestExportRequest):
+    """Export selected backtest history entries to a single Google Sheet."""
+    import requests as _requests
+
+    token = _google_access_token()
+    if not token:
+        raise HTTPException(status_code=500, detail="Google auth not available")
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # 1. Create a new spreadsheet
+    title = f"CHIMERA Backtest Export — {req.entries[0]['date'] if req.entries else 'Unknown'}"
+    if len(req.entries) > 1:
+        title = f"CHIMERA Backtest Export — {len(req.entries)} runs"
+
+    create_resp = _requests.post(
+        "https://sheets.googleapis.com/v4/spreadsheets",
+        json={"properties": {"title": title}},
+        headers=headers,
+        timeout=15,
+    )
+    if create_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Sheets API error: {create_resp.text}")
+
+    sheet_data = create_resp.json()
+    spreadsheet_id = sheet_data["spreadsheetId"]
+    spreadsheet_url = sheet_data["spreadsheetUrl"]
+
+    # 2. Build rows — one sheet per backtest run
+    batch_requests = []
+    value_updates = []
+
+    for idx, entry in enumerate(req.entries):
+        sheet_title = f"{entry.get('date', 'Run')}_{idx + 1}"
+
+        # Add sheet (skip first — Sheet1 already exists)
+        if idx == 0:
+            # Rename Sheet1
+            batch_requests.append({
+                "updateSheetProperties": {
+                    "properties": {"sheetId": 0, "title": sheet_title},
+                    "fields": "title",
+                }
+            })
+        else:
+            batch_requests.append({
+                "addSheet": {"properties": {"title": sheet_title}}
+            })
+
+        # Build header + data rows
+        summary = entry.get("summary", {})
+        config = entry.get("config", {})
+        rows = [
+            ["CHIMERA Backtest", entry.get("date", ""), f"Run: {entry.get('run_at', '')}"],
+            [f"Countries: {','.join(config.get('countries', []))}", f"Window: {config.get('process_window_mins', '')}min",
+             f"JOFS: {'ON' if config.get('jofs_enabled') else 'OFF'}"],
+            [f"Markets: {summary.get('markets_evaluated', '')}", f"Bets: {summary.get('bets_placed', '')}",
+             f"P&L: £{summary.get('total_pnl', 0):.2f}", f"ROI: {summary.get('roi', 0)}%"],
+            [],
+            ["Time", "Venue", "Favourite", "Odds", "Rule", "Stake", "Liability", "Result", "P&L"],
+        ]
+
+        for r in entry.get("results", []):
+            instructions = r.get("instructions", [])
+            total_stake = sum(i.get("size", 0) for i in instructions)
+            total_liab = sum(i.get("liability", 0) for i in instructions)
+            outcomes = list(set(i.get("outcome", "") for i in instructions if i.get("outcome")))
+            fav = r.get("favourite", {})
+            rows.append([
+                (r.get("race_time") or "")[:16],
+                r.get("venue", ""),
+                fav.get("name", "") if fav else "",
+                fav.get("odds", "") if fav else "",
+                r.get("skip_reason", "") if r.get("skipped") else r.get("rule_applied", ""),
+                "" if r.get("skipped") else f"£{total_stake:.2f}",
+                "" if r.get("skipped") else f"£{total_liab:.2f}",
+                "SKIPPED" if r.get("skipped") else "/".join(outcomes) or "—",
+                "" if r.get("skipped") else f"£{r.get('pnl', 0):.2f}",
+            ])
+
+        value_updates.append({
+            "range": f"'{sheet_title}'!A1",
+            "majorDimension": "ROWS",
+            "values": rows,
+        })
+
+    # 3. Execute batch sheet creation/rename
+    if batch_requests:
+        _requests.post(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}:batchUpdate",
+            json={"requests": batch_requests},
+            headers=headers,
+            timeout=15,
+        )
+
+    # 4. Write all data
+    _requests.post(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values:batchUpdate",
+        json={"valueInputOption": "RAW", "data": value_updates},
+        headers=headers,
+        timeout=15,
+    )
+
+    # 5. Move to shared folder if configured
+    if GOOGLE_DRIVE_FOLDER_ID:
+        _requests.patch(
+            f"https://www.googleapis.com/drive/v3/files/{spreadsheet_id}?addParents={GOOGLE_DRIVE_FOLDER_ID}",
+            headers=headers,
+            timeout=10,
+        )
+
+    return {"url": spreadsheet_url, "spreadsheet_id": spreadsheet_id}
+
+
+@app.post("/api/reports/{report_id}/save-drive")
+def save_report_to_drive(report_id: str):
+    """Save a report as a Google Doc in the configured Drive folder."""
+    import requests as _requests
+
+    report = None
+    for r in engine.reports:
+        if r["report_id"] == report_id:
+            report = r
+            break
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    token = _google_access_token()
+    if not token:
+        raise HTTPException(status_code=500, detail="Google auth not available")
+
+    if not GOOGLE_DRIVE_FOLDER_ID:
+        raise HTTPException(status_code=500, detail="GOOGLE_DRIVE_FOLDER_ID not configured")
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    title = report.get("title", f"CHIMERA Report {report_id}")
+    content = report.get("content", "")
+    if isinstance(content, dict):
+        content = json.dumps(content, indent=2)
+
+    # Create HTML file in Drive
+    html_body = f"""<html><head><meta charset="utf-8"><title>{title}</title></head>
+<body style="font-family: Inter, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px;">
+<h1>{title}</h1>
+{content}
+<hr><p style="color: #999; font-size: 11px;">Generated by CHIMERA Lay Engine</p>
+</body></html>"""
+
+    metadata = {
+        "name": title,
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": [GOOGLE_DRIVE_FOLDER_ID],
+    }
+
+    boundary = "chimera_boundary"
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{json.dumps(metadata)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: text/html; charset=UTF-8\r\n\r\n"
+        f"{html_body}\r\n"
+        f"--{boundary}--"
+    )
+
+    resp = _requests.post(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        data=body.encode("utf-8"),
+        headers={
+            **headers,
+            "Content-Type": f"multipart/related; boundary={boundary}",
+        },
+        timeout=15,
+    )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Drive API error: {resp.text}")
+
+    file_data = resp.json()
+    file_url = f"https://docs.google.com/document/d/{file_data['id']}/edit"
+    return {"url": file_url, "file_id": file_data["id"]}

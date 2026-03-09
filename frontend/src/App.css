@@ -698,6 +698,8 @@ input[type="date"]:focus { outline: none; border-color: #2563eb; }
   background: #fff;
 }
 .bt-hist-card.expanded { border-color: #c4b5fd; }
+.bt-hist-card.selected { border-color: #06b6d4; background: #f0fdfa; }
+.bt-hist-card.selected .bt-hist-card-header { background: #f0fdfa; }
 .bt-hist-card-header {
   display: flex;
   align-items: center;
