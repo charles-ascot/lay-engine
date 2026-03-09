@@ -129,7 +129,7 @@ class LayEngine:
         self.mark_uplift_enabled: bool = False   # Mark Rule: 2.5–3.5 band stake to 5 pts
 
         # ── Processing window ──
-        self.process_window: int = PROCESS_WINDOW_MINUTES  # Configurable at runtime
+        self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
         self.monitoring: dict = {}      # market_id → list of odds snapshots
         self.next_race: Optional[dict] = None  # Nearest unprocessed race
 

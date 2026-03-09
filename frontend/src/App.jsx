@@ -56,6 +56,14 @@ function SnapshotButton({ tableId, filename }) {
   )
 }
 
+// ── Window formatter ──
+function fmtWindow(mins) {
+  if (mins == null) return '12m'
+  if (mins < 1) return `${Math.round(mins * 60)}s`
+  if (mins % 1 !== 0) return `${Math.floor(mins)}m ${Math.round((mins % 1) * 60)}s`
+  return `${mins}m`
+}
+
 // ── Status Badge ──
 function Badge({ status }) {
   const colors = {
@@ -721,7 +729,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
                 <span className="snapshot-strategy-title">Strategy</span>
                 <span>{(snapshotResult.countries || []).map(c => COUNTRY_LABELS[c] || c).join(' ')}</span>
                 <span>£{snapshotResult.point_value || 1}/pt</span>
-                <span>Window: {snapshotResult.process_window || 12}m</span>
+                <span>Window: {fmtWindow(snapshotResult.process_window)}</span>
                 <span className={snapshotResult.jofs_control ? 'tag-on' : 'tag-off'}>JOFS {snapshotResult.jofs_control ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.spread_control ? 'tag-on' : 'tag-off'}>Spread {snapshotResult.spread_control ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotResult.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
@@ -1004,8 +1012,19 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
               value={state.process_window || 12}
               onChange={e => onSetProcessWindow(+e.target.value)}
             >
-              {[5, 8, 10, 12, 15, 20, 30].map(v => (
-                <option key={v} value={v}>{v} min before off</option>
+              {[
+                { v: 0.083, label: '5 sec before off' },
+                { v: 1.5, label: '1m 30s before off' },
+                { v: 2, label: '2 min before off' },
+                { v: 5, label: '5 min before off' },
+                { v: 8, label: '8 min before off' },
+                { v: 10, label: '10 min before off' },
+                { v: 12, label: '12 min before off' },
+                { v: 15, label: '15 min before off' },
+                { v: 20, label: '20 min before off' },
+                { v: 30, label: '30 min before off' },
+              ].map(({ v, label }) => (
+                <option key={v} value={v}>{label}</option>
               ))}
             </select>
           </label>
@@ -1369,8 +1388,17 @@ function BacktestTab() {
                 onChange={e => setProcessWindow(Number(e.target.value))}
                 className="bt-select"
               >
-                {[1, 2, 3, 5, 7, 10, 15].map(m => (
-                  <option key={m} value={m}>{m} min before</option>
+                {[
+                  { v: 0.083, label: '5 sec' },
+                  { v: 1.5, label: '1m 30s' },
+                  { v: 2, label: '2 min' },
+                  { v: 3, label: '3 min' },
+                  { v: 5, label: '5 min' },
+                  { v: 7, label: '7 min' },
+                  { v: 10, label: '10 min' },
+                  { v: 15, label: '15 min' },
+                ].map(({ v, label }) => (
+                  <option key={v} value={v}>{label} before</option>
                 ))}
               </select>
             </div>
@@ -1603,7 +1631,7 @@ function BacktestTab() {
                   <div className="bt-hist-card-body">
                     <div className="bt-hist-card-meta">
                       <span className="bt-muted">
-                        {entry.config.countries.join('/')} · {entry.config.process_window_mins}min window ·{' '}
+                        {entry.config.countries.join('/')} · {fmtWindow(entry.config.process_window_mins)} window ·{' '}
                         {entry.summary.markets_evaluated} markets · {entry.summary.markets_skipped} skipped
                       </span>
                       <div style={{ display: 'flex', gap: 6 }}>

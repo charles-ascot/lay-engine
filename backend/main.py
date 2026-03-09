@@ -89,7 +89,7 @@ class CountriesRequest(BaseModel):
     countries: list[str]
 
 class ProcessWindowRequest(BaseModel):
-    minutes: int
+    minutes: float
 
 class PointValueRequest(BaseModel):
     value: float
@@ -410,7 +410,7 @@ def set_countries(req: CountriesRequest):
 @app.post("/api/engine/process-window")
 def set_process_window(req: ProcessWindowRequest):
     """Set the betting window — how many minutes before race start to place bets."""
-    if req.minutes < 1 or req.minutes > 60:
+    if req.minutes < 0.05 or req.minutes > 60:
         raise HTTPException(status_code=400, detail="Window must be 1–60 minutes")
     engine.process_window = req.minutes
     engine._save_state()
@@ -1924,7 +1924,7 @@ def _fsu_auth_header() -> dict:
 class BacktestRunRequest(BaseModel):
     date: str
     countries: list[str] = ["GB", "IE"]
-    process_window_mins: int = 5
+    process_window_mins: float = 5
     jofs_enabled: bool = True
     mark_ceiling_enabled: bool = False
     mark_floor_enabled: bool = False
