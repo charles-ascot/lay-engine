@@ -922,17 +922,20 @@ def chat(req: ChatRequest):
             content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
         )
 
-    # Build session context
-    if req.date:
-        context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
-    else:
-        context_sessions = engine.sessions[-10:]
+    ds = engine.settings.get("ai_data_sources", {})
 
-    session_data = _compact_session_data(context_sessions)
+    # Build session context (only if enabled)
+    session_data = []
+    if ds.get("session_data", True):
+        if req.date:
+            context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
+        else:
+            context_sessions = engine.sessions[-10:]
+        session_data = _compact_session_data(context_sessions)
 
     # Fetch settled data for the relevant date
     settled_context = ""
-    if req.date:
+    if ds.get("settled_bets", True) and req.date:
         settled = _get_settled_for_date(req.date)
         if settled:
             settled_context = f"""
@@ -941,21 +944,34 @@ SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L):
 {json.dumps(settled, indent=2, default=str)}"""
 
     # Include historical summary for cumulative context
-    historical = _get_historical_summary()
+    historical = {}
+    if ds.get("historical_summary", True):
+        historical = _get_historical_summary()
 
-    system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
-You have access to all data from the CHIMERA Lay Engine.
-
-{RULES_DESCRIPTION}
-
+    # Engine state
+    engine_state_ctx = ""
+    if ds.get("engine_state", True):
+        engine_state_ctx = f"""
 Active countries: {', '.join(engine.countries)}
 Engine mode: {"DRY_RUN" if engine.dry_run else "LIVE"}
+Balance: {engine.balance}"""
+
+    # Rules
+    rules_ctx = ""
+    if ds.get("rule_definitions", True):
+        rules_ctx = RULES_DESCRIPTION
+
+    system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
+You have access to data from the CHIMERA Lay Engine (only the data sources enabled by the user).
+
+{rules_ctx}
+{engine_state_ctx}
 
 SESSION DATA (bets placed by the engine):
-{json.dumps(session_data, indent=2, default=str)}{settled_context}
+{json.dumps(session_data, indent=2, default=str) if session_data else "(Session data not enabled)"}{settled_context}
 
 HISTORICAL SUMMARY (all operating days):
-{json.dumps(historical, indent=2, default=str)}
+{json.dumps(historical, indent=2, default=str) if historical else "(Historical data not enabled)"}
 
 Answer questions about this data concisely. Be specific with numbers.
 You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes.
@@ -1227,14 +1243,16 @@ def generate_report(req: GenerateReportRequest):
             content={"status": "error", "message": "No matching sessions found"},
         )
 
+    ds = engine.settings.get("ai_data_sources", {})
+
     # 1. Compact session data (enriched with venue, country, market_id)
-    session_data = _compact_session_data(selected_sessions)
+    session_data = _compact_session_data(selected_sessions) if ds.get("session_data", True) else []
 
     # 2. Settled bet data from Betfair (actual WIN/LOSS outcomes)
-    settled_data = _get_settled_for_date(req.date)
+    settled_data = _get_settled_for_date(req.date) if ds.get("settled_bets", True) else None
 
     # 3. Historical session data for cumulative performance
-    historical_data = _get_historical_summary(exclude_date=req.date)
+    historical_data = _get_historical_summary(exclude_date=req.date) if ds.get("historical_summary", True) else {}
 
     # 4. Current engine state
     from datetime import datetime, timezone
@@ -1301,6 +1319,14 @@ def generate_report(req: GenerateReportRequest):
         engine.reports.append(report)
         engine._save_reports()
 
+        # Auto-send to recipients if email is enabled
+        recipients = engine.settings.get("report_recipients", [])
+        ai_caps = engine.settings.get("ai_capabilities", {})
+        email_result = None
+        if recipients and ai_caps.get("send_emails"):
+            email_result = _send_report_email(report, recipients)
+
+        report["email_result"] = email_result
         return report
     except Exception as e:
         logging.error(f"Report generation failed: {e}")
@@ -1353,6 +1379,138 @@ def delete_report(report_id: str):
         status_code=404,
         content={"status": "error", "message": "Report not found"},
     )
+
+
+# ──────────────────────────────────────────────
+#  SETTINGS: Recipients, AI Data Sources, AI Capabilities
+# ──────────────────────────────────────────────
+
+class RecipientModel(BaseModel):
+    email: str
+    name: str = ""
+
+class UpdateRecipientsRequest(BaseModel):
+    recipients: list[RecipientModel]
+
+class UpdateAIDataSourcesRequest(BaseModel):
+    ai_data_sources: dict[str, bool]
+
+class UpdateAICapabilitiesRequest(BaseModel):
+    ai_capabilities: dict[str, bool]
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Return app settings (recipients, data sources, AI capabilities)."""
+    return engine.settings
+
+
+@app.put("/api/settings/recipients")
+def update_recipients(req: UpdateRecipientsRequest):
+    """Update the list of report email recipients."""
+    engine.settings["report_recipients"] = [r.dict() for r in req.recipients]
+    engine._save_settings()
+    return {"status": "ok", "recipients": engine.settings["report_recipients"]}
+
+
+@app.put("/api/settings/ai-data-sources")
+def update_ai_data_sources(req: UpdateAIDataSourcesRequest):
+    """Toggle which data sources are exposed to the AI agent."""
+    engine.settings["ai_data_sources"].update(req.ai_data_sources)
+    engine._save_settings()
+    return {"status": "ok", "ai_data_sources": engine.settings["ai_data_sources"]}
+
+
+@app.put("/api/settings/ai-capabilities")
+def update_ai_capabilities(req: UpdateAICapabilitiesRequest):
+    """Toggle which actions the AI agent is allowed to perform."""
+    engine.settings["ai_capabilities"].update(req.ai_capabilities)
+    engine._save_settings()
+    return {"status": "ok", "ai_capabilities": engine.settings["ai_capabilities"]}
+
+
+# ──────────────────────────────────────────────
+#  EMAIL: Send reports to recipients
+# ──────────────────────────────────────────────
+
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "chimera@thync.online")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "CHIMERA Lay Engine")
+
+
+def _send_report_email(report: dict, recipients: list[dict]):
+    """Send an HTML report to all recipients via SendGrid."""
+    if not SENDGRID_API_KEY:
+        logging.warning("SENDGRID_API_KEY not configured — skipping email dispatch")
+        return {"sent": 0, "error": "SENDGRID_API_KEY not configured"}
+    if not recipients:
+        return {"sent": 0, "error": "No recipients configured"}
+
+    import requests as http_requests
+
+    html_content = report.get("content", "")
+    if isinstance(html_content, dict):
+        # JSON report — wrap in basic HTML
+        html_content = f"<pre>{json.dumps(html_content, indent=2)}</pre>"
+
+    subject = report.get("title", "CHIMERA Report")
+    to_list = [{"email": r["email"], "name": r.get("name", "")} for r in recipients]
+
+    payload = {
+        "personalizations": [{"to": to_list}],
+        "from": {"email": EMAIL_FROM, "name": EMAIL_FROM_NAME},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": f"""
+            <div style="font-family: 'Inter', 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; color: #1a1a2e;">
+                <h1 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 8px;">{subject}</h1>
+                {html_content}
+                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;"/>
+                <p style="color: #8a8a9a; font-size: 12px;">
+                    Sent automatically by CHIMERA Lay Engine.<br/>
+                    Manage recipients in Settings → Report Recipients.
+                </p>
+            </div>
+        """}],
+    }
+
+    try:
+        resp = http_requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        if resp.status_code in (200, 201, 202):
+            logging.info(f"Report email sent to {len(to_list)} recipients")
+            return {"sent": len(to_list)}
+        else:
+            logging.error(f"SendGrid error {resp.status_code}: {resp.text}")
+            return {"sent": 0, "error": f"SendGrid {resp.status_code}"}
+    except Exception as e:
+        logging.error(f"Email send failed: {e}")
+        return {"sent": 0, "error": str(e)}
+
+
+@app.post("/api/reports/{report_id}/send")
+def send_report_to_recipients(report_id: str):
+    """Manually send a report to all configured recipients."""
+    report = None
+    for r in engine.reports:
+        if r["report_id"] == report_id:
+            report = r
+            break
+    if not report:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Report not found"})
+
+    recipients = engine.settings.get("report_recipients", [])
+    if not recipients:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "No recipients configured"})
+
+    result = _send_report_email(report, recipients)
+    return {"status": "ok", **result}
 
 
 # ──────────────────────────────────────────────

@@ -2561,10 +2561,101 @@ function ApiKeysTab() {
   )
 }
 
+// ── Data Source Labels ──
+const DATA_SOURCE_LABELS = {
+  session_data:       { label: 'Session Data',       desc: 'Live/dry-run session bets and rule evaluations', icon: '📊' },
+  settled_bets:       { label: 'Settled Bets',       desc: 'Betfair settled bet outcomes with actual P/L', icon: '✅' },
+  historical_summary: { label: 'Historical Summary', desc: 'Cumulative performance across all operating days', icon: '📈' },
+  engine_state:       { label: 'Engine State',       desc: 'Current engine status, balance, and configuration', icon: '⚙️' },
+  rule_definitions:   { label: 'Rule Definitions',   desc: 'Active betting rules and their parameters', icon: '📐' },
+  backtest_results:   { label: 'Backtest Results',   desc: 'Historical backtest data from FSU', icon: '🧪' },
+  github_codebase:    { label: 'GitHub Codebase',    desc: 'Source code from the lay-engine repository', icon: '💻' },
+}
+
+const AI_CAPABILITY_LABELS = {
+  send_emails:   { label: 'Send Emails',     desc: 'Auto-dispatch reports to recipients after generation', icon: '📧' },
+  write_reports: { label: 'Write Reports',   desc: 'Generate AI-powered performance reports', icon: '📝' },
+  fetch_files:   { label: 'Fetch Files',     desc: 'Access and read files from connected storage', icon: '📁' },
+  github_access: { label: 'GitHub Access',   desc: 'Browse and understand the app codebase on GitHub', icon: '🐙' },
+}
+
 // ── Settings Tab ──
 function SettingsTab() {
+  const [settings, setSettings] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState('')
+
+  useEffect(() => {
+    api('/api/settings')
+      .then(data => { setSettings(data); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }
+
+  const addRecipient = async () => {
+    if (!newEmail.trim()) return
+    const updated = [...(settings.report_recipients || []), { email: newEmail.trim(), name: newName.trim() }]
+    setSaving(true)
+    const res = await api('/api/settings/recipients', {
+      method: 'PUT',
+      body: JSON.stringify({ recipients: updated }),
+    })
+    if (res.recipients) setSettings(prev => ({ ...prev, report_recipients: res.recipients }))
+    setNewEmail('')
+    setNewName('')
+    setSaving(false)
+    showToast('Recipient added')
+  }
+
+  const removeRecipient = async (idx) => {
+    const updated = settings.report_recipients.filter((_, i) => i !== idx)
+    const res = await api('/api/settings/recipients', {
+      method: 'PUT',
+      body: JSON.stringify({ recipients: updated }),
+    })
+    if (res.recipients) setSettings(prev => ({ ...prev, report_recipients: res.recipients }))
+    showToast('Recipient removed')
+  }
+
+  const toggleDataSource = async (key) => {
+    const current = settings.ai_data_sources[key]
+    const res = await api('/api/settings/ai-data-sources', {
+      method: 'PUT',
+      body: JSON.stringify({ ai_data_sources: { [key]: !current } }),
+    })
+    if (res.ai_data_sources) setSettings(prev => ({ ...prev, ai_data_sources: res.ai_data_sources }))
+  }
+
+  const toggleCapability = async (key) => {
+    const current = settings.ai_capabilities[key]
+    const res = await api('/api/settings/ai-capabilities', {
+      method: 'PUT',
+      body: JSON.stringify({ ai_capabilities: { [key]: !current } }),
+    })
+    if (res.ai_capabilities) setSettings(prev => ({ ...prev, ai_capabilities: res.ai_capabilities }))
+  }
+
+  if (loading) return <p className="empty">Loading settings...</p>
+  if (!settings) return <p className="empty">Failed to load settings.</p>
+
+  const recipients = settings.report_recipients || []
+  const dataSources = settings.ai_data_sources || {}
+  const capabilities = settings.ai_capabilities || {}
+  const enabledCount = Object.values(dataSources).filter(Boolean).length
+  const totalCount = Object.keys(dataSources).length
+
   return (
     <div>
+      {toast && <div className="settings-toast">{toast}</div>}
+
+      {/* ── Betfair Connection ── */}
       <div className="engine-section">
         <h2>Betfair Connection</h2>
         <p className="api-description">
@@ -2577,7 +2668,117 @@ function SettingsTab() {
           <span>Data feed: <strong>REST polling (5s market refresh)</strong></span>
         </div>
       </div>
-      <div style={{ marginTop: 8 }}>
+
+      {/* ── Report Recipients ── */}
+      <div className="engine-section" style={{ marginTop: 12 }}>
+        <h2>Report Recipients</h2>
+        <p className="api-description">
+          When AI generates a report, copies are automatically emailed to all recipients listed below
+          (requires <strong>Send Emails</strong> capability enabled).
+        </p>
+
+        <div className="recipients-list">
+          {recipients.length === 0 ? (
+            <p className="empty">No recipients configured. Add email addresses below.</p>
+          ) : (
+            recipients.map((r, i) => (
+              <div key={i} className="recipient-row">
+                <span className="recipient-icon">📧</span>
+                <div className="recipient-info">
+                  <span className="recipient-email">{r.email}</span>
+                  {r.name && <span className="recipient-name">{r.name}</span>}
+                </div>
+                <button className="btn btn-danger btn-sm" onClick={() => removeRecipient(i)}>Remove</button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="recipient-add-form">
+          <input
+            type="email"
+            placeholder="Email address"
+            value={newEmail}
+            onChange={e => setNewEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addRecipient()}
+          />
+          <input
+            type="text"
+            placeholder="Name (optional)"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addRecipient()}
+          />
+          <button className="btn btn-primary" onClick={addRecipient} disabled={saving || !newEmail.trim()}>
+            {saving ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── AI Data Sources ── */}
+      <div className="engine-section" style={{ marginTop: 12 }}>
+        <h2>AI Data Sources</h2>
+        <p className="api-description">
+          Control which data sets are exposed to the Chimera AI agent when generating reports
+          and answering questions. <strong>{enabledCount}/{totalCount}</strong> sources enabled.
+        </p>
+
+        <div className="data-sources-grid">
+          {Object.entries(DATA_SOURCE_LABELS).map(([key, meta]) => {
+            const enabled = dataSources[key] ?? false
+            return (
+              <div
+                key={key}
+                className={`data-source-card ${enabled ? 'enabled' : 'disabled'}`}
+                onClick={() => toggleDataSource(key)}
+              >
+                <div className="data-source-header">
+                  <span className="data-source-icon">{meta.icon}</span>
+                  <span className="data-source-label">{meta.label}</span>
+                  <span className={`data-source-toggle ${enabled ? 'on' : 'off'}`}>
+                    {enabled ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <p className="data-source-desc">{meta.desc}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── AI Capabilities ── */}
+      <div className="engine-section" style={{ marginTop: 12 }}>
+        <h2>Chimera AI Capabilities</h2>
+        <p className="api-description">
+          Control what actions the AI agent is allowed to perform. Disabled capabilities
+          restrict the agent even if the underlying service is configured.
+        </p>
+
+        <div className="data-sources-grid">
+          {Object.entries(AI_CAPABILITY_LABELS).map(([key, meta]) => {
+            const enabled = capabilities[key] ?? false
+            return (
+              <div
+                key={key}
+                className={`data-source-card ${enabled ? 'enabled' : 'disabled'}`}
+                onClick={() => toggleCapability(key)}
+              >
+                <div className="data-source-header">
+                  <span className="data-source-icon">{meta.icon}</span>
+                  <span className="data-source-label">{meta.label}</span>
+                  <span className={`data-source-toggle ${enabled ? 'on' : 'off'}`}>
+                    {enabled ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <p className="data-source-desc">{meta.desc}</p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── API Keys ── */}
+      <div style={{ marginTop: 12 }}>
         <ApiKeysTab />
       </div>
     </div>
@@ -2596,6 +2797,8 @@ function ReportsTab() {
   const [generating, setGenerating] = useState(false)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [showTemplateSelect, setShowTemplateSelect] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailToast, setEmailToast] = useState('')
   const reportContentRef = useRef(null)
 
   useEffect(() => {
@@ -2646,6 +2849,10 @@ function ReportsTab() {
       if (res.report_id) {
         fetchReports()
         setViewingReport(res)
+        if (res.email_result?.sent > 0) {
+          setEmailToast(`Report auto-sent to ${res.email_result.sent} recipient${res.email_result.sent !== 1 ? 's' : ''}`)
+          setTimeout(() => setEmailToast(''), 4000)
+        }
       }
     } catch (e) {
       console.error('Report generation failed:', e)
@@ -2663,6 +2870,23 @@ function ReportsTab() {
     await api(`/api/reports/${reportId}`, { method: 'DELETE' })
     fetchReports()
     if (viewingReport?.report_id === reportId) setViewingReport(null)
+  }
+
+  const handleSendEmail = async (reportId) => {
+    setSendingEmail(true)
+    setEmailToast('')
+    try {
+      const res = await api(`/api/reports/${reportId}/send`, { method: 'POST' })
+      if (res.sent > 0) {
+        setEmailToast(`Report sent to ${res.sent} recipient${res.sent !== 1 ? 's' : ''}`)
+      } else {
+        setEmailToast(res.error || 'Failed to send')
+      }
+    } catch (e) {
+      setEmailToast('Email send failed')
+    }
+    setSendingEmail(false)
+    setTimeout(() => setEmailToast(''), 4000)
   }
 
   const handleDownloadPDF = () => {
@@ -2867,14 +3091,24 @@ function ReportsTab() {
   if (viewingReport) {
     return (
       <div>
+        {emailToast && <div className="settings-toast">{emailToast}</div>}
         <div className="tab-toolbar">
           <button className="btn btn-secondary btn-back" onClick={() => setViewingReport(null)}>
             ← Back to Reports
           </button>
           <h2>{viewingReport.title}</h2>
-          <button className="btn btn-primary" onClick={handleDownloadPDF}>
-            Print / PDF
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleSendEmail(viewingReport.report_id)}
+              disabled={sendingEmail}
+            >
+              {sendingEmail ? 'Sending...' : '📧 Email'}
+            </button>
+            <button className="btn btn-primary" onClick={handleDownloadPDF}>
+              Print / PDF
+            </button>
+          </div>
         </div>
         <div className="report-viewer" ref={reportContentRef}
           dangerouslySetInnerHTML={{ __html: renderReportContent(viewingReport) }}

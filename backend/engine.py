@@ -54,6 +54,9 @@ REPORTS_FILE = Path(os.environ.get("REPORTS_FILE", "/tmp/chimera_reports.json"))
 # Dry-run snapshots file
 SNAPSHOTS_FILE = Path(os.environ.get("SNAPSHOTS_FILE", "/tmp/chimera_snapshots.json"))
 
+# App settings file (recipients, data sources, AI capabilities)
+SETTINGS_FILE = Path(os.environ.get("SETTINGS_FILE", "/tmp/chimera_settings.json"))
+
 # ── GCS persistence (survives container restarts) ──
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
 _gcs_client = None
@@ -149,6 +152,26 @@ class LayEngine:
         # ── Dry-run snapshots ──
         self.dry_run_snapshots: list[dict] = []
 
+        # ── App settings (recipients, data sources, AI caps) ──
+        self.settings: dict = {
+            "report_recipients": [],        # [{email, name}]
+            "ai_data_sources": {            # Which data sources AI can access
+                "session_data": True,
+                "settled_bets": True,
+                "historical_summary": True,
+                "engine_state": True,
+                "rule_definitions": True,
+                "backtest_results": False,
+                "github_codebase": False,
+            },
+            "ai_capabilities": {            # Which actions the AI agent can take
+                "send_emails": False,
+                "write_reports": True,
+                "fetch_files": False,
+                "github_access": False,
+            },
+        }
+
         # ── Background market refresh (runs when authenticated but engine stopped) ──
         self._market_thread: Optional[threading.Thread] = None
         self._market_refresh_active: bool = False
@@ -159,6 +182,7 @@ class LayEngine:
         self._load_api_keys()
         self._load_reports()
         self._load_snapshots()
+        self._load_settings()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -427,6 +451,51 @@ class LayEngine:
             _gcs_write("chimera_snapshots.json", snapshots_json)
         except Exception as e:
             logger.warning(f"Failed to save snapshots: {e}")
+
+    def _load_settings(self):
+        """Load app settings from GCS (preferred) or disk."""
+        defaults = {
+            "report_recipients": [],
+            "ai_data_sources": {
+                "session_data": True, "settled_bets": True,
+                "historical_summary": True, "engine_state": True,
+                "rule_definitions": True, "backtest_results": False,
+                "github_codebase": False,
+            },
+            "ai_capabilities": {
+                "send_emails": False, "write_reports": True,
+                "fetch_files": False, "github_access": False,
+            },
+        }
+        try:
+            raw = _gcs_read("chimera_settings.json")
+            if raw:
+                loaded = json.loads(raw)
+            elif SETTINGS_FILE.exists():
+                loaded = json.loads(SETTINGS_FILE.read_text())
+            else:
+                loaded = {}
+            # Merge with defaults so new keys are always present
+            for key, default_val in defaults.items():
+                if key not in loaded:
+                    loaded[key] = default_val
+                elif isinstance(default_val, dict):
+                    for k, v in default_val.items():
+                        loaded[key].setdefault(k, v)
+            self.settings = loaded
+            logger.info(f"Loaded settings ({len(self.settings.get('report_recipients', []))} recipients)")
+        except Exception as e:
+            logger.warning(f"Failed to load settings: {e}")
+            self.settings = defaults
+
+    def _save_settings(self):
+        """Persist app settings to disk + GCS."""
+        try:
+            settings_json = json.dumps(self.settings, default=str)
+            SETTINGS_FILE.write_text(settings_json)
+            _gcs_write("chimera_settings.json", settings_json)
+        except Exception as e:
+            logger.warning(f"Failed to save settings: {e}")
 
     def generate_api_key(self, label: str = "") -> dict:
         """Generate a new API key. Returns the full key (only shown once)."""
