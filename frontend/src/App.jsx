@@ -44,6 +44,31 @@ function downloadTableAsExcel(tableId, filename) {
   URL.revokeObjectURL(url)
 }
 
+function downloadTableAsExcelRaw(html, filename) {
+  const blob = new Blob(
+    [
+      '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+      'xmlns:x="urn:schemas-microsoft-com:office:excel" ' +
+      'xmlns="http://www.w3.org/TR/REC-html40">' +
+      '<head><meta charset="utf-8">' +
+      '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>' +
+      '<x:ExcelWorksheet><x:Name>Sheet1</x:Name>' +
+      '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>' +
+      '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+      '</head><body>' + html + '</body></html>'
+    ],
+    { type: 'application/vnd.ms-excel' }
+  )
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}.xls`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // ── Snapshot Button ──
 function SnapshotButton({ tableId, filename }) {
   return (
@@ -1318,6 +1343,43 @@ function BacktestTab() {
     setExpandedHistId(null)
   }
 
+  function exportSelectedLocal() {
+    if (selectedHistIds.size === 0) return
+    const entries = history.filter(h => selectedHistIds.has(h.id))
+
+    // Build one HTML table per entry
+    let html = ''
+    for (const entry of entries) {
+      const cfg = entry.config || {}
+      const sm = entry.summary || {}
+      html += `<h3>${entry.date} — ${(cfg.countries || []).join(',')} — Window: ${cfg.process_window_mins || '?'}min</h3>`
+      html += `<p>Markets: ${sm.markets_evaluated || 0} | Bets: ${sm.bets_placed || 0} | P&amp;L: £${(sm.total_pnl || 0).toFixed(2)} | ROI: ${sm.roi || 0}%</p>`
+      html += '<table border="1" cellpadding="4" cellspacing="0"><tr><th>Time</th><th>Venue</th><th>Favourite</th><th>Odds</th><th>Rule</th><th>Stake</th><th>Liability</th><th>Result</th><th>P&amp;L</th></tr>'
+      for (const r of (entry.results || [])) {
+        const instrs = r.instructions || []
+        const totalStake = instrs.reduce((s, i) => s + (i.size || 0), 0)
+        const totalLiab = instrs.reduce((s, i) => s + (i.liability || 0), 0)
+        const outcomes = [...new Set(instrs.map(i => i.outcome).filter(Boolean))]
+        const fav = r.favourite || {}
+        html += '<tr>'
+        html += `<td>${(r.race_time || '').slice(0, 16)}</td>`
+        html += `<td>${r.venue || ''}</td>`
+        html += `<td>${fav.name || ''}</td>`
+        html += `<td>${fav.odds || ''}</td>`
+        html += `<td>${r.skipped ? (r.skip_reason || 'SKIPPED') : (r.rule_applied || '')}</td>`
+        html += `<td>${r.skipped ? '' : '£' + totalStake.toFixed(2)}</td>`
+        html += `<td>${r.skipped ? '' : '£' + totalLiab.toFixed(2)}</td>`
+        html += `<td>${r.skipped ? 'SKIPPED' : (outcomes.join('/') || '—')}</td>`
+        html += `<td>${r.skipped ? '' : '£' + (r.pnl || 0).toFixed(2)}</td>`
+        html += '</tr>'
+      }
+      html += '</table><br/>'
+    }
+
+    const dateLabel = entries.length === 1 ? entries[0].date : `${entries.length}_runs`
+    downloadTableAsExcelRaw(html, `chimera_backtest_${dateLabel}`)
+  }
+
   async function exportSelectedToSheets() {
     if (selectedHistIds.size === 0) return
     setExportingSheets(true)
@@ -1569,10 +1631,17 @@ function BacktestTab() {
               </button>
               <button
                 className="btn btn-primary btn-sm"
+                disabled={selectedHistIds.size === 0}
+                onClick={exportSelectedLocal}
+              >
+                Download XLS{selectedHistIds.size > 0 ? ` (${selectedHistIds.size})` : ''}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
                 disabled={selectedHistIds.size === 0 || exportingSheets}
                 onClick={exportSelectedToSheets}
               >
-                {exportingSheets ? 'Exporting…' : `Export to Sheets${selectedHistIds.size > 0 ? ` (${selectedHistIds.size})` : ''}`}
+                {exportingSheets ? 'Exporting…' : `Google Sheets${selectedHistIds.size > 0 ? ` (${selectedHistIds.size})` : ''}`}
               </button>
               <button
                 className="btn btn-secondary btn-sm"
