@@ -2143,7 +2143,18 @@ class BacktestExportRequest(BaseModel):
 def backtest_export_sheets(req: BacktestExportRequest):
     """Export selected backtest history entries to a single Google Sheet."""
     import requests as _requests
+    import traceback
 
+    try:
+        return _do_export_sheets(req, _requests)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"export-sheets unhandled error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=502, detail=f"Export failed: {e}")
+
+
+def _do_export_sheets(req: BacktestExportRequest, _requests):
     token = _google_access_token()
     if not token:
         raise HTTPException(status_code=500, detail="Google auth not available — check service account scopes")
