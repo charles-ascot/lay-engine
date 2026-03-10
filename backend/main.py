@@ -2146,9 +2146,10 @@ def backtest_export_sheets(req: BacktestExportRequest):
 
     token = _google_access_token()
     if not token:
-        raise HTTPException(status_code=500, detail="Google auth not available")
+        raise HTTPException(status_code=500, detail="Google auth not available — check service account scopes")
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    logging.info(f"Backtest export: token obtained, creating spreadsheet for {len(req.entries)} entries")
 
     # 1. Create a new spreadsheet
     title = f"CHIMERA Backtest Export — {req.entries[0]['date'] if req.entries else 'Unknown'}"
@@ -2162,7 +2163,8 @@ def backtest_export_sheets(req: BacktestExportRequest):
         timeout=15,
     )
     if create_resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Sheets API error: {create_resp.text}")
+        logging.error(f"Sheets API create failed: {create_resp.status_code} {create_resp.text[:500]}")
+        raise HTTPException(status_code=502, detail=f"Sheets API error: {create_resp.text[:300]}")
 
     sheet_data = create_resp.json()
     spreadsheet_id = sheet_data["spreadsheetId"]
@@ -2246,12 +2248,14 @@ def backtest_export_sheets(req: BacktestExportRequest):
     # 5. Move to shared Drive folder if configured
     bt_folder = GOOGLE_DRIVE_BACKTEST_FOLDER_ID or GOOGLE_DRIVE_FOLDER_ID
     if bt_folder:
-        _requests.patch(
+        move_resp = _requests.patch(
             f"https://www.googleapis.com/drive/v3/files/{spreadsheet_id}"
             f"?addParents={bt_folder}&supportsAllDrives=true",
             headers=headers,
             timeout=10,
         )
+        if move_resp.status_code != 200:
+            logging.warning(f"Drive move failed: {move_resp.status_code} {move_resp.text[:300]}")
 
     return {"url": spreadsheet_url, "spreadsheet_id": spreadsheet_id}
 
