@@ -126,7 +126,8 @@ class LayEngine:
         self.jofs_control: bool = True   # Joint/Close-Odds Favourite Split on by default
         self.mark_ceiling_enabled: bool = False  # Mark Rule: no lays above 8.0
         self.mark_floor_enabled: bool = False    # Mark Rule: no lays below 1.5
-        self.mark_uplift_enabled: bool = False   # Mark Rule: 2.5–3.5 band stake to 5 pts
+        self.mark_uplift_enabled: bool = False   # Mark Rule: 2.5–3.5 band stake uplift
+        self.mark_uplift_stake: float = 3.0    # Mark Rule: uplift stake value (pts)
 
         # ── Processing window ──
         self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
@@ -206,6 +207,7 @@ class LayEngine:
                 "mark_ceiling_enabled": self.mark_ceiling_enabled,
                 "mark_floor_enabled": self.mark_floor_enabled,
                 "mark_uplift_enabled": self.mark_uplift_enabled,
+                "mark_uplift_stake": self.mark_uplift_stake,
                 "point_value": self.point_value,
                 "process_window": self.process_window,
                 "status": self.status,
@@ -276,6 +278,7 @@ class LayEngine:
             self.mark_ceiling_enabled = data.get("mark_ceiling_enabled", False)
             self.mark_floor_enabled = data.get("mark_floor_enabled", False)
             self.mark_uplift_enabled = data.get("mark_uplift_enabled", False)
+            self.mark_uplift_stake = data.get("mark_uplift_stake", 3.0)
             self.point_value = data.get("point_value", 1.0)
             self.process_window = data.get("process_window", PROCESS_WINDOW_MINUTES)
             self.balance = data.get("balance")
@@ -920,6 +923,7 @@ class LayEngine:
             mark_ceiling_enabled=self.mark_ceiling_enabled,
             mark_floor_enabled=self.mark_floor_enabled,
             mark_uplift_enabled=self.mark_uplift_enabled,
+            mark_uplift_stake=self.mark_uplift_stake,
         )
 
         # Apply point value multiplier to stakes
@@ -1213,6 +1217,7 @@ class LayEngine:
             "mark_ceiling_enabled": self.mark_ceiling_enabled,
             "mark_floor_enabled": self.mark_floor_enabled,
             "mark_uplift_enabled": self.mark_uplift_enabled,
+                "mark_uplift_stake": self.mark_uplift_stake,
             "point_value": self.point_value,
             "date": self.day_started,
             "last_scan": self.last_scan,
@@ -1448,6 +1453,7 @@ class LayEngine:
             "mark_ceiling_enabled": self.mark_ceiling_enabled,
             "mark_floor_enabled": self.mark_floor_enabled,
             "mark_uplift_enabled": self.mark_uplift_enabled,
+                "mark_uplift_stake": self.mark_uplift_stake,
             "process_window": getattr(self, 'process_window', 12),
             "results": per_market_results,
         }

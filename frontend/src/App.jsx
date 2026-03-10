@@ -759,7 +759,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
                 <span className={snapshotResult.spread_control ? 'tag-on' : 'tag-off'}>Spread {snapshotResult.spread_control ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotResult.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.mark_floor_enabled ? 'tag-on' : 'tag-off'}>Floor {snapshotResult.mark_floor_enabled ? 'ON' : 'OFF'}</span>
-                <span className={snapshotResult.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotResult.mark_uplift_enabled ? 'ON' : 'OFF'}</span>
+                <span className={snapshotResult.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotResult.mark_uplift_enabled ? `${snapshotResult.mark_uplift_stake || 3} pts` : 'OFF'}</span>
               </div>
               <div className="snapshot-results-header">
                 <h3>Snapshot Results</h3>
@@ -949,7 +949,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
                           <span className={snapshotDetail.jofs_control ? 'tag-on' : 'tag-off'}>JOFS {snapshotDetail.jofs_control ? 'ON' : 'OFF'}</span>
                           <span className={snapshotDetail.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotDetail.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
                           <span className={snapshotDetail.mark_floor_enabled ? 'tag-on' : 'tag-off'}>Floor {snapshotDetail.mark_floor_enabled ? 'ON' : 'OFF'}</span>
-                          <span className={snapshotDetail.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotDetail.mark_uplift_enabled ? 'ON' : 'OFF'}</span>
+                          <span className={snapshotDetail.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotDetail.mark_uplift_enabled ? `${snapshotDetail.mark_uplift_stake || 3} pts` : 'OFF'}</span>
                         </div>
                         <table className="snapshot-results-table">
                           <thead>
@@ -1007,7 +1007,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetProcessWindow, onSetPointValue }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -1141,14 +1141,27 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           >
             {state.mark_floor_enabled ? 'ON' : 'OFF'}
           </button>
-          <span className="engine-label" style={{ marginLeft: 16 }}>2.5–3.5 Uplift (5 pts):</span>
+          <span className="engine-label" style={{ marginLeft: 16 }}>2.5–3.5 Uplift:</span>
           <button
             className={`btn-toggle ${state.mark_uplift_enabled ? 'active' : ''}`}
             onClick={onToggleMarkUplift}
-            title="When favourite odds are 2.5–3.5, increase stake to 5 points"
+            title="When favourite odds are 2.5–3.5, increase stake"
           >
             {state.mark_uplift_enabled ? 'ON' : 'OFF'}
           </button>
+          {state.mark_uplift_enabled && (
+            <select
+              className="select-small"
+              value={state.mark_uplift_stake || 3}
+              onChange={e => onSetMarkUpliftStake(Number(e.target.value))}
+              style={{ marginLeft: 8, width: 70 }}
+              title="Uplift stake (pts) for 2.5–3.5 band"
+            >
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(v => (
+                <option key={v} value={v}>{v} pts</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -1196,6 +1209,7 @@ function BacktestTab() {
   const [markCeiling, setMarkCeiling] = useState(false)
   const [markFloor, setMarkFloor] = useState(false)
   const [markUplift, setMarkUplift] = useState(false)
+  const [markUpliftStake, setMarkUpliftStake] = useState(3)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1282,6 +1296,7 @@ function BacktestTab() {
           mark_ceiling_enabled: markCeiling,
           mark_floor_enabled: markFloor,
           mark_uplift_enabled: markUplift,
+          mark_uplift_stake: markUpliftStake,
           market_ids: [...selectedMarketIds],
         }),
       })
@@ -1300,6 +1315,7 @@ function BacktestTab() {
           mark_ceiling_enabled: markCeiling,
           mark_floor_enabled: markFloor,
           mark_uplift_enabled: markUplift,
+          mark_uplift_stake: markUpliftStake,
           market_count: selectedMarketIds.size,
         },
         summary: {
@@ -1484,6 +1500,19 @@ function BacktestTab() {
               <label key={key} className="bt-toggle-label">
                 <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />
                 {label}
+                {key === 'uplift' && val && (
+                  <select
+                    className="select-small"
+                    value={markUpliftStake}
+                    onChange={e => { e.stopPropagation(); setMarkUpliftStake(Number(e.target.value)) }}
+                    style={{ marginLeft: 6, width: 65 }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(v => (
+                      <option key={v} value={v}>{v} pts</option>
+                    ))}
+                  </select>
+                )}
               </label>
             ))}
           </div>
@@ -1691,7 +1720,7 @@ function BacktestTab() {
                     {entry.config.jofs_enabled && <span className="tag-on">JOFS</span>}
                     {entry.config.mark_ceiling_enabled && <span className="tag-on">Ceil</span>}
                     {entry.config.mark_floor_enabled && <span className="tag-on">Floor</span>}
-                    {entry.config.mark_uplift_enabled && <span className="tag-on">Uplift</span>}
+                    {entry.config.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
                   </span>
                   <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
                 </div>
@@ -3527,6 +3556,13 @@ function Dashboard() {
     await api('/api/engine/mark-uplift', { method: 'POST' })
     fetchState()
   }
+  const handleSetMarkUpliftStake = async (value) => {
+    await api('/api/engine/mark-uplift-stake', {
+      method: 'POST',
+      body: JSON.stringify({ value }),
+    })
+    fetchState()
+  }
   const handleSetPointValue = async (value) => {
     await api('/api/engine/point-value', {
       method: 'POST',
@@ -3673,6 +3709,7 @@ function Dashboard() {
             onToggleMarkCeiling={handleToggleMarkCeiling}
             onToggleMarkFloor={handleToggleMarkFloor}
             onToggleMarkUplift={handleToggleMarkUplift}
+            onSetMarkUpliftStake={handleSetMarkUpliftStake}
             onSetProcessWindow={handleSetProcessWindow}
             onSetPointValue={handleSetPointValue}
           />

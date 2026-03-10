@@ -160,6 +160,7 @@ def apply_rules(
     mark_ceiling_enabled: bool = False,
     mark_floor_enabled: bool = False,
     mark_uplift_enabled: bool = False,
+    mark_uplift_stake: float = 3.0,
 ) -> RuleResult:
     """
     Apply the lay betting rules to a market.
@@ -259,11 +260,11 @@ def apply_rules(
 
     # ─── RULE 2: Favourite odds 2.0–5.0 ───
     if 2.0 <= odds <= 5.0:
-        # Mark Rule: 2.5–3.5 band uplift to 5 points
+        # Mark Rule: 2.5–3.5 band uplift
         in_uplift_band = mark_uplift_enabled and 2.5 <= odds <= 3.5
         if close_odds:
             # Joint/close favourite — split stake evenly
-            half = 2.5 if in_uplift_band else 1.0
+            half = (mark_uplift_stake / 2) if in_uplift_band else 1.0
             uplift_tag = " [UPLIFT]" if in_uplift_band else ""
             result.rule_applied = (
                 f"RULE_2_JOINT: Fav {odds} in 2.0–5.0, 2nd fav {second_fav.best_available_to_lay} "
@@ -286,7 +287,7 @@ def apply_rules(
                 rule_applied="RULE_2_JOINT_2ND",
             ))
         else:
-            stake = 5.0 if in_uplift_band else 2.0
+            stake = mark_uplift_stake if in_uplift_band else 2.0
             uplift_tag = " [UPLIFT]" if in_uplift_band else ""
             result.rule_applied = f"RULE_2: Fav odds {odds} in 2.0–5.0 → £{stake} lay{uplift_tag}"
             result.instructions.append(LayInstruction(

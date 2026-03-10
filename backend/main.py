@@ -367,10 +367,24 @@ def toggle_mark_floor():
 
 @app.post("/api/engine/mark-uplift")
 def toggle_mark_uplift():
-    """Toggle Mark Rule: 2.5–3.5 band stake uplift to 5 points."""
+    """Toggle Mark Rule: 2.5–3.5 band stake uplift."""
     engine.mark_uplift_enabled = not engine.mark_uplift_enabled
     engine._save_state()
     return {"mark_uplift_enabled": engine.mark_uplift_enabled}
+
+
+class MarkUpliftStakeRequest(BaseModel):
+    value: float
+
+
+@app.post("/api/engine/mark-uplift-stake")
+def set_mark_uplift_stake(req: MarkUpliftStakeRequest):
+    """Set the Mark Rule uplift stake value (pts) for the 2.5–3.5 band."""
+    if req.value < 1 or req.value > 20:
+        raise HTTPException(status_code=400, detail="Uplift stake must be between 1 and 20")
+    engine.mark_uplift_stake = req.value
+    engine._save_state()
+    return {"mark_uplift_stake": engine.mark_uplift_stake}
 
 
 @app.post("/api/engine/point-value")
@@ -1929,6 +1943,7 @@ class BacktestRunRequest(BaseModel):
     mark_ceiling_enabled: bool = False
     mark_floor_enabled: bool = False
     mark_uplift_enabled: bool = False
+    mark_uplift_stake: float = 3.0
     market_ids: list[str] = []  # empty = run all markets for the date
 
 
@@ -2043,6 +2058,7 @@ def backtest_run(req: BacktestRunRequest):
             mark_ceiling_enabled=req.mark_ceiling_enabled,
             mark_floor_enabled=req.mark_floor_enabled,
             mark_uplift_enabled=req.mark_uplift_enabled,
+            mark_uplift_stake=req.mark_uplift_stake,
         )
 
         if rule_result.skipped:
