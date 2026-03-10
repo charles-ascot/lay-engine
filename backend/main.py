@@ -2116,6 +2116,7 @@ def backtest_run(req: BacktestRunRequest):
 # ── Google Drive / Sheets helpers ──
 
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "")
+GOOGLE_DRIVE_BACKTEST_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_BACKTEST_FOLDER_ID", "")
 
 
 def _google_access_token():
@@ -2125,7 +2126,7 @@ def _google_access_token():
         from google.auth.transport.requests import Request as _GRequest
         creds, _ = _gauth_default(scopes=[
             "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/drive",
         ])
         creds.refresh(_GRequest())
         return creds.token
@@ -2242,10 +2243,12 @@ def backtest_export_sheets(req: BacktestExportRequest):
         timeout=15,
     )
 
-    # 5. Move to shared folder if configured
-    if GOOGLE_DRIVE_FOLDER_ID:
+    # 5. Move to shared Drive folder if configured
+    bt_folder = GOOGLE_DRIVE_BACKTEST_FOLDER_ID or GOOGLE_DRIVE_FOLDER_ID
+    if bt_folder:
         _requests.patch(
-            f"https://www.googleapis.com/drive/v3/files/{spreadsheet_id}?addParents={GOOGLE_DRIVE_FOLDER_ID}",
+            f"https://www.googleapis.com/drive/v3/files/{spreadsheet_id}"
+            f"?addParents={bt_folder}&supportsAllDrives=true",
             headers=headers,
             timeout=10,
         )
@@ -2270,7 +2273,8 @@ def save_report_to_drive(report_id: str):
     if not token:
         raise HTTPException(status_code=500, detail="Google auth not available")
 
-    if not GOOGLE_DRIVE_FOLDER_ID:
+    reports_folder = GOOGLE_DRIVE_FOLDER_ID
+    if not reports_folder:
         raise HTTPException(status_code=500, detail="GOOGLE_DRIVE_FOLDER_ID not configured")
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -2280,7 +2284,7 @@ def save_report_to_drive(report_id: str):
     if isinstance(content, dict):
         content = json.dumps(content, indent=2)
 
-    # Create HTML file in Drive
+    # Create HTML file in Drive (Shared Drive compatible)
     html_body = f"""<html><head><meta charset="utf-8"><title>{title}</title></head>
 <body style="font-family: Inter, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px;">
 <h1>{title}</h1>
@@ -2291,7 +2295,7 @@ def save_report_to_drive(report_id: str):
     metadata = {
         "name": title,
         "mimeType": "application/vnd.google-apps.document",
-        "parents": [GOOGLE_DRIVE_FOLDER_ID],
+        "parents": [reports_folder],
     }
 
     boundary = "chimera_boundary"
@@ -2306,7 +2310,7 @@ def save_report_to_drive(report_id: str):
     )
 
     resp = _requests.post(
-        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true",
         data=body.encode("utf-8"),
         headers={
             **headers,
