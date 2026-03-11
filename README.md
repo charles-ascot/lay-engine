@@ -36,7 +36,7 @@ CHIMERA scans Betfair Exchange for horse racing WIN markets across configurable 
 ┌─────────────────────┐        ┌──────────────────────────┐
 │  Frontend (React)   │  HTTPS │  Backend (FastAPI)        │
 │  Cloudflare Pages   │───────>│  Cloud Run europe-west2   │
-│  chimera5.thync.    │        │                           │
+│  layengine.thync.    │        │                           │
 │  online             │        │  ┌──────────┐             │
 └─────────────────────┘        │  │  Engine   │──> Betfair  │
                                │  │  Loop     │    Exchange  │
@@ -247,7 +247,7 @@ gcloud run deploy chimera-lay-engine \
   --image gcr.io/chimera-v4/chimera-lay-engine \
   --region europe-west2 \
   --platform managed \
-  --set-env-vars "BETFAIR_APP_KEY=<key>,FRONTEND_URL=https://chimera5.thync.online,DRY_RUN=true,GEMINI_API_KEY=<key>,OPENAI_API_KEY=<key>,GCS_BUCKET=<bucket>" \
+  --set-env-vars "BETFAIR_APP_KEY=<key>,FRONTEND_URL=https://layengine.thync.online,DRY_RUN=true,GEMINI_API_KEY=<key>,OPENAI_API_KEY=<key>,GCS_BUCKET=<bucket>" \
   --min-instances=0 \
   --max-instances=1 \
   --memory=256Mi \
@@ -261,7 +261,7 @@ Both Cloud Run (backend) and Cloudflare Pages (frontend) auto-deploy when code i
 ```bash
 gcloud scheduler jobs create http chimera-keepalive \
   --schedule="*/5 6-22 * * 1-6" \
-  --uri="https://chimera-flumine-950990732577.europe-west2.run.app/api/keepalive" \
+  --uri="https://lay-engine-950990732577.europe-west2.run.app/api/keepalive" \
   --http-method=GET \
   --time-zone="Europe/London"
 ```
@@ -272,8 +272,8 @@ gcloud scheduler jobs create http chimera-keepalive \
 2. Build command: `npm run build`
 3. Build output: `dist`
 4. Root directory: `frontend`
-5. Environment variable: `VITE_API_URL=https://chimera-flumine-950990732577.europe-west2.run.app`
-6. Custom domain: `chimera5.thync.online`
+5. Environment variable: `VITE_API_URL=https://lay-engine-950990732577.europe-west2.run.app`
+6. Custom domain: `layengine.thync.online`
 
 ## Environment Variables
 

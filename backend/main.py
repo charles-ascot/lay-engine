@@ -60,7 +60,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-app = FastAPI(title="CHIMERA Lay Engine", version="1.1.0")
+app = FastAPI(title="CHIMERA Lay Engine", version="5.0.0")
 
 # ── CORS: Allow Cloudflare Pages frontend + local dev ──
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://layengine.thync.online")
@@ -249,7 +249,7 @@ def get_rules():
     from rules import SPREAD_THRESHOLDS, CLOSE_ODDS_THRESHOLD
     return {
         "strategy": "UK_IE_Favourite_Lay",
-        "version": "2.1",
+        "version": "5.0",
         "timing": "pre_off",
         "markets": {
             "event_type": "7 (Horse Racing)",
@@ -1047,7 +1047,7 @@ interface ChimeraReport {{
     prepared_by: string;           // "CHIMERA AI Agent"
     version: string;               // "1.0"
     confidential: boolean;         // true
-    engine_version: string;        // "CHIMERA Lay Engine v1.1"
+    engine_version: string;        // "CHIMERA Lay Engine v5.0"
     dry_run_disabled: boolean;     // true if mode is LIVE
   }};
   executive_summary: {{
@@ -1196,7 +1196,7 @@ HISTORICAL SESSIONS (all previous operating days — use for cumulative_performa
 ENGINE STATE:
 - Active countries: {countries}
 - Mode: {mode}
-- Engine version: CHIMERA Lay Engine v1.1
+- Engine version: CHIMERA Lay Engine v5.0
 
 === INSTRUCTIONS ===
 

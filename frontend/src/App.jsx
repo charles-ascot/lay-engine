@@ -140,7 +140,7 @@ function LoginPanel({ onLogin }) {
     <div className="login-panel">
       <div className="login-box">
         <h1>CHIMERA</h1>
-        <p className="subtitle">Lay Engine v1.1</p>
+        <p className="subtitle">Lay Engine v5.0</p>
         <form onSubmit={handleLogin}>
           <input
             type="text"

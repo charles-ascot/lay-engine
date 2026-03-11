@@ -2,6 +2,26 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.0.0] — 2026-03-11
+
+### Added
+- **FSU3 — Standalone Backtest Service** — Extracted backtest functionality into independent microservice at `https://github.com/charles-ascot/fsu3`. Runs on Cloud Run with full rules engine, FSU client, and REST API.
+- **Adjustable uplift stake** — 2.5–3.5 band uplift now configurable (2–10 pts) via dropdown in both Engine Settings and Backtest config. New API endpoint `POST /api/engine/mark-uplift-stake`.
+- **Backtest rule parity** — Backtest tab now includes Spread Control toggle and Point Value selector, matching all Bet Settings controls.
+- **Download XLS** — Local Excel export for backtest results alongside Google Sheets export.
+- **Shared Drive support** — Google Drive exports use `supportsAllDrives=true` for Workspace Shared Drives.
+- **Separate Drive folders** — Backtest exports and daily reports go to distinct Drive folders (`GOOGLE_DRIVE_BACKTEST_FOLDER_ID`).
+
+### Changed
+- **Uplift stake reduced 5→3 pts** — Per Strategy Change Notice MI-CHAT-10MAR26 (Mark Insley, 10 March 2026). Default now 3 pts.
+- **Process window options** — Standardised across Bet Settings and Backtest: 30s, 1m, 2m, 3m, 4m, 5m, 10m, 20m, 30m, 1hr.
+- **Unified versioning** — All CHIMERA services (Lay Engine, FSU1, FSU3) now track as v5.0.0.
+- **Drive scope** — Changed from `drive.file` to `drive` for Shared Drive compatibility.
+
+### Fixed
+- Removed stale Flumine references from README.
+- Fixed process window validation error message.
+
 ## [2.3.0] — 2026-03-09
 
 ### Added
