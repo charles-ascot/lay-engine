@@ -84,6 +84,7 @@ function SnapshotButton({ tableId, filename }) {
 // ── Window formatter ──
 function fmtWindow(mins) {
   if (mins == null) return '12m'
+  if (mins >= 60) return `${mins / 60}h`
   if (mins < 1) return `${Math.round(mins * 60)}s`
   if (mins % 1 !== 0) return `${Math.floor(mins)}m ${Math.round((mins % 1) * 60)}s`
   return `${mins}m`
@@ -1038,16 +1039,16 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
               onChange={e => onSetProcessWindow(+e.target.value)}
             >
               {[
-                { v: 0.083, label: '5 sec before off' },
-                { v: 1.5, label: '1m 30s before off' },
+                { v: 0.5, label: '30 sec before off' },
+                { v: 1, label: '1 min before off' },
                 { v: 2, label: '2 min before off' },
+                { v: 3, label: '3 min before off' },
+                { v: 4, label: '4 min before off' },
                 { v: 5, label: '5 min before off' },
-                { v: 8, label: '8 min before off' },
                 { v: 10, label: '10 min before off' },
-                { v: 12, label: '12 min before off' },
-                { v: 15, label: '15 min before off' },
                 { v: 20, label: '20 min before off' },
                 { v: 30, label: '30 min before off' },
+                { v: 60, label: '1 hour before off' },
               ].map(({ v, label }) => (
                 <option key={v} value={v}>{label}</option>
               ))}
@@ -1210,6 +1211,8 @@ function BacktestTab() {
   const [markFloor, setMarkFloor] = useState(false)
   const [markUplift, setMarkUplift] = useState(false)
   const [markUpliftStake, setMarkUpliftStake] = useState(3)
+  const [spreadControl, setSpreadControl] = useState(false)
+  const [pointValue, setPointValue] = useState(1)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1293,10 +1296,12 @@ function BacktestTab() {
           countries,
           process_window_mins: processWindow,
           jofs_enabled: jofsEnabled,
+          spread_control: spreadControl,
           mark_ceiling_enabled: markCeiling,
           mark_floor_enabled: markFloor,
           mark_uplift_enabled: markUplift,
           mark_uplift_stake: markUpliftStake,
+          point_value: pointValue,
           market_ids: [...selectedMarketIds],
         }),
       })
@@ -1312,10 +1317,12 @@ function BacktestTab() {
           countries,
           process_window_mins: processWindow,
           jofs_enabled: jofsEnabled,
+          spread_control: spreadControl,
           mark_ceiling_enabled: markCeiling,
           mark_floor_enabled: markFloor,
           mark_uplift_enabled: markUplift,
           mark_uplift_stake: markUpliftStake,
+          point_value: pointValue,
           market_count: selectedMarketIds.size,
         },
         summary: {
@@ -1467,14 +1474,16 @@ function BacktestTab() {
                 className="bt-select"
               >
                 {[
-                  { v: 0.083, label: '5 sec' },
-                  { v: 1.5, label: '1m 30s' },
+                  { v: 0.5, label: '30 sec' },
+                  { v: 1, label: '1 min' },
                   { v: 2, label: '2 min' },
                   { v: 3, label: '3 min' },
+                  { v: 4, label: '4 min' },
                   { v: 5, label: '5 min' },
-                  { v: 7, label: '7 min' },
                   { v: 10, label: '10 min' },
-                  { v: 15, label: '15 min' },
+                  { v: 20, label: '20 min' },
+                  { v: 30, label: '30 min' },
+                  { v: 60, label: '1 hour' },
                 ].map(({ v, label }) => (
                   <option key={v} value={v}>{label} before</option>
                 ))}
@@ -1493,6 +1502,7 @@ function BacktestTab() {
           <div className="bt-toggles">
             {[
               ['jofs', jofsEnabled, setJofsEnabled, 'JOFS (Joint/Close Fav)'],
+              ['spread', spreadControl, setSpreadControl, 'Spread Control'],
               ['ceil', markCeiling, setMarkCeiling, 'Mark Ceiling (≤8.0)'],
               ['floor', markFloor, setMarkFloor, 'Mark Floor (≥1.5)'],
               ['uplift', markUplift, setMarkUplift, 'Mark Uplift (2.5–3.5)'],
@@ -1515,6 +1525,19 @@ function BacktestTab() {
                 )}
               </label>
             ))}
+            <label className="bt-toggle-label">
+              Point Value:
+              <select
+                className="select-small"
+                value={pointValue}
+                onChange={e => setPointValue(Number(e.target.value))}
+                style={{ marginLeft: 6, width: 80 }}
+              >
+                {[1, 2, 5, 10, 20, 50].map(v => (
+                  <option key={v} value={v}>£{v}/pt</option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       </div>

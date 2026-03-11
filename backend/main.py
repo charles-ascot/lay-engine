@@ -425,7 +425,7 @@ def set_countries(req: CountriesRequest):
 def set_process_window(req: ProcessWindowRequest):
     """Set the betting window — how many minutes before race start to place bets."""
     if req.minutes < 0.05 or req.minutes > 60:
-        raise HTTPException(status_code=400, detail="Window must be 1–60 minutes")
+        raise HTTPException(status_code=400, detail="Window must be 0.05–60 minutes")
     engine.process_window = req.minutes
     engine._save_state()
     return {"status": "ok", "process_window": engine.process_window}
@@ -1940,10 +1940,12 @@ class BacktestRunRequest(BaseModel):
     countries: list[str] = ["GB", "IE"]
     process_window_mins: float = 5
     jofs_enabled: bool = True
+    spread_control: bool = False
     mark_ceiling_enabled: bool = False
     mark_floor_enabled: bool = False
     mark_uplift_enabled: bool = False
     mark_uplift_stake: float = 3.0
+    point_value: float = 1.0
     market_ids: list[str] = []  # empty = run all markets for the date
 
 
@@ -2048,6 +2050,33 @@ def backtest_run(req: BacktestRunRequest):
             })
             continue
 
+        # Spread control — reject if favourite's spread is too wide
+        if req.spread_control and runners:
+            from rules import identify_favourites, check_spread
+            fav, _ = identify_favourites(runners)
+            if fav:
+                sc = check_spread(fav)
+                if not sc.passed:
+                    results.append({
+                        "market_id": market_id,
+                        "market_name": m["market_name"],
+                        "venue": m["venue"],
+                        "race_time": race_time_str,
+                        "evaluated_at": target_iso,
+                        "skipped": True,
+                        "skip_reason": f"Spread rejected: {sc.reason}",
+                        "rule_applied": "",
+                        "favourite": {"name": fav.runner_name, "odds": fav.best_available_to_lay, "selection_id": fav.selection_id},
+                        "second_favourite": None,
+                        "instructions": [],
+                        "settled": False,
+                        "winner_selection_id": None,
+                        "pnl": 0.0,
+                        "total_stake": 0.0,
+                        "total_liability": 0.0,
+                    })
+                    continue
+
         rule_result = apply_betting_rules(
             market_id=market_id,
             market_name=m["market_name"],
@@ -2060,6 +2089,11 @@ def backtest_run(req: BacktestRunRequest):
             mark_uplift_enabled=req.mark_uplift_enabled,
             mark_uplift_stake=req.mark_uplift_stake,
         )
+
+        # Apply point value multiplier
+        if req.point_value != 1.0:
+            for instr in rule_result.instructions:
+                instr.size = round(instr.size * req.point_value, 2)
 
         if rule_result.skipped:
             rd = rule_result.to_dict()
