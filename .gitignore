@@ -5,3 +5,4 @@ frontend/dist/
 .env
 *.egg-info/
 .vscode/
+fsu/

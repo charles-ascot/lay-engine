@@ -151,7 +151,7 @@ All Cloud Run → Cloud Run communication uses GCP OIDC identity tokens fetched 
 All services auto-deploy when code is pushed to their respective GitHub repos:
 - **Lay Engine:** Push to `charles-ascot/lay-engine` → Cloud Build → Cloud Run
 - **Frontend:** Push to `charles-ascot/lay-engine` → Cloudflare Pages auto-build
-- **FSU1:** `gcloud run deploy fsu1 --source ./fsu --region=europe-west1 --project=chimera-v4`
+- **FSU1:** `gcloud run deploy fsu1 --source . --region=europe-west1 --project=chimera-v4` (from `charles-ascot/fsu1` repo)
 - **FSU3:** `gcloud run deploy fsu3 --source . --region=europe-west2 --project=chimera-v4`
 
 ## Future: Strategy FSU
