@@ -2088,7 +2088,8 @@ function BacktestTab() {
                     <input
                       type="checkbox"
                       checked={cycleSelectedDates.has(d)}
-                      onChange={e => toggleCycleDate(d, e)}
+                      onChange={() => {}}
+                      onClick={e => toggleCycleDate(d, e)}
                     />
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{d}</span>
                   </label>
