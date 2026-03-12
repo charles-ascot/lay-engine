@@ -1240,6 +1240,7 @@ function BacktestTab() {
 
   // Cycle Run state
   const [cycleSelectedDates, setCycleSelectedDates] = useState(new Set())
+  const lastCycleDateClick = useRef(null)
   const [cycleRunning, setCycleRunning] = useState(false)
   const [cycleProgress, setCycleProgress] = useState(null)
   const [cycleHistory, setCycleHistory] = useState(() => btCycleHistLoad())
@@ -1446,12 +1447,25 @@ function BacktestTab() {
   }
 
   // ── Cycle Run ──
-  function toggleCycleDate(d) {
-    setCycleSelectedDates(prev => {
-      const next = new Set(prev)
-      next.has(d) ? next.delete(d) : next.add(d)
-      return next
-    })
+  function toggleCycleDate(d, e) {
+    if (e.shiftKey && lastCycleDateClick.current && lastCycleDateClick.current !== d) {
+      const idxA = dates.indexOf(lastCycleDateClick.current)
+      const idxB = dates.indexOf(d)
+      const [lo, hi] = idxA < idxB ? [idxA, idxB] : [idxB, idxA]
+      const range = dates.slice(lo, hi + 1)
+      setCycleSelectedDates(prev => {
+        const next = new Set(prev)
+        range.forEach(x => next.add(x))
+        return next
+      })
+    } else {
+      setCycleSelectedDates(prev => {
+        const next = new Set(prev)
+        next.has(d) ? next.delete(d) : next.add(d)
+        return next
+      })
+    }
+    lastCycleDateClick.current = d
   }
   function selectAllCycleDates() { setCycleSelectedDates(new Set(dates)) }
   function deselectAllCycleDates() { setCycleSelectedDates(new Set()) }
@@ -2074,7 +2088,7 @@ function BacktestTab() {
                     <input
                       type="checkbox"
                       checked={cycleSelectedDates.has(d)}
-                      onChange={() => toggleCycleDate(d)}
+                      onChange={e => toggleCycleDate(d, e)}
                     />
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{d}</span>
                   </label>
