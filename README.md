@@ -126,6 +126,50 @@ chimera-lay-engine/
 | **Errors** | Timestamped error log |
 | **Settings** | Report recipients, AI data source toggles, AI capability toggles |
 | **API Keys** | Generate, list, and revoke API keys for external agents |
+| **Backtest** | Historic market replay against the 4-rule strategy with single-day and multi-day cycle runs |
+
+## Backtest Tab
+
+The Backtest tab replays historic Betfair market data against the configured 4-rule strategy without placing real bets.
+
+### Single Run
+1. Select a date from the dropdown (populated from FSU1 historic data).
+2. Filter by country (GB/IE) and configure rules (JOFS, Spread Control, Mark Ceiling/Floor/Uplift, Point Value).
+3. Optionally filter the market browser to include only specific races.
+4. Click **Run Backtest** — results appear immediately below as a settlement table with P&L per race.
+5. Each run is saved to **History** (browser localStorage, max 50 runs) below the live result.
+
+### Cycle Run
+The Cycle Run section (below the single run config) lets you run the same configuration across multiple dates in one pass.
+
+1. Tick any number of dates in the **Dates** grid.
+2. Click **Run Cycle** — the engine calls `/api/backtest/run` once per date (all markets, no pre-filtering) and shows a live progress bar.
+3. When complete the cycle is saved to **Cycle History** (separate localStorage key, max 20 runs).
+
+### History & Export
+Both the single-run History and Cycle History sections support:
+- **Select / Deselect All** checkboxes for bulk operations
+- **Download XLS** — exports selected runs to a local Excel file
+- **Google Sheets** — exports to a new Google Spreadsheet (requires service account with Sheets API scope)
+- **Delete** — removes selected entries from localStorage
+- **Clear All** — wipes the entire history section
+
+Cycle History cards are collapsible. Expanding a cycle card reveals per-day sub-cards, each of which is also expandable to show the full race-by-race settlement table with its own XLS export button.
+
+### Storage
+| Store | Key | Max entries |
+|-------|-----|-------------|
+| Single runs | `chimera_backtest_history` | 50 |
+| Cycle runs | `chimera_backtest_cycle_history` | 20 |
+
+### Backtest API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/backtest/dates` | List available replay dates from FSU1 |
+| `GET` | `/api/backtest/markets` | Markets for a date + country filter |
+| `POST` | `/api/backtest/run` | Run strategy against a single date |
+| `POST` | `/api/backtest/export-sheets` | Export one or more runs to Google Sheets |
 
 ## API Endpoints
 

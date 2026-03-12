@@ -1199,6 +1199,17 @@ function btHistSave(entries) {
   try { localStorage.setItem(BT_HISTORY_KEY, JSON.stringify(entries.slice(0, BT_HISTORY_MAX))) } catch {}
 }
 
+// ── Cycle Run History helpers ──
+const BT_CYCLE_KEY = 'chimera_backtest_cycle_history'
+const BT_CYCLE_MAX = 20
+
+function btCycleHistLoad() {
+  try { return JSON.parse(localStorage.getItem(BT_CYCLE_KEY) || '[]') } catch { return [] }
+}
+function btCycleHistSave(entries) {
+  try { localStorage.setItem(BT_CYCLE_KEY, JSON.stringify(entries.slice(0, BT_CYCLE_MAX))) } catch {}
+}
+
 // ── Backtest Tab ──
 function BacktestTab() {
   const [datesLoading, setDatesLoading] = useState(true)
@@ -1226,6 +1237,16 @@ function BacktestTab() {
   const [expandedHistId, setExpandedHistId] = useState(null)
   const [selectedHistIds, setSelectedHistIds] = useState(new Set())
   const [exportingSheets, setExportingSheets] = useState(false)
+
+  // Cycle Run state
+  const [cycleSelectedDates, setCycleSelectedDates] = useState(new Set())
+  const [cycleRunning, setCycleRunning] = useState(false)
+  const [cycleProgress, setCycleProgress] = useState(null)
+  const [cycleHistory, setCycleHistory] = useState(() => btCycleHistLoad())
+  const [expandedCycleId, setExpandedCycleId] = useState(null)
+  const [expandedCycleDayDate, setExpandedCycleDayDate] = useState(null)
+  const [selectedCycleIds, setSelectedCycleIds] = useState(new Set())
+  const [exportingCycleSheets, setExportingCycleSheets] = useState(false)
 
   // Load available dates on mount
   useEffect(() => {
@@ -1421,6 +1442,184 @@ function BacktestTab() {
       setError('Google Sheets export failed: ' + e.message)
     } finally {
       setExportingSheets(false)
+    }
+  }
+
+  // ── Cycle Run ──
+  function toggleCycleDate(d) {
+    setCycleSelectedDates(prev => {
+      const next = new Set(prev)
+      next.has(d) ? next.delete(d) : next.add(d)
+      return next
+    })
+  }
+  function selectAllCycleDates() { setCycleSelectedDates(new Set(dates)) }
+  function deselectAllCycleDates() { setCycleSelectedDates(new Set()) }
+
+  async function runCycle() {
+    if (cycleSelectedDates.size === 0) return
+    const sortedDates = [...cycleSelectedDates].sort()
+    setCycleRunning(true)
+    setCycleProgress({ current: 0, total: sortedDates.length, currentDate: '' })
+    const days = []
+    for (let i = 0; i < sortedDates.length; i++) {
+      const date = sortedDates[i]
+      setCycleProgress({ current: i + 1, total: sortedDates.length, currentDate: date })
+      try {
+        const r = await fetch(`${API}/api/backtest/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date,
+            countries,
+            process_window_mins: processWindow,
+            jofs_enabled: jofsEnabled,
+            spread_control: spreadControl,
+            mark_ceiling_enabled: markCeiling,
+            mark_floor_enabled: markFloor,
+            mark_uplift_enabled: markUplift,
+            mark_uplift_stake: markUpliftStake,
+            point_value: pointValue,
+            market_ids: [],
+          }),
+        })
+        if (!r.ok) throw new Error(`${r.status}`)
+        const data = await r.json()
+        days.push({ date, ...data })
+      } catch (e) {
+        days.push({ date, error: e.message, markets_evaluated: 0, bets_placed: 0, markets_skipped: 0, total_stake: 0, total_liability: 0, total_pnl: 0, roi: 0, results: [] })
+      }
+    }
+    const totStake = days.reduce((s, d) => s + (d.total_stake || 0), 0)
+    const totPnl = days.reduce((s, d) => s + (d.total_pnl || 0), 0)
+    const summary = {
+      total_days: sortedDates.length,
+      days_completed: days.filter(d => !d.error).length,
+      markets_evaluated: days.reduce((s, d) => s + (d.markets_evaluated || 0), 0),
+      bets_placed: days.reduce((s, d) => s + (d.bets_placed || 0), 0),
+      markets_skipped: days.reduce((s, d) => s + (d.markets_skipped || 0), 0),
+      total_stake: totStake,
+      total_liability: days.reduce((s, d) => s + (d.total_liability || 0), 0),
+      total_pnl: totPnl,
+      roi: totStake > 0 ? Math.round((totPnl / totStake) * 1000) / 10 : 0,
+    }
+    const entry = {
+      id: Date.now().toString(),
+      run_at: new Date().toISOString(),
+      dates: sortedDates,
+      config: {
+        countries,
+        process_window_mins: processWindow,
+        jofs_enabled: jofsEnabled,
+        spread_control: spreadControl,
+        mark_ceiling_enabled: markCeiling,
+        mark_floor_enabled: markFloor,
+        mark_uplift_enabled: markUplift,
+        mark_uplift_stake: markUpliftStake,
+        point_value: pointValue,
+      },
+      summary,
+      days,
+    }
+    const next = [entry, ...btCycleHistLoad()]
+    btCycleHistSave(next)
+    setCycleHistory(next)
+    setCycleRunning(false)
+    setCycleProgress(null)
+  }
+
+  function toggleCycleSelect(id) {
+    setSelectedCycleIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function deleteSelectedCycle() {
+    if (selectedCycleIds.size === 0) return
+    if (!window.confirm(`Delete ${selectedCycleIds.size} cycle run${selectedCycleIds.size !== 1 ? 's' : ''}?`)) return
+    const next = cycleHistory.filter(h => !selectedCycleIds.has(h.id))
+    btCycleHistSave(next)
+    setCycleHistory(next)
+    setSelectedCycleIds(new Set())
+    setExpandedCycleId(null)
+  }
+
+  function exportCycleLocal(entries) {
+    let html = ''
+    for (const entry of entries) {
+      const cfg = entry.config || {}
+      const sm = entry.summary || {}
+      html += `<h3>Cycle Run: ${(entry.dates || []).join(', ')} — ${(cfg.countries || []).join(',')} — Window: ${cfg.process_window_mins || '?'}min</h3>`
+      html += `<p>Days: ${sm.total_days || 0} | Markets: ${sm.markets_evaluated || 0} | Bets: ${sm.bets_placed || 0} | P&amp;L: £${(sm.total_pnl || 0).toFixed(2)} | ROI: ${sm.roi || 0}%</p>`
+      for (const day of (entry.days || [])) {
+        html += `<h4>${day.date}${day.error ? ' — ERROR: ' + day.error : ` — Bets: ${day.bets_placed} | P&L: £${(day.total_pnl || 0).toFixed(2)}`}</h4>`
+        if (!day.error) {
+          html += '<table border="1" cellpadding="4" cellspacing="0"><tr><th>Time</th><th>Venue</th><th>Favourite</th><th>Odds</th><th>Rule</th><th>Stake</th><th>Liability</th><th>Result</th><th>P&amp;L</th></tr>'
+          for (const r of (day.results || [])) {
+            const instrs = r.instructions || []
+            const totalStake = instrs.reduce((s, i) => s + (i.size || 0), 0)
+            const totalLiab = instrs.reduce((s, i) => s + (i.liability || 0), 0)
+            const outcomes = [...new Set(instrs.map(i => i.outcome).filter(Boolean))]
+            const fav = r.favourite || {}
+            html += '<tr>'
+            html += `<td>${(r.race_time || '').slice(0, 16)}</td>`
+            html += `<td>${r.venue || ''}</td>`
+            html += `<td>${fav.name || ''}</td>`
+            html += `<td>${fav.odds || ''}</td>`
+            html += `<td>${r.skipped ? (r.skip_reason || 'SKIPPED') : (r.rule_applied || '')}</td>`
+            html += `<td>${r.skipped ? '' : '£' + totalStake.toFixed(2)}</td>`
+            html += `<td>${r.skipped ? '' : '£' + totalLiab.toFixed(2)}</td>`
+            html += `<td>${r.skipped ? 'SKIPPED' : (outcomes.join('/') || '—')}</td>`
+            html += `<td>${r.skipped ? '' : '£' + (r.pnl || 0).toFixed(2)}</td>`
+            html += '</tr>'
+          }
+          html += '</table><br/>'
+        }
+      }
+    }
+    const label = entries.length === 1
+      ? `${entries[0].dates[0]}_to_${entries[0].dates[entries[0].dates.length - 1]}`
+      : `${entries.length}_cycles`
+    downloadTableAsExcelRaw(html, `chimera_cycle_${label}`)
+  }
+
+  async function exportCycleToSheets(entries) {
+    setExportingCycleSheets(true)
+    try {
+      // Convert cycle days into the same entry format as single backtests
+      const flatEntries = entries.flatMap(cycle =>
+        (cycle.days || []).filter(d => !d.error).map(day => ({
+          id: `${cycle.id}-${day.date}`,
+          run_at: cycle.run_at,
+          date: day.date,
+          config: cycle.config,
+          summary: {
+            markets_evaluated: day.markets_evaluated,
+            bets_placed: day.bets_placed,
+            markets_skipped: day.markets_skipped,
+            total_stake: day.total_stake,
+            total_liability: day.total_liability,
+            total_pnl: day.total_pnl,
+            roi: day.roi,
+          },
+          results: day.results,
+        }))
+      )
+      const r = await fetch(`${API}/api/backtest/export-sheets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: flatEntries }),
+      })
+      if (!r.ok) throw new Error(`${r.status}`)
+      const data = await r.json()
+      if (data.url) window.open(data.url, '_blank')
+      else setError(data.error || 'Export failed')
+    } catch (e) {
+      setError('Google Sheets export failed: ' + e.message)
+    } finally {
+      setExportingCycleSheets(false)
     }
   }
 
@@ -1836,6 +2035,284 @@ function BacktestTab() {
           })}
         </div>
       )}
+
+      {/* ── Cycle Run ── */}
+      <div className="bt-cycle-section">
+        <div className="bt-hist-section-header" style={{ marginBottom: 12 }}>
+          <h3>Cycle Run</h3>
+          <span className="bt-muted">Select multiple dates to run in sequence</span>
+        </div>
+
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="engine-section">
+            <div className="bt-browser-header">
+              <span className="engine-label" style={{ fontWeight: 600 }}>
+                Dates
+                {datesLoading ? ' (loading…)' : ` · ${dates.length} available`}
+              </span>
+              <div className="bt-browser-actions">
+                <span className="bt-muted">{cycleSelectedDates.size} selected</span>
+                <button className="btn btn-secondary btn-sm" onClick={selectAllCycleDates} disabled={datesLoading}>All</button>
+                <button className="btn btn-secondary btn-sm" onClick={deselectAllCycleDates}>None</button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={runCycle}
+                  disabled={cycleRunning || cycleSelectedDates.size === 0}
+                >
+                  {cycleRunning
+                    ? `Running ${cycleProgress?.current || 0}/${cycleProgress?.total || 0}…`
+                    : `Run Cycle${cycleSelectedDates.size > 0 ? ` (${cycleSelectedDates.size})` : ''}`}
+                </button>
+              </div>
+            </div>
+
+            {datesLoading && <div className="bt-muted" style={{ fontSize: 12 }}>Loading dates…</div>}
+            {!datesLoading && (
+              <div className="bt-cycle-date-grid">
+                {dates.map(d => (
+                  <label key={d} className="bt-market-row">
+                    <input
+                      type="checkbox"
+                      checked={cycleSelectedDates.has(d)}
+                      onChange={() => toggleCycleDate(d)}
+                    />
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{d}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {cycleRunning && cycleProgress && (
+              <div className="bt-cycle-progress">
+                <div className="bt-cycle-progress-bar">
+                  <div
+                    className="bt-cycle-progress-fill"
+                    style={{ width: `${(cycleProgress.current / cycleProgress.total) * 100}%` }}
+                  />
+                </div>
+                <span className="bt-muted" style={{ fontSize: 11 }}>
+                  {cycleProgress.current}/{cycleProgress.total} — {cycleProgress.currentDate}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Cycle History */}
+        {cycleHistory.length > 0 && (
+          <div className="bt-hist-section">
+            <div className="bt-hist-section-header">
+              <h3>Cycle History</h3>
+              <span className="bt-muted">{cycleHistory.length} run{cycleHistory.length !== 1 ? 's' : ''} stored</span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                {selectedCycleIds.size > 0 && (
+                  <span className="bt-muted" style={{ fontSize: 11 }}>{selectedCycleIds.size} selected</span>
+                )}
+                <button className="btn btn-secondary btn-sm" onClick={() => setSelectedCycleIds(selectedCycleIds.size === cycleHistory.length ? new Set() : new Set(cycleHistory.map(h => h.id)))}>
+                  {selectedCycleIds.size === cycleHistory.length ? 'Deselect All' : 'Select All'}
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={selectedCycleIds.size === 0}
+                  onClick={() => exportCycleLocal(cycleHistory.filter(h => selectedCycleIds.has(h.id)))}
+                >
+                  Download XLS{selectedCycleIds.size > 0 ? ` (${selectedCycleIds.size})` : ''}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={selectedCycleIds.size === 0 || exportingCycleSheets}
+                  onClick={() => exportCycleToSheets(cycleHistory.filter(h => selectedCycleIds.has(h.id)))}
+                >
+                  {exportingCycleSheets ? 'Exporting…' : `Google Sheets${selectedCycleIds.size > 0 ? ` (${selectedCycleIds.size})` : ''}`}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ color: '#dc2626' }}
+                  disabled={selectedCycleIds.size === 0}
+                  onClick={deleteSelectedCycle}
+                >
+                  Delete{selectedCycleIds.size > 0 ? ` (${selectedCycleIds.size})` : ''}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ color: '#dc2626' }}
+                  onClick={() => { if (window.confirm('Clear all cycle history?')) { btCycleHistSave([]); setCycleHistory([]); setSelectedCycleIds(new Set()) } }}
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            {cycleHistory.map(entry => {
+              const isExpanded = expandedCycleId === entry.id
+              const sm = entry.summary || {}
+              const pnl = sm.total_pnl || 0
+              const dateRange = entry.dates?.length > 0
+                ? `${entry.dates[0]} → ${entry.dates[entry.dates.length - 1]}`
+                : '—'
+              return (
+                <div key={entry.id} className={`bt-hist-card${isExpanded ? ' expanded' : ''}${selectedCycleIds.has(entry.id) ? ' selected' : ''}`}>
+                  <div className="bt-hist-card-header" onClick={() => setExpandedCycleId(isExpanded ? null : entry.id)}>
+                    <input
+                      type="checkbox"
+                      checked={selectedCycleIds.has(entry.id)}
+                      onChange={e => { e.stopPropagation(); toggleCycleSelect(entry.id) }}
+                      onClick={e => e.stopPropagation()}
+                      style={{ marginRight: 8 }}
+                    />
+                    <span className="bt-hist-date" style={{ fontSize: 11 }}>{dateRange}</span>
+                    <span className="bt-muted" style={{ fontSize: 10 }}>
+                      {new Date(entry.run_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="bt-hist-stat">{sm.total_days || 0} days</span>
+                    <span className="bt-hist-stat">Bets <strong>{sm.bets_placed || 0}</strong></span>
+                    <span className="bt-hist-stat">Stake <strong>£{(sm.total_stake || 0).toFixed(2)}</strong></span>
+                    <span className={`bt-hist-stat ${pnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                      P&amp;L <strong>{pnl >= 0 ? '+' : ''}£{pnl.toFixed(2)}</strong>
+                    </span>
+                    <span className={`bt-hist-stat ${(sm.roi || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                      ROI <strong>{(sm.roi || 0) >= 0 ? '+' : ''}{sm.roi || 0}%</strong>
+                    </span>
+                    <span className="bt-hist-flags">
+                      {entry.config?.jofs_enabled && <span className="tag-on">JOFS</span>}
+                      {entry.config?.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
+                    </span>
+                    <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="bt-hist-card-body">
+                      <div className="bt-hist-card-meta">
+                        <span className="bt-muted">
+                          {(entry.config?.countries || []).join('/')} · {fmtWindow(entry.config?.process_window_mins)} window ·{' '}
+                          {sm.markets_evaluated || 0} markets · {sm.days_completed || 0}/{sm.total_days || 0} days completed
+                        </span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={e => { e.stopPropagation(); exportCycleLocal([entry]) }}
+                          >
+                            Export XLS
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            style={{ color: '#dc2626' }}
+                            onClick={e => {
+                              e.stopPropagation()
+                              const next = cycleHistory.filter(h => h.id !== entry.id)
+                              btCycleHistSave(next)
+                              setCycleHistory(next)
+                              setExpandedCycleId(null)
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Per-day sub-cards */}
+                      {(entry.days || []).map(day => {
+                        const dayKey = `${entry.id}-${day.date}`
+                        const isDayExpanded = expandedCycleDayDate === dayKey
+                        const dpnl = day.total_pnl || 0
+                        const tableId = `bt-cycle-tbl-${dayKey}`
+                        return (
+                          <div key={day.date} className={`bt-hist-card${isDayExpanded ? ' expanded' : ''}`} style={{ marginTop: 6 }}>
+                            <div className="bt-hist-card-header" onClick={() => setExpandedCycleDayDate(isDayExpanded ? null : dayKey)}>
+                              <span className="bt-hist-date">{day.date}</span>
+                              {day.error
+                                ? <span className="bt-muted" style={{ fontSize: 11, color: '#dc2626' }}>Error: {day.error}</span>
+                                : <>
+                                    <span className="bt-hist-stat">Bets <strong>{day.bets_placed || 0}</strong></span>
+                                    <span className="bt-hist-stat">Stake <strong>£{(day.total_stake || 0).toFixed(2)}</strong></span>
+                                    <span className={`bt-hist-stat ${dpnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                      P&amp;L <strong>{dpnl >= 0 ? '+' : ''}£{dpnl.toFixed(2)}</strong>
+                                    </span>
+                                    <span className={`bt-hist-stat ${(day.roi || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                                      ROI <strong>{(day.roi || 0) >= 0 ? '+' : ''}{day.roi || 0}%</strong>
+                                    </span>
+                                  </>
+                              }
+                              <span className="collapsible-chevron">{isDayExpanded ? '−' : '+'}</span>
+                            </div>
+
+                            {isDayExpanded && !day.error && (
+                              <div className="bt-hist-card-body">
+                                <div className="bt-hist-card-meta">
+                                  <span className="bt-muted">
+                                    {day.markets_evaluated || 0} markets · {day.markets_skipped || 0} skipped
+                                  </span>
+                                  <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={e => { e.stopPropagation(); downloadTableAsExcel(tableId, `cycle_${day.date}_${entry.id}`) }}
+                                  >
+                                    Export XLS
+                                  </button>
+                                </div>
+                                <div className="table-scroll">
+                                  <table id={tableId}>
+                                    <thead>
+                                      <tr>
+                                        <th>Time</th>
+                                        <th>Venue</th>
+                                        <th>Favourite</th>
+                                        <th>Rule</th>
+                                        <th>Stake</th>
+                                        <th>Liability</th>
+                                        <th>Result</th>
+                                        <th>P&amp;L</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {(day.results || []).map(r => {
+                                        const time = r.race_time ? r.race_time.slice(11, 16) : '—'
+                                        const skipped = r.skipped
+                                        const instructions = r.instructions || []
+                                        const totalStake = instructions.reduce((s, i) => s + (i.size || 0), 0)
+                                        const totalLiab = instructions.reduce((s, i) => s + (i.liability || 0), 0)
+                                        const rpnl = r.pnl || 0
+                                        const outcomes = [...new Set(instructions.map(i => i.outcome).filter(Boolean))]
+                                        const outcomeStr = skipped ? 'SKIPPED' : (outcomes.join('/') || '—')
+                                        const outcomeClass = outcomeStr === 'WON' ? 'text-success'
+                                          : outcomeStr === 'LOST' ? 'text-danger'
+                                          : outcomeStr === 'SKIPPED' ? 'bt-muted' : ''
+                                        return (
+                                          <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
+                                            <td>{time}</td>
+                                            <td>{r.venue}</td>
+                                            <td>
+                                              {r.favourite
+                                                ? <span>{r.favourite.name} <span className="bt-muted">@ {r.favourite.odds}</span></span>
+                                                : '—'}
+                                            </td>
+                                            <td className="bt-rule-cell" title={r.rule_applied || r.skip_reason || ''}>
+                                              {skipped ? <span className="bt-muted">{r.skip_reason}</span> : r.rule_applied}
+                                            </td>
+                                            <td>{skipped ? '—' : `£${totalStake.toFixed(2)}`}</td>
+                                            <td>{skipped ? '—' : `£${totalLiab.toFixed(2)}`}</td>
+                                            <td className={outcomeClass}>{outcomeStr}</td>
+                                            <td className={rpnl > 0 ? 'text-success' : rpnl < 0 ? 'text-danger' : ''}>
+                                              {skipped ? '—' : `${rpnl >= 0 ? '+' : ''}£${rpnl.toFixed(2)}`}
+                                            </td>
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

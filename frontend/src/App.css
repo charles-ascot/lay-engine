@@ -753,6 +753,29 @@ input[type="date"]:focus { outline: none; border-color: #2563eb; }
   background: #f3f4f6;
   color: #9ca3af;
 }
+.bt-cycle-section { margin-top: 32px; padding-top: 24px; border-top: 2px solid #e5e7eb; }
+.bt-cycle-date-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.bt-cycle-progress { margin-top: 10px; }
+.bt-cycle-progress-bar {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.bt-cycle-progress-fill {
+  height: 100%;
+  background: #7c3aed;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
 .backtest-tab h2 { font-size: 14px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
 .empty-state { color: #8a8a9a; font-size: 12px; margin-bottom: 20px; }
 .backtest-placeholder { display: flex; flex-direction: column; gap: 12px; }
