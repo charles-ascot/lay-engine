@@ -23,10 +23,10 @@ CHIMERA is a modular horse racing lay betting platform built on Google Cloud Run
 │          │                                                  │
 │   ┌──────┴───────┐    ┌──────────────┐                     │
 │   │  FSU2        │    │  Frontend    │                     │
-│   │  Data Recorder│    │  (Cloudflare)│                     │
+│   │  Video Intel │    │  (Cloudflare)│                     │
 │   │              │    │              │                     │
-│   │  Live Feed   │    │  React SPA   │                     │
-│   │  Collection  │    │  Dashboard   │                     │
+│   │  YouTube →   │    │  React SPA   │                     │
+│   │  Gemini AI   │    │  Dashboard   │                     │
 │   └──────────────┘    └──────────────┘                     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -80,16 +80,28 @@ Reads historic Betfair Advanced data from GCS and serves it through an API that 
 
 ---
 
-### FSU2 — Data Recorder
+### FSU2 — Video Intelligence Service
 
-Captures live Betfair market data for future replay and analysis.
+Receives YouTube URLs, processes them through Gemini 2.5 Flash (Vertex AI), and persists structured intelligence (summaries, transcripts, topics, entities, sentiment) to Google Cloud Storage.
 
 | Property | Value |
 |----------|-------|
-| **Cloud Run** | `betfair-data-rec` (europe-west2) |
-| **URL** | `https://datarec.thync.online` |
+| **Version** | 5.0.0 |
+| **Cloud Run** | `fsu2` (europe-west1) |
+| **GitHub** | `charles-ascot/fsu2` |
+| **Framework** | Node.js (Express) |
+| **AI Model** | Google Gemini 2.5 Flash (Vertex AI) |
+| **GCS Bucket** | `chimera-video-summaries` |
+| **Auth** | API key (`FSU_API_KEY`) |
 
-**Status:** Operational. Collects live feed data for storage.
+**Key Capabilities:**
+- YouTube video processing via Gemini AI
+- Structured content extraction: summary, transcript, key topics, entities, sentiment
+- Persistent storage to GCS (`processed/YYYY/MM/DD/{jobId}.json`)
+- Deep health checks (GCS + Gemini connectivity)
+- Rate limiting and API key authentication
+
+**API:** `/health`, `/health/deep`, `POST /process`, `GET /process/validate`
 
 ---
 
@@ -124,11 +136,15 @@ Frontend (Cloudflare Pages)
 Lay Engine (Cloud Run)
     │ OIDC identity token
     ├──► FSU1 (historic data)
-    ├──► FSU2 (live feed status)
     ├──► Betfair Exchange API (live betting)
     ├──► Anthropic API (AI reports)
     ├──► SendGrid API (email)
     └──► Google Drive/Sheets API (exports)
+
+FSU2 (Cloud Run)
+    │ API key auth
+    ├──► Gemini 2.5 Flash (Vertex AI)
+    └──► GCS bucket (video summaries)
 
 FSU3 (Cloud Run)
     │ OIDC identity token
@@ -144,6 +160,8 @@ All Cloud Run → Cloud Run communication uses GCP OIDC identity tokens fetched 
 | Lay Engine | FSU1 | `roles/run.invoker` |
 | FSU3 | FSU1 | `roles/run.invoker` |
 | FSU1 | GCS bucket | `roles/storage.objectViewer` |
+| FSU2 | Vertex AI | `roles/aiplatform.user` |
+| FSU2 | GCS bucket (video summaries) | `roles/storage.objectCreator` + `roles/storage.objectViewer` |
 | Lay Engine | Google Drive (Shared) | Service account as Contributor on Shared Drive |
 
 ## Deployment
@@ -152,6 +170,7 @@ All services auto-deploy when code is pushed to their respective GitHub repos:
 - **Lay Engine:** Push to `charles-ascot/lay-engine` → Cloud Build → Cloud Run
 - **Frontend:** Push to `charles-ascot/lay-engine` → Cloudflare Pages auto-build
 - **FSU1:** `gcloud run deploy fsu1 --source . --region=europe-west1 --project=chimera-v4` (from `charles-ascot/fsu1` repo)
+- **FSU2:** `gcloud run deploy fsu2 --source . --region=europe-west1 --project=chimera-v4` (from `charles-ascot/fsu2` repo)
 - **FSU3:** `gcloud run deploy fsu3 --source . --region=europe-west2 --project=chimera-v4`
 
 ## Future: Strategy FSU

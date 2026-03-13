@@ -794,6 +794,94 @@ def _get_settled_for_date(target_date: str) -> list[dict]:
     return settled
 
 
+def _compute_day_stats(settled_bets: list[dict]) -> dict:
+    """Pre-compute authoritative aggregations from settled bet data.
+
+    All win/loss counts, P&L totals, and odds-band breakdowns are computed
+    here in Python so the AI agent receives authoritative figures rather than
+    computing them itself (LLMs are unreliable arithmetic engines).
+
+    Odds-band boundaries (half-open intervals, same as lay rules):
+      < 2.0    → [0, 2.0)
+      2.0–2.99 → [2.0, 3.0)
+      3.0–3.99 → [3.0, 4.0)
+      4.0–4.99 → [4.0, 5.0)
+      5.0+     → [5.0, ∞)
+    """
+    BANDS = [
+        {"label": "< 2.0",    "min": None, "max": 2.0},
+        {"label": "2.0–2.99", "min": 2.0,  "max": 3.0},
+        {"label": "3.0–3.99", "min": 3.0,  "max": 4.0},
+        {"label": "4.0–4.99", "min": 4.0,  "max": 5.0},
+        {"label": "5.0+",     "min": 5.0,  "max": None},
+    ]
+
+    def get_band_label(odds: float) -> str:
+        for b in BANDS:
+            lo = b["min"] if b["min"] is not None else float("-inf")
+            hi = b["max"] if b["max"] is not None else float("inf")
+            if lo <= odds < hi:
+                return b["label"]
+        return "Unknown"
+
+    # Only count bets with a definitive WIN/LOSS outcome
+    settled = [b for b in settled_bets if b.get("bet_outcome") in ("WON", "LOST")]
+
+    wins = sum(1 for b in settled if b["bet_outcome"] == "WON")
+    losses = sum(1 for b in settled if b["bet_outcome"] == "LOST")
+    total = wins + losses
+    net_pl = round(sum(b.get("profit", 0) for b in settled), 2)
+    total_staked = round(
+        sum(b.get("our_stake") or b.get("size_settled", 0) for b in settled), 2
+    )
+    strike_rate = round(wins / total, 4) if total > 0 else 0.0
+    roi = round(net_pl / total_staked, 4) if total_staked > 0 else 0.0
+
+    # Per-band aggregation
+    band_acc = {b["label"]: {"bets": 0, "wins": 0, "losses": 0, "pl": 0.0, "staked": 0.0}
+                for b in BANDS}
+    unclassified = []
+    for b in settled:
+        odds = b.get("price_matched", 0)
+        label = get_band_label(odds)
+        if label not in band_acc:
+            unclassified.append({"odds": odds, "bet_id": b.get("bet_id")})
+            continue
+        band_acc[label]["bets"] += 1
+        band_acc[label]["wins"] += int(b["bet_outcome"] == "WON")
+        band_acc[label]["losses"] += int(b["bet_outcome"] == "LOST")
+        band_acc[label]["pl"] += b.get("profit", 0)
+        band_acc[label]["staked"] += b.get("our_stake") or b.get("size_settled", 0)
+
+    bands = []
+    for b_def in BANDS:
+        s = band_acc[b_def["label"]]
+        pl = round(s["pl"], 2)
+        staked = round(s["staked"], 2)
+        bands.append({
+            "label": b_def["label"],
+            "bets": s["bets"],
+            "wins": s["wins"],
+            "losses": s["losses"],
+            "win_pct": round(s["wins"] / s["bets"], 4) if s["bets"] > 0 else 0.0,
+            "pl": pl,
+            "roi": round(pl / staked, 4) if staked > 0 else 0.0,
+        })
+
+    return {
+        "total_bets": total,
+        "wins": wins,
+        "losses": losses,
+        "strike_rate": strike_rate,
+        "net_pl": net_pl,
+        "total_staked": total_staked,
+        "roi": roi,
+        "bands": bands,
+        "band_pl_sum": round(sum(b["pl"] for b in bands), 2),  # Must equal net_pl
+        "unclassified_bets": unclassified,  # Should always be empty
+    }
+
+
 def _get_historical_summary(exclude_date: str = None) -> dict:
     """Build cumulative performance summary from all historical sessions.
 
@@ -1179,6 +1267,27 @@ interface ChimeraReport {{
   }};
 }}
 
+=== PRE-COMPUTED AGGREGATIONS (AUTHORITATIVE — copy these values exactly) ===
+
+These figures were computed in Python directly from the settled bet records.
+You MUST use them verbatim for the matching fields — do NOT recompute from raw data.
+
+{computed_stats}
+
+Mapping to schema fields:
+  day_performance.slices[0] ("All Bets"):
+    total_bets    ← computed total_bets
+    wins          ← computed wins
+    losses        ← computed losses
+    strike_rate   ← computed strike_rate   (decimal, e.g. 0.816)
+    net_pl        ← computed net_pl        (GBP, e.g. 262.97)
+    total_staked  ← computed total_staked
+    roi           ← computed roi           (decimal)
+
+  odds_band_analysis.bands — use computed bands[] in order.
+    For each band: label, bets, wins, win_pct, pl, roi come from the computed values.
+    losses = bets - wins (compute inline).
+
 === DATA INPUTS ===
 
 TRADING DATE: {date}
@@ -1187,7 +1296,7 @@ REPORT DATE: {report_date}
 SESSION DATA (bets placed by the engine, with rule evaluations):
 {session_data}
 
-SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L):
+SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L — use for individual bet records and cross-referencing):
 {settled_data}
 
 HISTORICAL SESSIONS (all previous operating days — use for cumulative_performance):
@@ -1200,16 +1309,17 @@ ENGINE STATE:
 
 === INSTRUCTIONS ===
 
-1. Use SETTLED BETS data for actual WIN/LOSS outcomes and real P/L figures. Cross-reference by runner name and venue to match session bets with settled outcomes.
-2. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN (lay wins when horse loses) = +stake, LOSS (lay loses when horse wins) = -liability. For DRY RUN bets, you must still assign WIN/LOSS results based on the settled data if available.
-3. For cumulative_performance.by_day, include ALL historical operating days plus today.
-4. For cumulative_performance.by_band, aggregate across ALL days (historical + today).
-5. Strike rates and ROI are DECIMAL values (0.615 not 61.5, 0.266 not 26.6).
-6. P/L values are raw GBP numbers (use -5.60 not "-£5.60").
-7. Be precise with numbers — do not invent data. Only use the data provided.
-8. The day_number should be calculated from the historical data (count of unique operating dates + 1 for today).
-9. Include ALL bets that have a definitive outcome (WIN or LOSS) in the bets array. EXCLUDE any bets where the outcome cannot be determined — do NOT include VOID, NR, or unknown-result bets in any section (bets array, performance stats, odds band analysis, etc.). Only count bets with confirmed WIN/LOSS results.
-10. Output ONLY the JSON object. No backticks, no markdown fences, no explanatory text."""
+1. The PRE-COMPUTED AGGREGATIONS above are authoritative. Use them exactly for summary totals and band P&Ls. Do not recount or resum from raw data.
+2. Use SETTLED BETS data to populate the individual bets[] array (runner name, venue, odds, stake, liability, pl, result, band_label). Cross-reference by runner name and venue.
+3. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN = +stake, LOSS = -liability.
+4. For cumulative_performance.by_day, include ALL historical operating days plus today.
+5. For cumulative_performance.by_band, aggregate across ALL days (historical + today).
+6. Strike rates and ROI are DECIMAL values (0.615 not 61.5, 0.266 not 26.6).
+7. P/L values are raw GBP numbers (use -5.60 not "-£5.60").
+8. Be precise with numbers — do not invent data. Only use the data provided.
+9. The day_number should be calculated from the historical data (count of unique operating dates + 1 for today).
+10. Include ALL bets with WIN or LOSS outcome in the bets array. Exclude VOID, NR, or unknown-result bets from all sections.
+11. Output ONLY the JSON object. No backticks, no markdown fences, no explanatory text."""
 
 
 @app.get("/api/reports/templates")
@@ -1268,7 +1378,12 @@ def generate_report(req: GenerateReportRequest):
     # 3. Historical session data for cumulative performance
     historical_data = _get_historical_summary(exclude_date=req.date) if ds.get("historical_summary", True) else {}
 
-    # 4. Current engine state
+    # 4. Pre-compute authoritative aggregations from settled data
+    computed_stats = _compute_day_stats(settled_data) if settled_data else {
+        "note": "No settled data — aggregations unavailable; AI must estimate from session data"
+    }
+
+    # 5. Current engine state
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     mode = "DRY_RUN" if engine.dry_run else "LIVE"
@@ -1281,6 +1396,7 @@ def generate_report(req: GenerateReportRequest):
         rules_description=RULES_DESCRIPTION,
         date=req.date,
         report_date=now.strftime("%Y-%m-%d"),
+        computed_stats=json.dumps(computed_stats, indent=2, default=str),
         session_data=json.dumps(session_data, indent=2, default=str),
         settled_data=json.dumps(settled_data, indent=2, default=str) if settled_data else "[]  (No settled data available — use session data to calculate P/L)",
         historical_data=json.dumps(historical_data, indent=2, default=str),
