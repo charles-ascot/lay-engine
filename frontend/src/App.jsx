@@ -3680,8 +3680,8 @@ function ReportsTab() {
 
   const renderJsonReport = (data) => {
     if (!data) return ''
-    const fmtPL = (v) => v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}`
-    const fmtPct = (v) => `${(v * 100).toFixed(1)}%`
+    const fmtPL = (v) => { if (v == null || isNaN(v)) return '—'; return v >= 0 ? `+£${v.toFixed(2)}` : `−£${Math.abs(v).toFixed(2)}` }
+    const fmtPct = (v) => { if (v == null || isNaN(v)) return '—'; return `${(v * 100).toFixed(1)}%` }
     const fmtOdds = (v) => v?.toFixed(2) ?? '—'
     let h = ''
 
@@ -3750,7 +3750,7 @@ function ReportsTab() {
       h += '<table><thead><tr><th>Time</th><th>Runner</th><th>Venue</th><th>Market</th><th>Odds</th><th>Stake</th><th>Liability</th><th>P/L</th><th>Result</th><th>Band</th><th>Rule</th></tr></thead><tbody>'
       confirmedBets.forEach(b => {
         const resultClass = b.result === 'WIN' ? 'color:#16a34a' : b.result === 'LOSS' ? 'color:#dc2626' : ''
-        h += `<tr><td>${b.race_time || ''}</td><td>${b.selection}</td><td>${b.venue}</td><td>${b.market || ''}</td><td>${fmtOdds(b.odds)}</td><td>£${b.stake?.toFixed(2)}</td><td>£${b.liability?.toFixed(2)}</td><td>${fmtPL(b.pl)}</td><td style="${resultClass}"><strong>${b.result}</strong></td><td>${b.band_label || ''}</td><td>${b.rule || ''}</td></tr>`
+        h += `<tr><td>${b.race_time || ''}</td><td>${b.selection}</td><td>${b.venue}</td><td>${b.market || ''}</td><td>${fmtOdds(b.odds)}</td><td>${b.stake != null ? '£' + b.stake.toFixed(2) : '—'}</td><td>${b.liability != null ? '£' + b.liability.toFixed(2) : '—'}</td><td>${fmtPL(b.pl)}</td><td style="${resultClass}"><strong>${b.result}</strong></td><td>${b.band_label || ''}</td><td>${b.rule || ''}</td></tr>`
       })
       h += '</tbody></table>'
     }
