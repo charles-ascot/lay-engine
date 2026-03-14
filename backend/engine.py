@@ -54,6 +54,9 @@ REPORTS_FILE = Path(os.environ.get("REPORTS_FILE", "/tmp/chimera_reports.json"))
 # Dry-run snapshots file
 SNAPSHOTS_FILE = Path(os.environ.get("SNAPSHOTS_FILE", "/tmp/chimera_snapshots.json"))
 
+# Daily stats cache (authoritative P/L per date, built from settled bets when reports are generated)
+STATS_CACHE_FILE = Path(os.environ.get("STATS_CACHE_FILE", "/tmp/chimera_stats_cache.json"))
+
 # App settings file (recipients, data sources, AI capabilities)
 SETTINGS_FILE = Path(os.environ.get("SETTINGS_FILE", "/tmp/chimera_settings.json"))
 
@@ -150,6 +153,9 @@ class LayEngine:
         # ── Reports ──
         self.reports: list[dict] = []
 
+        # ── Daily stats cache: authoritative P/L per date, populated when reports are generated ──
+        self.daily_stats_cache: dict = {}  # date (YYYY-MM-DD) → _compute_day_stats output
+
         # ── Dry-run snapshots ──
         self.dry_run_snapshots: list[dict] = []
 
@@ -184,6 +190,7 @@ class LayEngine:
         self._load_reports()
         self._load_snapshots()
         self._load_settings()
+        self._load_stats_cache()
 
     # ──────────────────────────────────────────────
     #  STATE PERSISTENCE (Cloud Run survival)
@@ -499,6 +506,30 @@ class LayEngine:
             _gcs_write("chimera_settings.json", settings_json)
         except Exception as e:
             logger.warning(f"Failed to save settings: {e}")
+
+    def _load_stats_cache(self):
+        """Load daily stats cache from GCS (preferred) or disk."""
+        try:
+            raw = _gcs_read("chimera_stats_cache.json")
+            if raw:
+                self.daily_stats_cache = json.loads(raw)
+            elif STATS_CACHE_FILE.exists():
+                self.daily_stats_cache = json.loads(STATS_CACHE_FILE.read_text())
+            else:
+                self.daily_stats_cache = {}
+            logger.info(f"Loaded stats cache ({len(self.daily_stats_cache)} dates)")
+        except Exception as e:
+            logger.warning(f"Failed to load stats cache: {e}")
+            self.daily_stats_cache = {}
+
+    def _save_stats_cache(self):
+        """Persist daily stats cache to disk + GCS."""
+        try:
+            cache_json = json.dumps(self.daily_stats_cache, default=str)
+            STATS_CACHE_FILE.write_text(cache_json)
+            _gcs_write("chimera_stats_cache.json", cache_json)
+        except Exception as e:
+            logger.warning(f"Failed to save stats cache: {e}")
 
     def generate_api_key(self, label: str = "") -> dict:
         """Generate a new API key. Returns the full key (only shown once)."""
@@ -1029,6 +1060,7 @@ class LayEngine:
             **instruction.to_dict(),
             "venue": venue,
             "country": country,
+            "race_time": race_time,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "dry_run": False,
             "betfair_response": response,

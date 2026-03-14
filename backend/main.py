@@ -842,7 +842,7 @@ def _compute_day_stats(settled_bets: list[dict]) -> dict:
                 for b in BANDS}
     unclassified = []
     for b in settled:
-        odds = b.get("price_matched", 0)
+        odds = b.get("price_matched") or 0.0  # guard against None (Betfair returns null for unmatched)
         label = get_band_label(odds)
         if label not in band_acc:
             unclassified.append({"odds": odds, "bet_id": b.get("bet_id")})
@@ -900,7 +900,7 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
         if date not in days:
             days[date] = {
                 "date": date,
-                "bets": 0, "stake": 0, "liability": 0,
+                "bets": 0, "stake": 0.0, "liability": 0.0,
                 "sessions": 0,
             }
         days[date]["sessions"] += 1
@@ -908,13 +908,17 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
         for b in s.get("bets", []):
             if b.get("dry_run"):
                 continue
-            days[date]["bets"] += len(s.get("bets", []))
+            days[date]["bets"] += 1  # was incorrectly: += len(s.get("bets", []))
+            days[date]["stake"] = round(days[date]["stake"] + b.get("size", 0), 2)
+            days[date]["liability"] = round(days[date]["liability"] + b.get("liability", 0), 2)
 
-    # Also gather all session data compactly
+    # Also gather all session data compactly (LIVE sessions only)
     all_sessions = []
     for s in engine.sessions:
         date = s.get("date", "")
         if exclude_date and date == exclude_date:
+            continue
+        if s.get("mode") != "LIVE":
             continue
         all_sessions.append({
             "session_id": s["session_id"],
@@ -926,6 +930,15 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
             "total_liability": s.get("summary", {}).get("total_liability", 0),
             "countries": s.get("summary", {}).get("countries", []),
         })
+
+    # Merge in cached P/L stats (populated when reports are generated for each day)
+    for d in days.values():
+        cached = engine.daily_stats_cache.get(d["date"], {})
+        d["pl"] = cached.get("net_pl")          # None if not yet cached
+        d["wins"] = cached.get("wins", 0)
+        d["losses"] = cached.get("losses", 0)
+        d["strike_rate"] = cached.get("strike_rate", 0)
+        d["roi"] = cached.get("roi", 0)
 
     return {
         "total_sessions": len(all_sessions),
@@ -1367,42 +1380,54 @@ def generate_report(req: GenerateReportRequest):
             content={"status": "error", "message": "No matching sessions found"},
         )
 
-    ds = engine.settings.get("ai_data_sources", {})
+    try:
+        ds = engine.settings.get("ai_data_sources", {})
 
-    # 1. Compact session data (enriched with venue, country, market_id)
-    session_data = _compact_session_data(selected_sessions) if ds.get("session_data", True) else []
+        # 1. Compact session data (enriched with venue, country, market_id)
+        session_data = _compact_session_data(selected_sessions) if ds.get("session_data", True) else []
 
-    # 2. Settled bet data from Betfair (actual WIN/LOSS outcomes)
-    settled_data = _get_settled_for_date(req.date) if ds.get("settled_bets", True) else None
+        # 2. Settled bet data from Betfair (actual WIN/LOSS outcomes)
+        settled_data = _get_settled_for_date(req.date) if ds.get("settled_bets", True) else None
 
-    # 3. Historical session data for cumulative performance
-    historical_data = _get_historical_summary(exclude_date=req.date) if ds.get("historical_summary", True) else {}
+        # 3. Historical session data for cumulative performance
+        historical_data = _get_historical_summary(exclude_date=req.date) if ds.get("historical_summary", True) else {}
 
-    # 4. Pre-compute authoritative aggregations from settled data
-    computed_stats = _compute_day_stats(settled_data) if settled_data else {
-        "note": "No settled data — aggregations unavailable; AI must estimate from session data"
-    }
+        # 4. Pre-compute authoritative aggregations from settled data
+        computed_stats = _compute_day_stats(settled_data) if settled_data else {
+            "note": "No settled data — aggregations unavailable; AI must estimate from session data"
+        }
 
-    # 5. Current engine state
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    mode = "DRY_RUN" if engine.dry_run else "LIVE"
-    # Check mode from selected sessions — they may differ from current
-    session_modes = set(s.get("mode") for s in selected_sessions)
-    if session_modes:
-        mode = "LIVE" if "LIVE" in session_modes else "DRY_RUN"
+        # Cache today's stats for cumulative_performance in future reports
+        if computed_stats and "note" not in computed_stats:
+            engine.daily_stats_cache[req.date] = computed_stats
+            engine._save_stats_cache()
 
-    prompt = DAILY_REPORT_PROMPT.format(
-        rules_description=RULES_DESCRIPTION,
-        date=req.date,
-        report_date=now.strftime("%Y-%m-%d"),
-        computed_stats=json.dumps(computed_stats, indent=2, default=str),
-        session_data=json.dumps(session_data, indent=2, default=str),
-        settled_data=json.dumps(settled_data, indent=2, default=str) if settled_data else "[]  (No settled data available — use session data to calculate P/L)",
-        historical_data=json.dumps(historical_data, indent=2, default=str),
-        countries=", ".join(engine.countries),
-        mode=mode,
-    )
+        # 5. Current engine state
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        mode = "DRY_RUN" if engine.dry_run else "LIVE"
+        # Check mode from selected sessions — they may differ from current
+        session_modes = set(s.get("mode") for s in selected_sessions)
+        if session_modes:
+            mode = "LIVE" if "LIVE" in session_modes else "DRY_RUN"
+
+        prompt = DAILY_REPORT_PROMPT.format(
+            rules_description=RULES_DESCRIPTION,
+            date=req.date,
+            report_date=now.strftime("%Y-%m-%d"),
+            computed_stats=json.dumps(computed_stats, indent=2, default=str),
+            session_data=json.dumps(session_data, indent=2, default=str),
+            settled_data=json.dumps(settled_data, indent=2, default=str) if settled_data else "[]  (No settled data available — use session data to calculate P/L)",
+            historical_data=json.dumps(historical_data, indent=2, default=str),
+            countries=", ".join(engine.countries),
+            mode=mode,
+        )
+    except Exception as e:
+        logging.error(f"Report data preparation failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Report data preparation failed: {str(e)}"},
+        )
 
     try:
         client = get_anthropic()
