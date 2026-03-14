@@ -3514,6 +3514,7 @@ function ReportsTab() {
   const [sendingEmail, setSendingEmail] = useState(false)
   const [savingDrive, setSavingDrive] = useState(false)
   const [emailToast, setEmailToast] = useState('')
+  const [reportError, setReportError] = useState('')
   const reportContentRef = useRef(null)
 
   useEffect(() => {
@@ -3552,6 +3553,7 @@ function ReportsTab() {
     if (selectedSessionIds.length === 0) return
     setGenerating(true)
     setShowTemplateSelect(false)
+    setReportError('')
     try {
       const res = await api('/api/reports/generate', {
         method: 'POST',
@@ -3568,8 +3570,14 @@ function ReportsTab() {
           setEmailToast(`Report auto-sent to ${res.email_result.sent} recipient${res.email_result.sent !== 1 ? 's' : ''}`)
           setTimeout(() => setEmailToast(''), 4000)
         }
+      } else {
+        // Backend returned an error body — surface the message to the user
+        const msg = res.message || res.detail || 'Report generation failed — check server logs'
+        setReportError(msg)
+        console.error('Report generation error:', res)
       }
     } catch (e) {
+      setReportError(`Network error: ${e.message}`)
       console.error('Report generation failed:', e)
     }
     setGenerating(false)
@@ -3947,6 +3955,11 @@ function ReportsTab() {
                 >
                   {generating ? 'Generating...' : 'Generate Daily Report'}
                 </button>
+                {reportError && (
+                  <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(255,80,80,0.15)', border: '1px solid rgba(255,80,80,0.4)', borderRadius: 6, color: '#ff6b6b', fontSize: 13 }}>
+                    ⚠ {reportError}
+                  </div>
+                )}
               </>
             )}
           </div>
