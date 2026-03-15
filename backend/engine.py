@@ -23,6 +23,7 @@ from typing import Optional
 
 from betfair_client import BetfairClient
 from rules import Runner, apply_rules, RuleResult, check_spread
+from kelly import KellyConfig, calculate_kelly_stake
 
 logger = logging.getLogger("engine")
 
@@ -132,6 +133,9 @@ class LayEngine:
         self.mark_uplift_enabled: bool = False   # Mark Rule: 2.5–3.5 band stake uplift
         self.mark_uplift_stake: float = 3.0    # Mark Rule: uplift stake value (pts)
 
+        # ── Kelly Criterion ──
+        self.kelly_config: KellyConfig = KellyConfig()
+
         # ── Processing window ──
         self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
         self.monitoring: dict = {}      # market_id → list of odds snapshots
@@ -217,6 +221,12 @@ class LayEngine:
                 "mark_uplift_stake": self.mark_uplift_stake,
                 "point_value": self.point_value,
                 "process_window": self.process_window,
+                "kelly_enabled": self.kelly_config.enabled,
+                "kelly_fraction": self.kelly_config.fraction,
+                "kelly_bankroll": self.kelly_config.bankroll,
+                "kelly_edge_pct": self.kelly_config.edge_pct,
+                "kelly_min_stake": self.kelly_config.min_stake,
+                "kelly_max_stake": self.kelly_config.max_stake,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -289,6 +299,7 @@ class LayEngine:
             self.point_value = data.get("point_value", 1.0)
             self.process_window = data.get("process_window", PROCESS_WINDOW_MINUTES)
             self.balance = data.get("balance")
+            self.kelly_config = KellyConfig.from_dict(data)
 
             logger.info(
                 f"Restored state: {len(self.processed_markets)} processed markets, "
@@ -976,6 +987,15 @@ class LayEngine:
             for instruction in result.instructions:
                 instruction.size = round(instruction.size * self.point_value, 2)
 
+        # Apply Kelly Criterion sizing (replaces point-valued stake when enabled)
+        if self.kelly_config.enabled:
+            for instruction in result.instructions:
+                instruction.size = calculate_kelly_stake(
+                    lay_odds=instruction.price,
+                    config=self.kelly_config,
+                    base_stake=instruction.size,
+                )
+
         self.results.append(result.to_dict())
 
         if result.skipped:
@@ -1263,8 +1283,14 @@ class LayEngine:
             "mark_ceiling_enabled": self.mark_ceiling_enabled,
             "mark_floor_enabled": self.mark_floor_enabled,
             "mark_uplift_enabled": self.mark_uplift_enabled,
-                "mark_uplift_stake": self.mark_uplift_stake,
+            "mark_uplift_stake": self.mark_uplift_stake,
             "point_value": self.point_value,
+            "kelly_enabled": self.kelly_config.enabled,
+            "kelly_fraction": self.kelly_config.fraction,
+            "kelly_bankroll": self.kelly_config.bankroll,
+            "kelly_edge_pct": self.kelly_config.edge_pct,
+            "kelly_min_stake": self.kelly_config.min_stake,
+            "kelly_max_stake": self.kelly_config.max_stake,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,

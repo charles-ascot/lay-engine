@@ -400,6 +400,41 @@ def set_point_value(req: PointValueRequest):
     return {"point_value": engine.point_value}
 
 
+class KellyConfigRequest(BaseModel):
+    enabled: bool
+    fraction: float = 0.25
+    bankroll: float = 1000.0
+    edge_pct: float = 5.0
+    min_stake: float = 0.50
+    max_stake: float = 50.0
+
+
+@app.post("/api/engine/kelly")
+def set_kelly_config(req: KellyConfigRequest):
+    """Update Kelly Criterion config for the live engine."""
+    from kelly import KellyConfig as _KellyConfig
+    if not (0.05 <= req.fraction <= 1.0):
+        raise HTTPException(status_code=400, detail="fraction must be 0.05–1.0")
+    if req.bankroll < 10 or req.bankroll > 1_000_000:
+        raise HTTPException(status_code=400, detail="bankroll must be £10–£1,000,000")
+    if not (0.0 <= req.edge_pct <= 50.0):
+        raise HTTPException(status_code=400, detail="edge_pct must be 0–50 %")
+    if req.min_stake < 0.10:
+        raise HTTPException(status_code=400, detail="min_stake must be ≥ £0.10")
+    if req.max_stake > 10_000:
+        raise HTTPException(status_code=400, detail="max_stake must be ≤ £10,000")
+    engine.kelly_config = _KellyConfig(
+        enabled=req.enabled,
+        fraction=req.fraction,
+        bankroll=req.bankroll,
+        edge_pct=req.edge_pct,
+        min_stake=req.min_stake,
+        max_stake=req.max_stake,
+    )
+    engine._save_state()
+    return {"kelly": engine.kelly_config.to_dict()}
+
+
 @app.get("/api/engine/spread-rejections")
 def get_spread_rejections():
     """Return recent spread control rejections for today."""
@@ -507,6 +542,138 @@ def get_snapshot(snapshot_id: str):
         if s["snapshot_id"] == snapshot_id:
             return s
     raise HTTPException(status_code=404, detail="Snapshot not found")
+
+
+@app.post("/api/snapshots/{snapshot_id}/archive")
+def archive_snapshot(snapshot_id: str):
+    """Toggle the archived flag on a dry-run snapshot."""
+    from datetime import datetime as _dt
+    for s in engine.dry_run_snapshots:
+        if s["snapshot_id"] == snapshot_id:
+            s["archived"] = not s.get("archived", False)
+            s["archived_at"] = _dt.utcnow().isoformat() if s["archived"] else None
+            engine._save_snapshots()
+            return {"snapshot_id": snapshot_id, "archived": s["archived"]}
+    raise HTTPException(status_code=404, detail="Snapshot not found")
+
+
+@app.get("/api/snapshots/{snapshot_id}/export")
+def export_snapshot(snapshot_id: str):
+    """Download the full snapshot as a JSON file attachment."""
+    import json as _json
+    from fastapi.responses import Response as _Resp
+    for s in engine.dry_run_snapshots:
+        if s["snapshot_id"] == snapshot_id:
+            content = _json.dumps(s, indent=2, default=str)
+            ts = (s.get("created_at", "")[:10] or snapshot_id)
+            return _Resp(
+                content=content,
+                media_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="chimera_dryrun_{ts}.json"'},
+            )
+    raise HTTPException(status_code=404, detail="Snapshot not found")
+
+
+@app.get("/api/data-registry")
+def get_data_registry():
+    """Return a full inventory of all CHIMERA data records with their GCS/local storage locations."""
+    from collections import defaultdict as _dd
+
+    date_map = _dd(lambda: {
+        "date": "",
+        "sessions": [],
+        "dry_run_snapshots": [],
+        "reports": [],
+        "has_backtest": False,
+    })
+
+    # Sessions
+    for s in engine.sessions:
+        d = s.get("date", "unknown")
+        date_map[d]["date"] = d
+        date_map[d]["sessions"].append({
+            "session_id": s["session_id"],
+            "mode": s.get("mode", "LIVE"),
+            "status": s.get("status", ""),
+            "start_time": s.get("start_time", ""),
+            "stop_time": s.get("stop_time", ""),
+            "total_bets": s.get("summary", {}).get("total_bets", 0),
+            "total_stake": s.get("summary", {}).get("total_stake", 0),
+        })
+
+    # Dry-run snapshots
+    for s in engine.dry_run_snapshots:
+        created = s.get("created_at", "")
+        d = created[:10] if created else "unknown"
+        date_map[d]["date"] = d
+        date_map[d]["dry_run_snapshots"].append({
+            "snapshot_id": s["snapshot_id"],
+            "created_at": created,
+            "markets_evaluated": s.get("markets_evaluated", 0),
+            "bets_would_place": s.get("bets_would_place", 0),
+            "total_stake": s.get("total_stake", 0),
+            "archived": s.get("archived", False),
+        })
+
+    # Reports
+    for r in engine.reports:
+        d = r.get("date") or (r.get("created_at", "")[:10])
+        date_map[d]["date"] = d
+        date_map[d]["reports"].append({
+            "report_id": r["report_id"],
+            "title": r.get("title", ""),
+            "created_at": r.get("created_at", ""),
+            "template": r.get("template_name", ""),
+        })
+
+    sorted_entries = sorted(
+        [v for v in date_map.values() if v["date"]],
+        key=lambda x: x["date"],
+        reverse=True,
+    )
+
+    storage_locations = {
+        "sessions": {
+            "gcs": "gs://chimera-v4/chimera_sessions.json",
+            "local": "/tmp/chimera_sessions.json",
+            "description": "All session records (LIVE + DRY RUN) with full bet histories",
+        },
+        "engine_state": {
+            "gcs": "gs://chimera-v4/chimera_engine_state.json",
+            "local": "/tmp/chimera_engine_state.json",
+            "description": "Current engine state — today's markets, results, settings",
+        },
+        "reports": {
+            "gcs": "gs://chimera-v4/chimera_reports.json",
+            "local": "/tmp/chimera_reports.json",
+            "description": "All AI-generated daily performance reports",
+        },
+        "snapshots": {
+            "gcs": "gs://chimera-v4/chimera_snapshots.json",
+            "local": "/tmp/chimera_snapshots.json",
+            "description": "All dry-run snapshots (90-day retention policy)",
+        },
+        "stats_cache": {
+            "gcs": "gs://chimera-v4/chimera_stats_cache.json",
+            "local": "/tmp/chimera_stats_cache.json",
+            "description": "Pre-computed daily P&L statistics cache",
+        },
+        "settings": {
+            "gcs": "gs://chimera-v4/chimera_settings.json",
+            "local": "/tmp/chimera_settings.json",
+            "description": "Application settings — recipients, AI capabilities",
+        },
+    }
+
+    return {
+        "entries": sorted_entries,
+        "total_sessions": sum(len(e["sessions"]) for e in sorted_entries),
+        "total_snapshots": sum(len(e["dry_run_snapshots"]) for e in sorted_entries),
+        "total_reports": sum(len(e["reports"]) for e in sorted_entries),
+        "storage_locations": storage_locations,
+        "earliest_date": sorted_entries[-1]["date"] if sorted_entries else None,
+        "latest_date": sorted_entries[0]["date"] if sorted_entries else None,
+    }
 
 
 # ──────────────────────────────────────────────
@@ -2097,6 +2264,13 @@ class BacktestRunRequest(BaseModel):
     odds_agent_interval_mins: int = 5   # sample interval in minutes (1, 2, 5, 10)
     odds_agent_lookback_mins: int = 30  # how far back to sample (15, 30, 60, 120)
     odds_agent_overrule_confidence: float = 0.65
+    # Kelly Criterion stake sizing (works in both backtest and live)
+    kelly_enabled: bool = False
+    kelly_fraction: float = 0.25        # 0.25 = quarter Kelly (recommended)
+    kelly_bankroll: float = 1000.0      # total bankroll £
+    kelly_edge_pct: float = 5.0         # assumed edge % over market-implied probability
+    kelly_min_stake: float = 0.50       # stake floor £
+    kelly_max_stake: float = 50.0       # stake ceiling £
 
 
 @app.get("/api/backtest/dates")
@@ -2286,6 +2460,24 @@ def _backtest_run_inner(req):
         if req.point_value != 1.0:
             for instr in rule_result.instructions:
                 instr.size = round(instr.size * req.point_value, 2)
+
+        # Apply Kelly Criterion sizing (replaces point-valued stake when enabled)
+        if req.kelly_enabled:
+            from kelly import KellyConfig as _KC, calculate_kelly_stake as _cks
+            _kelly_cfg = _KC(
+                enabled=True,
+                fraction=req.kelly_fraction,
+                bankroll=req.kelly_bankroll,
+                edge_pct=req.kelly_edge_pct,
+                min_stake=req.kelly_min_stake,
+                max_stake=req.kelly_max_stake,
+            )
+            for instr in rule_result.instructions:
+                instr.size = _cks(
+                    lay_odds=instr.price,
+                    config=_kelly_cfg,
+                    base_stake=instr.size,
+                )
 
         # ── AI Research Agent overlay (backtest-only) ──────────────────────
         # Runs AFTER the strategy has decided to bet, BEFORE settlement lookup.

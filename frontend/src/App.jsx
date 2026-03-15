@@ -1008,7 +1008,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -1166,6 +1166,102 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
         </div>
       </div>
 
+      {/* Kelly Criterion */}
+      <div className="engine-section">
+        <h3>Kelly Criterion</h3>
+        <div className="engine-row">
+          <span className="engine-label">Kelly Criterion:</span>
+          <button
+            className={`btn-toggle ${state.kelly_enabled ? 'active' : ''}`}
+            onClick={() => onSetKelly({ enabled: !state.kelly_enabled })}
+            title="Size stakes using the Kelly Criterion — mathematically optimal bankroll allocation"
+          >
+            {state.kelly_enabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        {state.kelly_enabled && (
+          <div className="engine-row" style={{ flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
+            <label className="engine-label" style={{ gap: 6 }}>
+              Fraction:
+              <select
+                className="select-small"
+                value={state.kelly_fraction || 0.25}
+                onChange={e => onSetKelly({ fraction: parseFloat(e.target.value) })}
+                title="Quarter Kelly is strongly recommended to reduce variance"
+              >
+                <option value={0.25}>¼ Kelly (recommended)</option>
+                <option value={0.5}>½ Kelly</option>
+                <option value={1.0}>Full Kelly</option>
+              </select>
+            </label>
+            <label className="engine-label" style={{ gap: 6 }}>
+              Bankroll £:
+              <input
+                type="number"
+                className="select-small"
+                style={{ width: 90 }}
+                value={state.kelly_bankroll || 1000}
+                min={10}
+                max={1000000}
+                step={100}
+                onChange={e => onSetKelly({ bankroll: parseFloat(e.target.value) })}
+                title="Your total betting bankroll in £"
+              />
+            </label>
+            <label className="engine-label" style={{ gap: 6 }}>
+              Edge %:
+              <input
+                type="number"
+                className="select-small"
+                style={{ width: 70 }}
+                value={state.kelly_edge_pct || 5}
+                min={0}
+                max={50}
+                step={0.5}
+                onChange={e => onSetKelly({ edge_pct: parseFloat(e.target.value) })}
+                title="Your estimated edge over the market-implied probability (5% is a reasonable starting point)"
+              />
+            </label>
+            <label className="engine-label" style={{ gap: 6 }}>
+              Min stake £:
+              <input
+                type="number"
+                className="select-small"
+                style={{ width: 70 }}
+                value={state.kelly_min_stake || 0.5}
+                min={0.1}
+                max={100}
+                step={0.1}
+                onChange={e => onSetKelly({ min_stake: parseFloat(e.target.value) })}
+                title="Kelly stake will never go below this floor"
+              />
+            </label>
+            <label className="engine-label" style={{ gap: 6 }}>
+              Max stake £:
+              <input
+                type="number"
+                className="select-small"
+                style={{ width: 80 }}
+                value={state.kelly_max_stake || 50}
+                min={1}
+                max={10000}
+                step={1}
+                onChange={e => onSetKelly({ max_stake: parseFloat(e.target.value) })}
+                title="Kelly stake will never exceed this ceiling"
+              />
+            </label>
+          </div>
+        )}
+        {state.kelly_enabled && (
+          <div className="engine-info" style={{ marginTop: 6 }}>
+            <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+              Replaces the strategy's fixed stake with a bankroll-proportional Kelly stake.
+              Quarter Kelly is recommended — full Kelly maximises long-run growth but incurs large swings.
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* Confirm Settings */}
       <div className="engine-section bet-settings-confirm">
         <h3>Confirm Settings</h3>
@@ -1228,6 +1324,12 @@ function BacktestTab() {
   const [oddsAgentEnabled, setOddsAgentEnabled] = useState(false)
   const [oddsAgentInterval, setOddsAgentInterval] = useState(5)
   const [oddsAgentLookback, setOddsAgentLookback] = useState(30)
+  const [kellyEnabled, setKellyEnabled] = useState(false)
+  const [kellyFraction, setKellyFraction] = useState(0.25)
+  const [kellyBankroll, setKellyBankroll] = useState(1000)
+  const [kellyEdgePct, setKellyEdgePct] = useState(5)
+  const [kellyMinStake, setKellyMinStake] = useState(0.5)
+  const [kellyMaxStake, setKellyMaxStake] = useState(50)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1333,6 +1435,12 @@ function BacktestTab() {
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
           odds_agent_lookback_mins: oddsAgentLookback,
+          kelly_enabled: kellyEnabled,
+          kelly_fraction: kellyFraction,
+          kelly_bankroll: kellyBankroll,
+          kelly_edge_pct: kellyEdgePct,
+          kelly_min_stake: kellyMinStake,
+          kelly_max_stake: kellyMaxStake,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1358,6 +1466,12 @@ function BacktestTab() {
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
           odds_agent_lookback_mins: oddsAgentLookback,
+          kelly_enabled: kellyEnabled,
+          kelly_fraction: kellyFraction,
+          kelly_bankroll: kellyBankroll,
+          kelly_edge_pct: kellyEdgePct,
+          kelly_min_stake: kellyMinStake,
+          kelly_max_stake: kellyMaxStake,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1507,6 +1621,12 @@ function BacktestTab() {
             mark_uplift_stake: markUpliftStake,
             point_value: pointValue,
             market_ids: [],
+            kelly_enabled: kellyEnabled,
+            kelly_fraction: kellyFraction,
+            kelly_bankroll: kellyBankroll,
+            kelly_edge_pct: kellyEdgePct,
+            kelly_min_stake: kellyMinStake,
+            kelly_max_stake: kellyMaxStake,
           }),
         })
         if (!r.ok) throw new Error(`${r.status}`)
@@ -1819,6 +1939,82 @@ function BacktestTab() {
             )}
             <span style={{ fontSize: 11, color: '#8a8a9a', lineHeight: 1.4 }}>
               Samples historical odds at intervals and analyses drift/steam before influencing the bet. No internet required.
+            </span>
+          </div>
+
+          {/* Kelly Criterion toggle */}
+          <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(22,163,74,0.07)', borderRadius: 6, border: '1px solid rgba(22,163,74,0.25)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label className="bt-toggle-label" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={kellyEnabled}
+                onChange={e => setKellyEnabled(e.target.checked)}
+              />
+              <span style={{ color: '#16a34a', fontWeight: 600 }}>Kelly Criterion</span>
+            </label>
+            {kellyEnabled && (
+              <>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Fraction
+                  <select
+                    className="select-small"
+                    value={kellyFraction}
+                    onChange={e => setKellyFraction(parseFloat(e.target.value))}
+                    style={{ marginLeft: 4, width: 130 }}
+                  >
+                    <option value={0.25}>¼ Kelly (recommended)</option>
+                    <option value={0.5}>½ Kelly</option>
+                    <option value={1.0}>Full Kelly</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Bankroll £
+                  <input
+                    type="number"
+                    className="select-small"
+                    style={{ marginLeft: 4, width: 80 }}
+                    value={kellyBankroll}
+                    min={10} max={1000000} step={100}
+                    onChange={e => setKellyBankroll(parseFloat(e.target.value))}
+                  />
+                </label>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Edge %
+                  <input
+                    type="number"
+                    className="select-small"
+                    style={{ marginLeft: 4, width: 60 }}
+                    value={kellyEdgePct}
+                    min={0} max={50} step={0.5}
+                    onChange={e => setKellyEdgePct(parseFloat(e.target.value))}
+                  />
+                </label>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Min £
+                  <input
+                    type="number"
+                    className="select-small"
+                    style={{ marginLeft: 4, width: 60 }}
+                    value={kellyMinStake}
+                    min={0.1} max={100} step={0.1}
+                    onChange={e => setKellyMinStake(parseFloat(e.target.value))}
+                  />
+                </label>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Max £
+                  <input
+                    type="number"
+                    className="select-small"
+                    style={{ marginLeft: 4, width: 70 }}
+                    value={kellyMaxStake}
+                    min={1} max={10000} step={1}
+                    onChange={e => setKellyMaxStake(parseFloat(e.target.value))}
+                  />
+                </label>
+              </>
+            )}
+            <span style={{ fontSize: 11, color: '#8a8a9a', lineHeight: 1.4 }}>
+              Replaces fixed rule stakes with bankroll-proportional Kelly sizing. Quarter Kelly recommended.
             </span>
           </div>
         </div>
@@ -2498,6 +2694,39 @@ const formatDateHeader = (dateStr) => {
 }
 
 // ── History Tab (Sessions + Matched + Settled) ──
+// ── Collapsible month helpers ──
+function groupByMonth(items, getDate) {
+  const groups = {}
+  items.forEach(item => {
+    const d = getDate(item)
+    const month = d ? d.slice(0, 7) : 'unknown'
+    if (!groups[month]) groups[month] = []
+    groups[month].push(item)
+  })
+  return groups
+}
+
+function formatMonthLabel(ym) {
+  if (!ym || ym === 'unknown') return 'Unknown Date'
+  const [y, m] = ym.split('-')
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  return `${months[parseInt(m, 10) - 1]} ${y}`
+}
+
+function CollapsibleMonth({ label, count, countLabel = 'item', defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="collapsible-month">
+      <div className="collapsible-month-header" onClick={() => setOpen(o => !o)}>
+        <span className="collapse-arrow">{open ? '▾' : '▸'}</span>
+        <span className="collapse-label">{label}</span>
+        <span className="collapse-count">{count} {countLabel}{count !== 1 ? 's' : ''}</span>
+      </div>
+      {open && <div className="collapsible-month-body">{children}</div>}
+    </div>
+  )
+}
+
 function HistoryTab({ openChat }) {
   const [subTab, setSubTab] = useState('sessions')
   return (
@@ -2665,13 +2894,20 @@ function SessionsTab({ openChat }) {
     )
   }
 
-  // Group sessions by date
+  // Group sessions by date then by month
   const grouped = {}
   sessions.forEach(s => {
     if (!grouped[s.date]) grouped[s.date] = []
     grouped[s.date].push(s)
   })
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+  const monthMap = {}
+  sortedDates.forEach(date => {
+    const month = date.slice(0, 7)
+    if (!monthMap[month]) monthMap[month] = []
+    monthMap[month].push(date)
+  })
+  const sortedMonths = Object.keys(monthMap).sort((a, b) => b.localeCompare(a))
 
   const getSessionCountries = (s) => {
     const countries = s.countries || s.summary?.countries || []
@@ -2699,7 +2935,15 @@ function SessionsTab({ openChat }) {
         <p className="empty">No sessions recorded yet. Start the engine to create one.</p>
       ) : (
         <div className="snapshots-grouped">
-          {sortedDates.map(date => (
+          {sortedMonths.map((month, mi) => (
+            <CollapsibleMonth
+              key={month}
+              label={formatMonthLabel(month)}
+              count={monthMap[month].reduce((sum, d) => sum + grouped[d].length, 0)}
+              countLabel="session"
+              defaultOpen={mi === 0}
+            >
+          {monthMap[month].map(date => (
             <div key={date} className="snapshots-date-group">
               <div className="snapshots-date-header">
                 <span className="snapshots-date-label">{formatDateHeader(date)}</span>
@@ -2747,6 +2991,8 @@ function SessionsTab({ openChat }) {
                 })}
               </div>
             </div>
+          ))}
+            </CollapsibleMonth>
           ))}
         </div>
       )}
@@ -3043,58 +3289,72 @@ function MatchedTab() {
             </tbody>
           </table>
 
-          {Object.entries(data.bets_by_date).map(([date, bets]) => {
-            const dayStake = bets.reduce((s, b) => s + (b.size || 0), 0)
-            const dayLiability = bets.reduce((s, b) => s + (b.liability || 0), 0)
-            return (
-              <div key={date} className="matched-date-group">
-                <div className="matched-date-header" onClick={() => toggleDay(date)}>
-                  <span className="matched-date-label">
-                    {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
-                  </span>
-                  <span className="matched-date-stats">
-                    <span>{bets.length} bet{bets.length !== 1 ? 's' : ''}</span>
-                    <span>£<strong>{dayStake.toFixed(2)}</strong> staked</span>
-                    <span>£<strong>{dayLiability.toFixed(2)}</strong> liability</span>
-                  </span>
-                </div>
-                {!collapsedDays.has(date) && (
-                  <div className="matched-bet-list">
-                    {bets.map((b, i) => {
-                      const key = `${date}-${i}`
-                      return (
-                        <div key={key} className="matched-bet-row" onClick={() => toggleBet(key)}>
-                          <div className="matched-bet-summary">
-                            <span className="matched-bet-time">
-                              {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            <span className="matched-bet-runner">{b.runner_name}</span>
-                            <span className="cell-lay-odds">{b.price?.toFixed(2)}</span>
-                            <span>£{b.size?.toFixed(2)}</span>
-                            <span className="matched-bet-liability">£{b.liability?.toFixed(2)}</span>
-                            <code>{b.rule_applied}</code>
-                            <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
-                              {b.betfair_response?.status || '?'}
-                            </span>
-                          </div>
-                          {expandedBets.has(key) && (
-                            <div className="matched-bet-detail">
-                              <span>Bet ID: <code>{b.betfair_response?.bet_id || '—'}</code></span>
-                              <span>Matched: £{b.betfair_response?.size_matched?.toFixed(2) || '—'}</span>
-                              <span>Avg Price: {b.betfair_response?.avg_price_matched?.toFixed(2) || '—'}</span>
-                              <span>Market: <code>{b.market_id}</code></span>
-                              <span>Venue: {b.venue || '—'}</span>
-                              <span>Country: {b.country || '—'}</span>
-                            </div>
-                          )}
+          {(() => {
+            const allDates = Object.keys(data.bets_by_date).sort((a, b) => b.localeCompare(a))
+            const byMonth = groupByMonth(allDates, d => d)
+            const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a))
+            return sortedMonths.map((month, mi) => {
+              const monthDates = byMonth[month]
+              const monthBets = monthDates.reduce((sum, d) => sum + (data.bets_by_date[d]?.length || 0), 0)
+              return (
+                <CollapsibleMonth key={month} label={formatMonthLabel(month)} count={monthBets} countLabel="bet" defaultOpen={mi === 0}>
+                  {monthDates.map(date => {
+                    const bets = data.bets_by_date[date]
+                    const dayStake = bets.reduce((s, b) => s + (b.size || 0), 0)
+                    const dayLiability = bets.reduce((s, b) => s + (b.liability || 0), 0)
+                    return (
+                      <div key={date} className="matched-date-group">
+                        <div className="matched-date-header" onClick={() => toggleDay(date)}>
+                          <span className="matched-date-label">
+                            {collapsedDays.has(date) ? '▸' : '▾'} {formatDateHeader(date)}
+                          </span>
+                          <span className="matched-date-stats">
+                            <span>{bets.length} bet{bets.length !== 1 ? 's' : ''}</span>
+                            <span>£<strong>{dayStake.toFixed(2)}</strong> staked</span>
+                            <span>£<strong>{dayLiability.toFixed(2)}</strong> liability</span>
+                          </span>
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                        {!collapsedDays.has(date) && (
+                          <div className="matched-bet-list">
+                            {bets.map((b, i) => {
+                              const key = `${date}-${i}`
+                              return (
+                                <div key={key} className="matched-bet-row" onClick={() => toggleBet(key)}>
+                                  <div className="matched-bet-summary">
+                                    <span className="matched-bet-time">
+                                      {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                    <span className="matched-bet-runner">{b.runner_name}</span>
+                                    <span className="cell-lay-odds">{b.price?.toFixed(2)}</span>
+                                    <span>£{b.size?.toFixed(2)}</span>
+                                    <span className="matched-bet-liability">£{b.liability?.toFixed(2)}</span>
+                                    <code>{b.rule_applied}</code>
+                                    <span className={`status-${b.betfair_response?.status?.toLowerCase()}`}>
+                                      {b.betfair_response?.status || '?'}
+                                    </span>
+                                  </div>
+                                  {expandedBets.has(key) && (
+                                    <div className="matched-bet-detail">
+                                      <span>Bet ID: <code>{b.betfair_response?.bet_id || '—'}</code></span>
+                                      <span>Matched: £{b.betfair_response?.size_matched?.toFixed(2) || '—'}</span>
+                                      <span>Avg Price: {b.betfair_response?.avg_price_matched?.toFixed(2) || '—'}</span>
+                                      <span>Market: <code>{b.market_id}</code></span>
+                                      <span>Venue: {b.venue || '—'}</span>
+                                      <span>Country: {b.country || '—'}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </CollapsibleMonth>
+              )
+            })
+          })()}
         </div>
       )}
     </div>
@@ -3223,7 +3483,18 @@ function SettledTab({ openChat }) {
 
       {!loading && data && data.days && (
         <div className="settled-grouped">
-          {Object.entries(data.days).map(([date, dayData]) => {
+          {(() => {
+            const allDates = Object.keys(data.days).sort((a, b) => b.localeCompare(a))
+            const byMonth = groupByMonth(allDates, d => d)
+            const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a))
+            return sortedMonths.map((month, mi) => {
+              const monthDates = byMonth[month]
+              const monthBets = monthDates.reduce((sum, d) => sum + (getFilteredBets(data.days[d]?.bets || []).length), 0)
+              if (monthBets === 0) return null
+              return (
+                <CollapsibleMonth key={month} label={formatMonthLabel(month)} count={monthBets} countLabel="bet" defaultOpen={mi === 0}>
+                  {monthDates.map(date => {
+            const dayData = data.days[date]
             const filteredBets = getFilteredBets(dayData.bets)
             if (filteredBets.length === 0) return null
 
@@ -3280,6 +3551,10 @@ function SettledTab({ openChat }) {
               </div>
             )
           })}
+                </CollapsibleMonth>
+              )
+            })
+          })()}
         </div>
       )}
     </div>
@@ -3649,10 +3924,43 @@ function ReportsTab() {
   const [reportError, setReportError] = useState('')
   const reportContentRef = useRef(null)
 
+  // Data Registry & Dry Run Archive state
+  const [registry, setRegistry] = useState(null)
+  const [registryLoading, setRegistryLoading] = useState(false)
+  const [snapshots, setSnapshots] = useState([])
+  const [archivingId, setArchivingId] = useState(null)
+  const [activeSection, setActiveSection] = useState('reports') // 'reports' | 'dryrun' | 'registry'
+
   useEffect(() => {
     api('/api/reports/templates').then(data => setTemplates(data.templates || []))
     fetchReports()
+    fetchSnapshots()
+    fetchRegistry()
   }, [])
+
+  const fetchRegistry = () => {
+    setRegistryLoading(true)
+    api('/api/data-registry')
+      .then(data => { setRegistry(data); setRegistryLoading(false) })
+      .catch(() => setRegistryLoading(false))
+  }
+
+  const fetchSnapshots = () => {
+    api('/api/snapshots').then(data => setSnapshots(data.snapshots || []))
+  }
+
+  const handleArchiveSnapshot = async (snapshotId) => {
+    setArchivingId(snapshotId)
+    await api(`/api/snapshots/${snapshotId}/archive`, { method: 'POST' })
+    fetchSnapshots()
+    fetchRegistry()
+    setArchivingId(null)
+  }
+
+  const handleDownloadSnapshot = (snapshotId, createdAt) => {
+    const ts = createdAt ? createdAt.slice(0, 10) : snapshotId
+    window.open(`${API}/api/snapshots/${snapshotId}/export`, '_blank')
+  }
 
   const fetchReports = () => {
     api('/api/reports').then(data => setReports(data.reports || []))
@@ -4098,33 +4406,218 @@ function ReportsTab() {
         )}
       </div>
 
-      <div className="report-list-section">
-        <h3>Generated Reports</h3>
-        {reports.length === 0 ? (
-          <p className="empty">No reports generated yet. Select a date and sessions above to create one.</p>
-        ) : (
-          <div className="report-list">
-            {reports.map(r => (
-              <div key={r.report_id} className="card report-card">
-                <div className="report-card-info">
-                  <strong>{r.title}</strong>
-                  <span className="report-card-meta">
-                    {r.template_name} · {new Date(r.created_at).toLocaleString()} · {r.session_ids?.length || 0} session{(r.session_ids?.length || 0) !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="report-card-actions">
-                  <button className="btn btn-secondary btn-sm" onClick={() => handleViewReport(r.report_id)}>
-                    View
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={() => handleDeleteReport(r.report_id)}>
-                    Delete
-                  </button>
+      {/* ── Section Nav ── */}
+      <div className="report-section-nav">
+        {[
+          { id: 'reports', label: '📄 Generated Reports', count: reports.length },
+          { id: 'dryrun',  label: '🧪 Dry Run Archive',  count: snapshots.length },
+          { id: 'registry',label: '🗂 Data Registry',    count: registry?.entries?.length || 0 },
+        ].map(s => (
+          <button
+            key={s.id}
+            className={`report-section-btn ${activeSection === s.id ? 'active' : ''}`}
+            onClick={() => setActiveSection(s.id)}
+          >
+            {s.label}
+            <span className="report-section-count">{s.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Generated Reports ── */}
+      {activeSection === 'reports' && (
+        <div className="report-list-section">
+          {reports.length === 0 ? (
+            <p className="empty">No reports generated yet. Select a date and sessions above to create one.</p>
+          ) : (
+            <div className="report-list">
+              {(() => {
+                const byMonth = groupByMonth(reports, r => r.created_at?.slice(0, 10) || '')
+                const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a))
+                return sortedMonths.map((month, mi) => (
+                  <CollapsibleMonth key={month} label={formatMonthLabel(month)} count={byMonth[month].length} countLabel="report" defaultOpen={mi === 0}>
+                    {byMonth[month].map(r => (
+                      <div key={r.report_id} className="card report-card">
+                        <div className="report-card-info">
+                          <strong>{r.title}</strong>
+                          <span className="report-card-meta">
+                            {r.template_name} · {new Date(r.created_at).toLocaleString()} · {r.session_ids?.length || 0} session{(r.session_ids?.length || 0) !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="report-card-actions">
+                          <button className="btn btn-secondary btn-sm" onClick={() => handleViewReport(r.report_id)}>View</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => handleDeleteReport(r.report_id)}>Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </CollapsibleMonth>
+                ))
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Dry Run Archive ── */}
+      {activeSection === 'dryrun' && (
+        <div className="dryrun-archive-section">
+          {snapshots.length === 0 ? (
+            <p className="empty">No dry-run snapshots recorded yet.</p>
+          ) : (
+            <div className="dryrun-archive-list">
+              {(() => {
+                const byMonth = groupByMonth(snapshots, s => s.created_at?.slice(0, 10) || '')
+                const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a))
+                return sortedMonths.map((month, mi) => (
+                  <CollapsibleMonth key={month} label={formatMonthLabel(month)} count={byMonth[month].length} countLabel="snapshot" defaultOpen={mi === 0}>
+                    {byMonth[month].map(s => (
+                      <div key={s.snapshot_id} className={`card dryrun-archive-card ${s.archived ? 'archived' : ''}`}>
+                        <div className="dryrun-archive-info">
+                          <div className="dryrun-archive-meta">
+                            <span className="dryrun-archive-date">
+                              {new Date(s.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                            </span>
+                            {s.archived && <span className="badge badge-archived">Archived</span>}
+                          </div>
+                          <div className="dryrun-archive-stats">
+                            <span>Markets: <strong>{s.markets_evaluated}</strong></span>
+                            <span>Would place: <strong>{s.bets_would_place}</strong></span>
+                            <span>Stake: <strong>£{(s.total_stake || 0).toFixed(2)}</strong></span>
+                            <span>Liability: <strong>£{(s.total_liability || 0).toFixed(2)}</strong></span>
+                          </div>
+                        </div>
+                        <div className="dryrun-archive-actions">
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleDownloadSnapshot(s.snapshot_id, s.created_at)}
+                            title="Download as JSON"
+                          >
+                            ⬇ Download
+                          </button>
+                          <button
+                            className={`btn btn-sm ${s.archived ? 'btn-secondary' : 'btn-warning'}`}
+                            onClick={() => handleArchiveSnapshot(s.snapshot_id)}
+                            disabled={archivingId === s.snapshot_id}
+                            title={s.archived ? 'Unarchive' : 'Archive'}
+                          >
+                            {archivingId === s.snapshot_id ? '...' : s.archived ? '↩ Unarchive' : '📦 Archive'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </CollapsibleMonth>
+                ))
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Data Registry ── */}
+      {activeSection === 'registry' && (
+        <div className="registry-section">
+          {registryLoading ? (
+            <p className="empty">Loading data registry...</p>
+          ) : !registry ? (
+            <p className="empty">Unable to load registry.</p>
+          ) : (
+            <>
+              {/* Storage Locations */}
+              <div className="registry-storage">
+                <h3>Storage Locations</h3>
+                <div className="registry-storage-grid">
+                  {Object.entries(registry.storage_locations || {}).map(([key, loc]) => (
+                    <div key={key} className="registry-storage-card">
+                      <div className="registry-storage-key">{key.replace(/_/g, ' ').toUpperCase()}</div>
+                      <div className="registry-storage-desc">{loc.description}</div>
+                      <div className="registry-storage-paths">
+                        <span className="registry-path gcs" title="Google Cloud Storage">☁ {loc.gcs}</span>
+                        <span className="registry-path local" title="Cloud Run local">💾 {loc.local}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+
+              {/* Per-day record inventory */}
+              <div className="registry-entries">
+                <h3>
+                  Record Inventory
+                  <span className="registry-totals">
+                    {registry.total_sessions} sessions · {registry.total_snapshots} dry runs · {registry.total_reports} reports
+                    {registry.earliest_date && ` · from ${registry.earliest_date}`}
+                  </span>
+                </h3>
+                {registry.entries.length === 0 ? (
+                  <p className="empty">No records found.</p>
+                ) : (
+                  <div className="registry-table-wrap">
+                    {(() => {
+                      const byMonth = groupByMonth(registry.entries, e => e.date)
+                      const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a))
+                      return sortedMonths.map((month, mi) => {
+                        const entries = byMonth[month]
+                        return (
+                          <CollapsibleMonth
+                            key={month}
+                            label={formatMonthLabel(month)}
+                            count={entries.length}
+                            countLabel="day"
+                            defaultOpen={mi === 0}
+                          >
+                            <table className="registry-table">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Sessions</th>
+                                  <th>Dry Runs</th>
+                                  <th>Reports</th>
+                                  <th>Total Records</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {entries.map(e => {
+                                  const liveSessions = e.sessions.filter(s => s.mode === 'LIVE').length
+                                  const drySessions  = e.sessions.filter(s => s.mode === 'DRY_RUN').length
+                                  const totalBets    = e.sessions.reduce((sum, s) => sum + (s.total_bets || 0), 0)
+                                  const archived     = e.dry_run_snapshots.filter(s => s.archived).length
+                                  return (
+                                    <tr key={e.date}>
+                                      <td><strong>{e.date}</strong></td>
+                                      <td>
+                                        {liveSessions > 0 && <span className="badge badge-live" style={{marginRight:4}}>{liveSessions} LIVE</span>}
+                                        {drySessions  > 0 && <span className="badge badge-dry">{drySessions} DRY</span>}
+                                        {totalBets > 0 && <span style={{marginLeft:6,fontSize:11,color:'#6b7280'}}>{totalBets} bets</span>}
+                                      </td>
+                                      <td>
+                                        {e.dry_run_snapshots.length > 0
+                                          ? <span>{e.dry_run_snapshots.length} snapshot{e.dry_run_snapshots.length !== 1 ? 's' : ''}{archived > 0 ? ` (${archived} archived)` : ''}</span>
+                                          : <span className="registry-none">—</span>}
+                                      </td>
+                                      <td>
+                                        {e.reports.length > 0
+                                          ? <span>{e.reports.length} report{e.reports.length !== 1 ? 's' : ''}</span>
+                                          : <span className="registry-none">—</span>}
+                                      </td>
+                                      <td>
+                                        <strong>{e.sessions.length + e.dry_run_snapshots.length + e.reports.length}</strong>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </CollapsibleMonth>
+                        )
+                      })
+                    })()}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -4274,6 +4767,21 @@ function Dashboard() {
     })
     fetchState()
   }
+  const handleSetKelly = async (patch) => {
+    const current = {
+      enabled: state.kelly_enabled ?? false,
+      fraction: state.kelly_fraction ?? 0.25,
+      bankroll: state.kelly_bankroll ?? 1000,
+      edge_pct: state.kelly_edge_pct ?? 5,
+      min_stake: state.kelly_min_stake ?? 0.5,
+      max_stake: state.kelly_max_stake ?? 50,
+    }
+    await api('/api/engine/kelly', {
+      method: 'POST',
+      body: JSON.stringify({ ...current, ...patch }),
+    })
+    fetchState()
+  }
   const handleLogout = async () => {
     await api('/api/logout', { method: 'POST' })
     window.location.reload()
@@ -4409,6 +4917,7 @@ function Dashboard() {
             onSetMarkUpliftStake={handleSetMarkUpliftStake}
             onSetProcessWindow={handleSetProcessWindow}
             onSetPointValue={handleSetPointValue}
+            onSetKelly={handleSetKelly}
           />
         )}
         {tab === 'settings' && <SettingsTab />}

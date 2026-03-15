@@ -2,6 +2,36 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.3.0] — 2026-03-15
+
+### Added
+- **Data Registry** — New section in the Reports tab giving a full inventory of every CHIMERA record from the first run (8 Feb 2026) to today. Grouped and collapsible by month, it shows a per-day breakdown of sessions, dry-run snapshots, and generated reports in a single table. Includes a Storage Locations panel listing every data file with its GCS path (`gs://chimera-v4/...`) and Cloud Run local path (`/tmp/...`) for quick reference.
+- **Dry Run Archive** — New section in the Reports tab listing every dry-run snapshot ever recorded, grouped by month. Each card shows markets evaluated, bets that would have been placed, stake and liability. Two actions per snapshot:
+  - **⬇ Download** — exports the full snapshot as a JSON file attachment (`chimera_dryrun_YYYY-MM-DD.json`)
+  - **📦 Archive / ↩ Unarchive** — soft-archives a snapshot (greys it out, flags it in the registry) without deleting it
+- **Collapsible month grouping** — All long lists throughout the app are now grouped and collapsible by month. Click a month header to expand or collapse its contents. The most recent month is always open by default. Applied to:
+  - History → Sessions
+  - History → Matched Bets (month wrapper around existing day-level collapse)
+  - History → Settled Bets (month wrapper around existing day-level collapse)
+  - Reports → Generated Reports
+  - Reports → Dry Run Archive
+  - Reports → Data Registry
+- **Reports section navigation** — The Reports tab now has a three-way tab bar: **Generated Reports** / **Dry Run Archive** / **Data Registry**, keeping the tab clean and focused.
+- **`GET /api/data-registry`** — New backend endpoint returning a date-indexed inventory of all sessions, snapshots, and reports with their GCS and local storage paths, plus aggregated totals and earliest/latest dates.
+- **`GET /api/snapshots/{id}/export`** — New endpoint to download any dry-run snapshot as a JSON file attachment.
+- **`POST /api/snapshots/{id}/archive`** — New endpoint to toggle the `archived` flag on a snapshot. State persisted to GCS.
+
+### Changed
+- `CollapsibleMonth` reusable React component and `groupByMonth` / `formatMonthLabel` helper functions added to `App.jsx` — shared across all tabs.
+- Reports tab state extended with `registry`, `snapshots`, `archivingId`, and `activeSection` fields.
+
+### Notes
+- The Data Registry shows all data **already stored** — it does not move or copy files, it simply tells you where everything lives.
+- Archived snapshots are **not deleted** — they remain in GCS and are flagged in the registry. The archive flag can be toggled at any time.
+- Collapsible groups default to **most recent month open**, all older months collapsed — keeps long histories manageable at a glance.
+
+---
+
 ## [5.2.0] — 2026-03-15
 
 ### Added
