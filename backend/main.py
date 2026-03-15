@@ -2088,10 +2088,15 @@ class BacktestRunRequest(BaseModel):
     mark_uplift_stake: float = 3.0
     point_value: float = 1.0
     market_ids: list[str] = []  # empty = run all markets for the date
-    # AI Research Agent (backtest-only — no effect on live betting)
+    # AI Internet Check Agent (backtest-only — no effect on live betting)
     ai_agent_enabled: bool = False
     ai_agent_max_searches: int = 4      # max web searches per runner (1–8)
     ai_agent_overrule_confidence: float = 0.65  # min confidence to overrule strategy
+    # AI Odds Movement Agent (backtest-only — no effect on live betting)
+    odds_agent_enabled: bool = False
+    odds_agent_interval_mins: int = 5   # sample interval in minutes (1, 2, 5, 10)
+    odds_agent_lookback_mins: int = 30  # how far back to sample (15, 30, 60, 120)
+    odds_agent_overrule_confidence: float = 0.65
 
 
 @app.get("/api/backtest/dates")
@@ -2139,7 +2144,7 @@ def backtest_run(req: BacktestRunRequest):
     """
     from datetime import datetime, timezone as _tz
 
-    # ── AI agent setup (backtest-only, lazy init) ──────────────────────────
+    # ── AI Internet Check Agent setup (backtest-only, lazy init) ───────────
     _ai_agent = None
     if req.ai_agent_enabled:
         try:
@@ -2150,7 +2155,21 @@ def backtest_run(req: BacktestRunRequest):
             )
             _ai_agent = BacktestAIAgent(get_anthropic(), backtest_date=req.date)
         except Exception as _ae:
-            logger.warning(f"AI backtest agent init failed: {_ae}")
+            logger.warning(f"AI internet agent init failed: {_ae}")
+
+    # ── AI Odds Movement Agent setup (backtest-only, lazy init) ─────────────
+    _odds_agent = None
+    if req.odds_agent_enabled:
+        try:
+            from ai_odds_agent import OddsMovementAgent, OddsAgentConfig as _OddsAgentConfig
+            _odds_agent_config = _OddsAgentConfig(
+                sample_interval_mins=max(1, min(10, req.odds_agent_interval_mins)),
+                lookback_mins=max(10, min(120, req.odds_agent_lookback_mins)),
+                overrule_min_confidence=max(0.5, min(0.95, req.odds_agent_overrule_confidence)),
+            )
+            _odds_agent = OddsMovementAgent(get_anthropic())
+        except Exception as _oe:
+            logger.warning(f"AI odds agent init failed: {_oe}")
 
     client = FSUClient(base_url=FSU_URL, date=req.date)
     client.login()  # fetches GCP identity token on Cloud Run
@@ -2285,6 +2304,46 @@ def backtest_run(req: BacktestRunRequest):
             except Exception as _ae:
                 logger.warning(f"AI agent processing error for {market_id}: {_ae}")
 
+        # ── AI Odds Movement Agent overlay (backtest-only) ─────────────────
+        # Samples historical prices at intervals, analyses drift/steam,
+        # then may CONFIRM, OVERRULE, or ADJUST each instruction's stake.
+        # The FSU virtual time is restored to target_iso after sampling.
+        _odds_decisions_map: dict = {}
+        if _odds_agent and not rule_result.skipped and rule_result.instructions:
+            try:
+                odds_decisions = _odds_agent.process_market(
+                    fsu_client=client,
+                    market_id=market_id,
+                    race_time_iso=race_time_str,
+                    evaluation_time_iso=target_iso,
+                    rule_result=rule_result,
+                    config=_odds_agent_config,
+                )
+                # Restore virtual time after sampling (critical — main loop must continue)
+                client.set_virtual_time(target_iso)
+                # Build map and apply decisions
+                for odec in odds_decisions:
+                    _odds_decisions_map[odec.selection_id] = odec
+                kept = []
+                for instr in rule_result.instructions:
+                    odec = _odds_decisions_map.get(instr.selection_id)
+                    if odec is None:
+                        kept.append(instr)
+                        continue
+                    if odec.agent_action == "OVERRULE":
+                        continue
+                    if odec.agent_action == "ADJUST":
+                        instr.size = odec.final_stake
+                    kept.append(instr)
+                rule_result.instructions = kept
+            except Exception as _oe:
+                logger.warning(f"Odds agent processing error for {market_id}: {_oe}")
+                # Always restore virtual time even on error
+                try:
+                    client.set_virtual_time(target_iso)
+                except Exception:
+                    pass
+
         if rule_result.skipped:
             rd = rule_result.to_dict()
             rd["evaluated_at"] = target_iso
@@ -2317,7 +2376,7 @@ def backtest_run(req: BacktestRunRequest):
             d = instr.to_dict()
             d["outcome"] = outcome
             d["pnl"] = instr_pnl
-            # Attach agent decision metadata if available
+            # Attach internet agent decision metadata if available
             dec = _agent_decisions_map.get(instr.selection_id)
             if dec:
                 d["agent_decision"] = {
@@ -2329,6 +2388,22 @@ def backtest_run(req: BacktestRunRequest):
                     "searches_performed": dec.searches_performed,
                     "overruled": dec.overruled,
                 }
+            # Attach odds movement agent decision metadata if available
+            odec = _odds_decisions_map.get(instr.selection_id)
+            if odec:
+                d["odds_decision"] = {
+                    "action": odec.agent_action,
+                    "confidence": odec.confidence,
+                    "stake_multiplier": odec.stake_multiplier,
+                    "reasoning": odec.reasoning,
+                    "odds_summary": odec.odds_summary,
+                    "trend": odec.trend,
+                    "price_open": odec.price_open,
+                    "price_close": odec.price_close,
+                    "price_delta": odec.price_delta,
+                    "samples_taken": odec.samples_taken,
+                    "overruled": odec.overruled,
+                }
             instructions_with_outcome.append(d)
 
         rd = rule_result.to_dict()
@@ -2337,10 +2412,15 @@ def backtest_run(req: BacktestRunRequest):
         rd["winner_selection_id"] = winner_id
         rd["settled"] = settled
         rd["pnl"] = round(total_pnl, 2)
-        # Count agent overrules for this market
+        # Count internet agent overrules for this market
         if _agent_decisions_map:
             rd["agent_overrules"] = sum(
                 1 for dec in _agent_decisions_map.values() if dec.agent_action == "OVERRULE"
+            )
+        # Count odds agent overrules for this market
+        if _odds_decisions_map:
+            rd["odds_agent_overrules"] = sum(
+                1 for odec in _odds_decisions_map.values() if odec.agent_action == "OVERRULE"
             )
         results.append(rd)
 
@@ -2369,16 +2449,26 @@ def backtest_run(req: BacktestRunRequest):
         "results": results,
     }
 
+    all_instrs = [i for r in results for i in r.get("instructions", [])]
+
     if req.ai_agent_enabled:
         response_body["ai_agent_enabled"] = True
         response_body["ai_agent_overrules"] = sum(
             r.get("agent_overrules", 0) for r in results
         )
-        # Count ADJUST decisions
-        all_instrs = [i for r in results for i in r.get("instructions", [])]
         response_body["ai_agent_adjustments"] = sum(
             1 for i in all_instrs
             if i.get("agent_decision", {}).get("action") == "ADJUST"
+        )
+
+    if req.odds_agent_enabled:
+        response_body["odds_agent_enabled"] = True
+        response_body["odds_agent_overrules"] = sum(
+            r.get("odds_agent_overrules", 0) for r in results
+        )
+        response_body["odds_agent_adjustments"] = sum(
+            1 for i in all_instrs
+            if i.get("odds_decision", {}).get("action") == "ADJUST"
         )
 
     return response_body

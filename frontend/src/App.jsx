@@ -1225,6 +1225,9 @@ function BacktestTab() {
   const [spreadControl, setSpreadControl] = useState(false)
   const [pointValue, setPointValue] = useState(1)
   const [aiAgentEnabled, setAiAgentEnabled] = useState(false)
+  const [oddsAgentEnabled, setOddsAgentEnabled] = useState(false)
+  const [oddsAgentInterval, setOddsAgentInterval] = useState(5)
+  const [oddsAgentLookback, setOddsAgentLookback] = useState(30)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1327,6 +1330,9 @@ function BacktestTab() {
           point_value: pointValue,
           market_ids: [...selectedMarketIds],
           ai_agent_enabled: aiAgentEnabled,
+          odds_agent_enabled: oddsAgentEnabled,
+          odds_agent_interval_mins: oddsAgentInterval,
+          odds_agent_lookback_mins: oddsAgentLookback,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1349,6 +1355,9 @@ function BacktestTab() {
           point_value: pointValue,
           market_count: selectedMarketIds.size,
           ai_agent_enabled: aiAgentEnabled,
+          odds_agent_enabled: oddsAgentEnabled,
+          odds_agent_interval_mins: oddsAgentInterval,
+          odds_agent_lookback_mins: oddsAgentLookback,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1771,6 +1780,47 @@ function BacktestTab() {
               <strong style={{ color: '#d97706' }}> Slower — allow extra time per race.</strong>
             </span>
           </div>
+
+          {/* AI Odds Movement Agent toggle */}
+          <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(6,182,212,0.07)', borderRadius: 6, border: '1px solid rgba(6,182,212,0.25)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label className="bt-toggle-label" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={oddsAgentEnabled}
+                onChange={e => setOddsAgentEnabled(e.target.checked)}
+              />
+              <span style={{ color: '#0891b2', fontWeight: 600 }}>AI Odds Movement Agent</span>
+            </label>
+            {oddsAgentEnabled && (
+              <>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Sample every
+                  <select
+                    className="select-small"
+                    value={oddsAgentInterval}
+                    onChange={e => setOddsAgentInterval(Number(e.target.value))}
+                    style={{ marginLeft: 4, width: 68 }}
+                  >
+                    {[1, 2, 5, 10].map(v => <option key={v} value={v}>{v} min</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: 11, color: '#8a8a9a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Look back
+                  <select
+                    className="select-small"
+                    value={oddsAgentLookback}
+                    onChange={e => setOddsAgentLookback(Number(e.target.value))}
+                    style={{ marginLeft: 4, width: 72 }}
+                  >
+                    {[15, 30, 60, 120].map(v => <option key={v} value={v}>{v} min</option>)}
+                  </select>
+                </label>
+              </>
+            )}
+            <span style={{ fontSize: 11, color: '#8a8a9a', lineHeight: 1.4 }}>
+              Samples historical odds at intervals and analyses drift/steam before influencing the bet. No internet required.
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1842,10 +1892,20 @@ function BacktestTab() {
               {result.ai_agent_enabled && (
                 <>
                   <span className="stat" style={{ color: '#7c3aed' }}>
-                    AI Overrules <strong>{result.ai_agent_overrules ?? 0}</strong>
+                    Web Overrules <strong>{result.ai_agent_overrules ?? 0}</strong>
                   </span>
                   <span className="stat" style={{ color: '#7c3aed' }}>
-                    AI Adjustments <strong>{result.ai_agent_adjustments ?? 0}</strong>
+                    Web Adj <strong>{result.ai_agent_adjustments ?? 0}</strong>
+                  </span>
+                </>
+              )}
+              {result.odds_agent_enabled && (
+                <>
+                  <span className="stat" style={{ color: '#0891b2' }}>
+                    Odds Overrules <strong>{result.odds_agent_overrules ?? 0}</strong>
+                  </span>
+                  <span className="stat" style={{ color: '#0891b2' }}>
+                    Odds Adj <strong>{result.odds_agent_adjustments ?? 0}</strong>
                   </span>
                 </>
               )}
@@ -1866,7 +1926,8 @@ function BacktestTab() {
                     <th>Liability</th>
                     <th>Result</th>
                     <th>P&amp;L</th>
-                    {result.ai_agent_enabled && <th style={{ color: '#7c3aed' }}>AI</th>}
+                    {result.ai_agent_enabled && <th style={{ color: '#7c3aed' }}>Web</th>}
+                    {result.odds_agent_enabled && <th style={{ color: '#0891b2' }}>Odds</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1883,7 +1944,7 @@ function BacktestTab() {
                       : outcomeStr === 'LOST' ? 'text-danger'
                       : outcomeStr === 'SKIPPED' ? 'bt-muted' : ''
 
-                    // Collect agent decisions across instructions for this row
+                    // Collect internet agent decisions for this row
                     const agentDecisions = instructions.map(i => i.agent_decision).filter(Boolean)
                     const agentOverruled = agentDecisions.some(d => d.action === 'OVERRULE')
                     const agentAdjusted = agentDecisions.some(d => d.action === 'ADJUST')
@@ -1891,6 +1952,18 @@ function BacktestTab() {
                     const agentTooltip = agentDecisions.map(d =>
                       `${d.action} (${Math.round((d.confidence || 0) * 100)}% conf)\n${d.reasoning}`
                     ).join('\n\n')
+
+                    // Collect odds movement agent decisions for this row
+                    const oddsDecisions = instructions.map(i => i.odds_decision).filter(Boolean)
+                    const oddsOverruled = oddsDecisions.some(d => d.action === 'OVERRULE')
+                    const oddsAdjusted = oddsDecisions.some(d => d.action === 'ADJUST')
+                    const oddsAction = oddsOverruled ? 'OVERRULE' : oddsAdjusted ? 'ADJUST' : oddsDecisions.length > 0 ? 'CONFIRM' : null
+                    const oddsTooltip = oddsDecisions.map(d => {
+                      const trend = d.trend ? ` [${d.trend}]` : ''
+                      const delta = d.price_delta != null ? ` Δ${d.price_delta > 0 ? '+' : ''}${d.price_delta.toFixed(2)}` : ''
+                      const prices = (d.price_open && d.price_close) ? ` ${d.price_open}→${d.price_close}` : ''
+                      return `${d.action} (${Math.round((d.confidence || 0) * 100)}% conf)${trend}${prices}${delta}\n${d.reasoning}`
+                    }).join('\n\n')
 
                     return (
                       <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
@@ -1915,7 +1988,19 @@ function BacktestTab() {
                             {agentAction === 'OVERRULE' && <span style={{ color: '#dc2626', fontWeight: 600, fontSize: 11 }}>✗ OVRL</span>}
                             {agentAction === 'ADJUST' && <span style={{ color: '#d97706', fontWeight: 600, fontSize: 11 }}>~ ADJ</span>}
                             {agentAction === 'CONFIRM' && <span style={{ color: '#16a34a', fontWeight: 600, fontSize: 11 }}>✓ OK</span>}
-                            {!agentAction && skipped && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
+                            {!agentAction && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
+                          </td>
+                        )}
+                        {result.odds_agent_enabled && (
+                          <td title={oddsTooltip || ''} style={{ cursor: oddsTooltip ? 'help' : 'default', whiteSpace: 'nowrap' }}>
+                            {oddsAction === 'OVERRULE' && <span style={{ color: '#dc2626', fontWeight: 600, fontSize: 11 }}>✗ OVRL</span>}
+                            {oddsAction === 'ADJUST' && <span style={{ color: '#d97706', fontWeight: 600, fontSize: 11 }}>~ ADJ</span>}
+                            {oddsAction === 'CONFIRM' && (
+                              <span style={{ color: '#0891b2', fontWeight: 600, fontSize: 11 }}>
+                                ✓ {oddsDecisions[0]?.trend === 'SHORTENING' ? '↘' : oddsDecisions[0]?.trend === 'DRIFTING' ? '↗' : '→'}
+                              </span>
+                            )}
+                            {!oddsAction && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
                           </td>
                         )}
                       </tr>
