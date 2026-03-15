@@ -2,6 +2,33 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.1.0] — 2026-03-15
+
+### Added
+- **AI Research Agent for Backtest** — A new optional intelligence overlay for the backtest engine. When enabled, a Claude-powered agent researches each runner the standard strategy wants to lay before the bet is placed. The agent searches the web for pre-race intelligence (recent form, trainer/jockey signals, fitness concerns, course suitability) and makes one of three decisions:
+  - **CONFIRM** — Research supports the lay; proceed as per strategy
+  - **OVERRULE** — Strong evidence the horse is likely to win; bet is dropped
+  - **ADJUST** — Research warrants a modified stake (multiplier 0.25×–2.0×)
+- **Strict temporal enforcement** — The agent operates with a hard date cutoff equal to the backtest date. It is explicitly instructed to discard any information published on or after that date, ensuring a valid, non-cheating backtest.
+- **Agentic search loop** — The agent runs a multi-turn `tool_use` conversation with Claude Sonnet 4.6, using DuckDuckGo web search as its tool (up to 4 searches per runner). It searches, reads, refines, and synthesises before making its final decision.
+- **AI column in results table** — Backtest results now include an AI column showing `✓ OK` (confirmed), `✗ OVRL` (overruled), or `~ ADJ` (adjusted) per race. Hovering shows the agent's reasoning.
+- **AI summary stats** — Stats ribbon shows total overrules and stake adjustments when agent is active.
+- **Toggle in backtest config** — Purple "AI Research Agent" checkbox in the backtest config panel, clearly labelled with a speed warning (agent adds time per race).
+- **`backend/ai_backtest_agent.py`** — New self-contained module (`BacktestAIAgent`, `AgentDecision`, `AgentConfig`). Completely isolated from the live betting engine — no shared state, no live code paths.
+- **`duckduckgo-search>=6.3.0`** — Added to backend dependencies for web search capability.
+
+### Changed
+- `BacktestRunRequest` extended with `ai_agent_enabled` (bool, default `False`), `ai_agent_max_searches` (int, default 4), and `ai_agent_overrule_confidence` (float, default 0.65).
+- `/api/backtest/run` response now includes `ai_agent_enabled`, `ai_agent_overrules`, and `ai_agent_adjustments` fields when agent is active.
+- Each instruction in the backtest result now carries an optional `agent_decision` object (`action`, `confidence`, `stake_multiplier`, `reasoning`, `research_summary`, `searches_performed`, `overruled`).
+
+### Notes
+- The AI Research Agent is **strictly backtest-only**. It is gated behind `ai_agent_enabled=True` in the request and has no connection to any live betting code paths.
+- Expect **3–5 minutes** additional processing time for a full day's card with agent enabled.
+- Overrule threshold is 65% confidence by default — configurable per run.
+
+---
+
 ## [5.0.0] — 2026-03-11
 
 ### Added
