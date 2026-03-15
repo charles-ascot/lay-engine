@@ -179,6 +179,32 @@ body {
 .badge-crashed { background: #dc2626; }
 .badge-dry-text { color: #d97706; }
 
+/* ── Network status banners ── */
+.network-banner {
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+  width: 100%;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+.network-banner--offline {
+  background: #92400e;
+  color: #fef3c7;
+  animation: pulse-offline 2s ease-in-out infinite;
+}
+.network-banner--restored {
+  background: #065f46;
+  color: #d1fae5;
+}
+@keyframes pulse-offline {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
 /* ── Tabs ── */
 .tabs {
   display: flex;

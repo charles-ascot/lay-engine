@@ -4150,6 +4150,10 @@ function Dashboard() {
   const [chatInitialDate, setChatInitialDate] = useState(null)
   const [chatInitialMessage, setChatInitialMessage] = useState(null)
 
+  // ── Network / reconnect state ──
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [wasOffline, setWasOffline] = useState(false)
+
   // ── Dry Run snapshot state (lifted for tab persistence) ──
   const [checkedMarkets, setCheckedMarkets] = useState(new Set())
   const [snapshotLoading, setSnapshotLoading] = useState(false)
@@ -4171,6 +4175,27 @@ function Dashboard() {
     fetchState()
     intervalRef.current = setInterval(fetchState, 10000)
     return () => clearInterval(intervalRef.current)
+  }, [fetchState])
+
+  // ── Offline / online detection ──
+  useEffect(() => {
+    const handleOffline = () => {
+      setIsOnline(false)
+      setWasOffline(true)
+    }
+    const handleOnline = () => {
+      setIsOnline(true)
+      // Immediately re-sync state when connection restored
+      fetchState()
+      // Auto-hide the "back online" banner after 3 seconds
+      setTimeout(() => setWasOffline(false), 3000)
+    }
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('online', handleOnline)
+    }
   }, [fetchState])
 
   const handleStart = async (mode = 'live') => {
@@ -4271,6 +4296,18 @@ function Dashboard() {
 
   return (
     <div className="dashboard">
+      {/* ── Network status banners ── */}
+      {!isOnline && (
+        <div className="network-banner network-banner--offline">
+          ⚡ Connection lost — reconnecting… The engine is still running on the server.
+        </div>
+      )}
+      {isOnline && wasOffline && (
+        <div className="network-banner network-banner--restored">
+          ✓ Connection restored
+        </div>
+      )}
+
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-left">

@@ -771,8 +771,22 @@ class LayEngine:
         self.last_scan = now.isoformat()
 
         if not self.client.ensure_session():
-            self._add_error("Session expired during scan")
+            # Count consecutive auth/network failures — only log as error after 3 in a row
+            # so a brief laptop offline does not litter the error list.
+            self._net_fail_count = getattr(self, "_net_fail_count", 0) + 1
+            if self._net_fail_count >= 3:
+                self._add_error(
+                    f"Session unavailable — {self._net_fail_count} consecutive scan(s) skipped"
+                )
+                self._net_fail_count = 0  # Reset so we get one error per burst, not a flood
+            else:
+                logger.warning(
+                    f"Session check failed (transient?) — scan skipped "
+                    f"({self._net_fail_count}/3 before error is recorded)"
+                )
             return
+        # Session good — reset failure counter
+        self._net_fail_count = 0
 
         self.markets = self.client.get_todays_win_markets(countries=self.countries)
 

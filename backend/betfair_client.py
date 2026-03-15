@@ -72,11 +72,20 @@ class BetfairClient:
             return False
 
     def ensure_session(self) -> bool:
-        """Ensure we have a valid session, re-authenticating if needed."""
+        """Ensure we have a valid session, re-authenticating if needed.
+
+        Network-resilient: if a keepalive/login call fails due to a transient
+        connection error (e.g. laptop briefly offline) AND the current token has
+        not yet expired, we keep using the existing token rather than crashing.
+        """
+        now = datetime.now(timezone.utc)
+
         if self.session_token and self.session_expiry:
-            if datetime.now(timezone.utc) < self.session_expiry - timedelta(minutes=30):
+            # Token is fresh — no renewal needed
+            if now < self.session_expiry - timedelta(minutes=30):
                 return True
-            # Try keepalive
+
+            # Token is near expiry — attempt keepalive renewal
             try:
                 resp = requests.post(
                     KEEPALIVE_URL,
@@ -85,12 +94,36 @@ class BetfairClient:
                 )
                 data = resp.json()
                 if data.get("status") == "SUCCESS":
-                    self.session_expiry = datetime.now(timezone.utc) + timedelta(hours=4)
+                    self.session_expiry = now + timedelta(hours=4)
+                    logger.info("Betfair session renewed via keepalive")
                     return True
-            except Exception:
-                pass
+            except requests.exceptions.ConnectionError:
+                # Transient network issue — if token hasn't actually expired yet,
+                # keep using it and try again next scan cycle.
+                if now < self.session_expiry:
+                    logger.warning(
+                        "Network unreachable during keepalive — "
+                        "token still valid until %s, continuing",
+                        self.session_expiry.strftime("%H:%M:%S UTC"),
+                    )
+                    return True
+                logger.error("Network offline and Betfair token has expired — cannot renew")
+                return False
+            except Exception as e:
+                logger.warning(f"Keepalive failed ({e}) — attempting full re-login")
 
-        return self.login()
+        # Full re-login with one retry on transient connection errors
+        for attempt in range(1, 3):
+            try:
+                return self.login()
+            except requests.exceptions.ConnectionError:
+                if attempt < 2:
+                    logger.warning(f"Login attempt {attempt} failed (network) — retrying in 5s")
+                    time.sleep(5)
+                else:
+                    logger.error("Login failed after 2 attempts — network appears offline")
+                    return False
+        return False
 
     def _headers(self) -> dict:
         return {
