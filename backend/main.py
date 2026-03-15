@@ -27,9 +27,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+import threading
+import uuid
+import time
+
 from engine import LayEngine
 from fsu_client import FSUClient
 from rules import apply_rules as apply_betting_rules
+
+# ── Async backtest job store ──────────────────────────────────────────────────
+# Backtests (especially with AI agents) can run for minutes — far beyond the
+# Cloud Run 60s request timeout.  We run them in a background thread and let
+# the frontend poll for completion.
+_backtest_jobs: dict = {}   # job_id → {"status", "result", "error", "started_at"}
+_backtest_jobs_lock = threading.Lock()
+
+def _cleanup_old_jobs():
+    """Drop jobs older than 2 hours to avoid unbounded memory growth."""
+    cutoff = time.time() - 7200
+    with _backtest_jobs_lock:
+        stale = [k for k, v in _backtest_jobs.items() if v["started_at"] < cutoff]
+        for k in stale:
+            del _backtest_jobs[k]
 
 # ── Anthropic client (lazy — only created when analysis is requested) ──
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -2308,22 +2327,50 @@ def backtest_markets(
 @app.post("/api/backtest/run")
 def backtest_run(req: BacktestRunRequest):
     """
-    Run a full-day backtest against FSU historic Betfair data.
-    Evaluates each market at race_time - process_window_mins, applies rules,
-    then checks the final settlement to compute P&L.
-
-    If ai_agent_enabled=True, a Claude-powered research agent overlays the strategy:
-    it searches the web for runner intelligence (only info available before req.date)
-    and may CONFIRM, OVERRULE, or ADJUST each bet. This is strictly backtest-only.
+    Start a backtest job and return a job_id immediately.
+    The backtest runs in a background thread — poll GET /api/backtest/job/{job_id}
+    for status and results.  This avoids Cloud Run's 60s request timeout for
+    long AI-agent runs.
     """
-    try:
-        return _backtest_run_inner(req)
-    except Exception as _exc:
-        logger.exception(f"Backtest run crashed: {_exc}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Backtest failed", "detail": str(_exc)},
-        )
+    _cleanup_old_jobs()
+    job_id = str(uuid.uuid4())
+    with _backtest_jobs_lock:
+        _backtest_jobs[job_id] = {
+            "status": "running",
+            "result": None,
+            "error": None,
+            "started_at": time.time(),
+        }
+
+    def _run():
+        try:
+            result = _backtest_run_inner(req)
+            with _backtest_jobs_lock:
+                _backtest_jobs[job_id]["status"] = "done"
+                _backtest_jobs[job_id]["result"] = result
+        except Exception as _exc:
+            logger.exception(f"Backtest job {job_id} crashed: {_exc}")
+            with _backtest_jobs_lock:
+                _backtest_jobs[job_id]["status"] = "error"
+                _backtest_jobs[job_id]["error"] = str(_exc)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/backtest/job/{job_id}")
+def backtest_job_status(job_id: str):
+    """Poll for backtest job status.  Returns {status, result?, error?}."""
+    with _backtest_jobs_lock:
+        job = _backtest_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "result": job["result"],
+        "error": job["error"],
+    }
 
 
 def _backtest_run_inner(req):

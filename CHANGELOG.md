@@ -2,6 +2,15 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.3.1] — 2026-03-15
+
+### Fixed
+- **Backtest CORS / timeout error** — `POST /api/backtest/run` was a synchronous blocking call that regularly exceeded Cloud Run's 60-second request timeout. The load balancer then returned a bare 504 with no CORS headers, which the browser misreported as a CORS policy error. Converted to an **async job pattern**: `POST /api/backtest/run` now starts a background thread and returns `{job_id}` instantly (well within 60s). The frontend polls `GET /api/backtest/job/{job_id}` every 3 seconds until the job completes. This permanently resolves the timeout regardless of how long AI-agent runs take.
+- Both `runBacktest()` (single day) and `runCycle()` (multi-day) updated to use the poll loop.
+- Old jobs are automatically cleaned up after 2 hours to prevent memory growth.
+
+---
+
 ## [5.3.0] — 2026-03-15
 
 ### Added

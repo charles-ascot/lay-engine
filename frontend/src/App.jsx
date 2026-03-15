@@ -1416,6 +1416,7 @@ function BacktestTab() {
     setResult(null)
     setError('')
     try {
+      // POST kicks off the job and returns immediately with a job_id
       const r = await fetch(`${API}/api/backtest/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1444,7 +1445,19 @@ function BacktestTab() {
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
-      const data = await r.json()
+      const { job_id } = await r.json()
+
+      // Poll until done
+      let data = null
+      while (true) {
+        await new Promise(res => setTimeout(res, 3000))
+        const poll = await fetch(`${API}/api/backtest/job/${job_id}`)
+        if (!poll.ok) throw new Error(`Poll failed: ${poll.status}`)
+        const pollData = await poll.json()
+        if (pollData.status === 'done') { data = pollData.result; break }
+        if (pollData.status === 'error') throw new Error(pollData.error || 'Backtest failed')
+      }
+
       setResult(data)
       // Persist to history
       const entry = {
@@ -1630,7 +1643,17 @@ function BacktestTab() {
           }),
         })
         if (!r.ok) throw new Error(`${r.status}`)
-        const data = await r.json()
+        const { job_id } = await r.json()
+        // Poll until this day's job finishes before moving to next date
+        let data = null
+        while (true) {
+          await new Promise(res => setTimeout(res, 3000))
+          const poll = await fetch(`${API}/api/backtest/job/${job_id}`)
+          if (!poll.ok) throw new Error(`Poll failed: ${poll.status}`)
+          const pollData = await poll.json()
+          if (pollData.status === 'done') { data = pollData.result; break }
+          if (pollData.status === 'error') throw new Error(pollData.error || 'Backtest failed')
+        }
         days.push({ date, ...data })
       } catch (e) {
         days.push({ date, error: e.message, markets_evaluated: 0, bets_placed: 0, markets_skipped: 0, total_stake: 0, total_liability: 0, total_pnl: 0, roi: 0, results: [] })
