@@ -2,6 +2,37 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.2.0] — 2026-03-15
+
+### Added
+- **AI Odds Movement Agent for Backtest** — A second optional AI overlay for the backtest engine, operating independently from the Internet Check agent. Instead of searching the web, this agent reads directly from the FSU historic price feed — the same data the backtest uses — sampling odds at configurable intervals before the race and asking Claude to analyse the drift and steam patterns. No internet connection required.
+- **Configurable sampling controls** — Two new UI selectors appear when the agent is enabled:
+  - **Sample every**: 1 / 2 / 5 / 10 minutes
+  - **Look back**: 15 / 30 / 60 / 120 minutes before evaluation time
+- **Drift/steam analysis** — Claude receives a structured price table (lay, back, spread, favourite status at each snapshot) and reasons about:
+  - **SHORTENING** — odds falling = money being placed on the horse to win = potentially dangerous lay
+  - **DRIFTING** — odds rising = market losing confidence in the runner = good lay signal
+  - **Late steam** — sharp sudden move in the final minutes = possible insider/sharp money warning
+- **"Odds" column in results table** — Shows `✓ ↘` (confirmed, shortening), `✓ ↗` (confirmed, drifting), `✓ →` (confirmed, stable), `✗ OVRL` (overruled), or `~ ADJ` (adjusted). Hover tooltip includes trend classification, opening→closing price, delta, and Claude's reasoning.
+- **Odds stats in ribbon** — When active, stats ribbon shows Odds Overrules and Odds Adj counts alongside the Web agent counts.
+- **`backend/ai_odds_agent.py`** — New self-contained module (`OddsMovementAgent`, `OddsAgentDecision`, `OddsAgentConfig`, `OddsSnapshot`). Completely isolated from the live betting engine.
+- **FSU virtual time management** — After sampling, the agent explicitly restores the FSU client's virtual time to the evaluation timestamp so the main backtest loop is unaffected.
+
+### Changed
+- `BacktestRunRequest` extended with `odds_agent_enabled` (bool, default `False`), `odds_agent_interval_mins` (int, default 5), `odds_agent_lookback_mins` (int, default 30), and `odds_agent_overrule_confidence` (float, default 0.65).
+- `/api/backtest/run` response now includes `odds_agent_enabled`, `odds_agent_overrules`, and `odds_agent_adjustments` fields when agent is active.
+- Each instruction in the backtest result now carries an optional `odds_decision` object (`action`, `confidence`, `stake_multiplier`, `reasoning`, `odds_summary`, `trend`, `price_open`, `price_close`, `price_delta`, `samples_taken`, `overruled`).
+- Stats ribbon "AI Overrules / AI Adjustments" labels renamed to "Web Overrules / Web Adj" to distinguish from the new Odds agent counters.
+- Results table AI column header renamed from "AI" to "Web" when Internet Check agent is active.
+
+### Notes
+- The Odds Movement Agent is **strictly backtest-only**. It is gated behind `odds_agent_enabled=True` in the request and has no connection to any live betting code paths.
+- Both AI agents (Internet Check and Odds Movement) can be run **simultaneously or independently**. When both are active, results show a "Web" column and an "Odds" column side by side.
+- The Odds Movement Agent is significantly **faster** than the Internet Check agent as it uses only internal FSU data — no external web calls.
+- Overrule threshold defaults to 65% confidence — configurable per run via `odds_agent_overrule_confidence`.
+
+---
+
 ## [5.1.0] — 2026-03-15
 
 ### Added
