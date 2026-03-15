@@ -7,3 +7,4 @@ python-multipart==0.0.20
 google-cloud-storage==2.18.2
 anthropic==0.83.0
 openai==1.58.1
+duckduckgo-search>=6.3.0

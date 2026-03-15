@@ -2088,6 +2088,10 @@ class BacktestRunRequest(BaseModel):
     mark_uplift_stake: float = 3.0
     point_value: float = 1.0
     market_ids: list[str] = []  # empty = run all markets for the date
+    # AI Research Agent (backtest-only — no effect on live betting)
+    ai_agent_enabled: bool = False
+    ai_agent_max_searches: int = 4      # max web searches per runner (1–8)
+    ai_agent_overrule_confidence: float = 0.65  # min confidence to overrule strategy
 
 
 @app.get("/api/backtest/dates")
@@ -2128,8 +2132,25 @@ def backtest_run(req: BacktestRunRequest):
     Run a full-day backtest against FSU historic Betfair data.
     Evaluates each market at race_time - process_window_mins, applies rules,
     then checks the final settlement to compute P&L.
+
+    If ai_agent_enabled=True, a Claude-powered research agent overlays the strategy:
+    it searches the web for runner intelligence (only info available before req.date)
+    and may CONFIRM, OVERRULE, or ADJUST each bet. This is strictly backtest-only.
     """
     from datetime import datetime, timezone as _tz
+
+    # ── AI agent setup (backtest-only, lazy init) ──────────────────────────
+    _ai_agent = None
+    if req.ai_agent_enabled:
+        try:
+            from ai_backtest_agent import BacktestAIAgent, AgentConfig as _AgentConfig
+            _agent_config = _AgentConfig(
+                max_searches_per_runner=max(1, min(8, req.ai_agent_max_searches)),
+                overrule_min_confidence=max(0.5, min(0.95, req.ai_agent_overrule_confidence)),
+            )
+            _ai_agent = BacktestAIAgent(get_anthropic(), backtest_date=req.date)
+        except Exception as _ae:
+            logger.warning(f"AI backtest agent init failed: {_ae}")
 
     client = FSUClient(base_url=FSU_URL, date=req.date)
     client.login()  # fetches GCP identity token on Cloud Run
@@ -2236,6 +2257,34 @@ def backtest_run(req: BacktestRunRequest):
             for instr in rule_result.instructions:
                 instr.size = round(instr.size * req.point_value, 2)
 
+        # ── AI Research Agent overlay (backtest-only) ──────────────────────
+        # Runs AFTER the strategy has decided to bet, BEFORE settlement lookup.
+        # Agent may CONFIRM, OVERRULE, or ADJUST each instruction's stake.
+        _agent_decisions_map: dict = {}
+        if _ai_agent and not rule_result.skipped and rule_result.instructions:
+            try:
+                decisions = _ai_agent.process_rule_results([rule_result], _agent_config)
+                market_decisions = decisions.get(market_id, [])
+                # Build a map keyed by selection_id for fast lookup
+                for dec in market_decisions:
+                    _agent_decisions_map[dec.selection_id] = dec
+                # Apply decisions to instructions
+                kept = []
+                for instr in rule_result.instructions:
+                    dec = _agent_decisions_map.get(instr.selection_id)
+                    if dec is None:
+                        kept.append(instr)
+                        continue
+                    if dec.agent_action == "OVERRULE":
+                        # Drop this instruction — agent disagrees with strategy
+                        continue
+                    if dec.agent_action == "ADJUST":
+                        instr.size = dec.final_stake
+                    kept.append(instr)
+                rule_result.instructions = kept
+            except Exception as _ae:
+                logger.warning(f"AI agent processing error for {market_id}: {_ae}")
+
         if rule_result.skipped:
             rd = rule_result.to_dict()
             rd["evaluated_at"] = target_iso
@@ -2268,6 +2317,18 @@ def backtest_run(req: BacktestRunRequest):
             d = instr.to_dict()
             d["outcome"] = outcome
             d["pnl"] = instr_pnl
+            # Attach agent decision metadata if available
+            dec = _agent_decisions_map.get(instr.selection_id)
+            if dec:
+                d["agent_decision"] = {
+                    "action": dec.agent_action,
+                    "confidence": dec.confidence,
+                    "stake_multiplier": dec.stake_multiplier,
+                    "reasoning": dec.reasoning,
+                    "research_summary": dec.research_summary,
+                    "searches_performed": dec.searches_performed,
+                    "overruled": dec.overruled,
+                }
             instructions_with_outcome.append(d)
 
         rd = rule_result.to_dict()
@@ -2276,6 +2337,11 @@ def backtest_run(req: BacktestRunRequest):
         rd["winner_selection_id"] = winner_id
         rd["settled"] = settled
         rd["pnl"] = round(total_pnl, 2)
+        # Count agent overrules for this market
+        if _agent_decisions_map:
+            rd["agent_overrules"] = sum(
+                1 for dec in _agent_decisions_map.values() if dec.agent_action == "OVERRULE"
+            )
         results.append(rd)
 
     # Aggregate summary stats
@@ -2289,7 +2355,7 @@ def backtest_run(req: BacktestRunRequest):
     total_pnl = round(sum(r.get("pnl", 0) for r in results), 2)
     bets_placed = sum(len(r.get("instructions", [])) for r in active_results)
 
-    return {
+    response_body = {
         "date": req.date,
         "countries": req.countries,
         "process_window_mins": req.process_window_mins,
@@ -2302,6 +2368,20 @@ def backtest_run(req: BacktestRunRequest):
         "roi": round((total_pnl / total_stake * 100) if total_stake > 0 else 0.0, 1),
         "results": results,
     }
+
+    if req.ai_agent_enabled:
+        response_body["ai_agent_enabled"] = True
+        response_body["ai_agent_overrules"] = sum(
+            r.get("agent_overrules", 0) for r in results
+        )
+        # Count ADJUST decisions
+        all_instrs = [i for r in results for i in r.get("instructions", [])]
+        response_body["ai_agent_adjustments"] = sum(
+            1 for i in all_instrs
+            if i.get("agent_decision", {}).get("action") == "ADJUST"
+        )
+
+    return response_body
 
 
 # ── Google Drive / Sheets helpers ──

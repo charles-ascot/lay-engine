@@ -1224,6 +1224,7 @@ function BacktestTab() {
   const [markUpliftStake, setMarkUpliftStake] = useState(3)
   const [spreadControl, setSpreadControl] = useState(false)
   const [pointValue, setPointValue] = useState(1)
+  const [aiAgentEnabled, setAiAgentEnabled] = useState(false)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1325,6 +1326,7 @@ function BacktestTab() {
           mark_uplift_stake: markUpliftStake,
           point_value: pointValue,
           market_ids: [...selectedMarketIds],
+          ai_agent_enabled: aiAgentEnabled,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1346,6 +1348,7 @@ function BacktestTab() {
           mark_uplift_stake: markUpliftStake,
           point_value: pointValue,
           market_count: selectedMarketIds.size,
+          ai_agent_enabled: aiAgentEnabled,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1752,6 +1755,22 @@ function BacktestTab() {
               </select>
             </label>
           </div>
+
+          {/* AI Research Agent toggle */}
+          <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(124,58,237,0.08)', borderRadius: 6, border: '1px solid rgba(124,58,237,0.25)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label className="bt-toggle-label" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={aiAgentEnabled}
+                onChange={e => setAiAgentEnabled(e.target.checked)}
+              />
+              <span style={{ color: '#7c3aed', fontWeight: 600 }}>AI Research Agent</span>
+            </label>
+            <span style={{ fontSize: 11, color: '#8a8a9a', lineHeight: 1.4 }}>
+              Searches the web for runner intelligence (pre-race-date only) and may overrule or adjust bets.
+              <strong style={{ color: '#d97706' }}> Slower — allow extra time per race.</strong>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1820,6 +1839,16 @@ function BacktestTab() {
               <span className={`stat ${result.roi >= 0 ? 'text-success' : 'text-danger'}`}>
                 ROI <strong>{result.roi >= 0 ? '+' : ''}{result.roi}%</strong>
               </span>
+              {result.ai_agent_enabled && (
+                <>
+                  <span className="stat" style={{ color: '#7c3aed' }}>
+                    AI Overrules <strong>{result.ai_agent_overrules ?? 0}</strong>
+                  </span>
+                  <span className="stat" style={{ color: '#7c3aed' }}>
+                    AI Adjustments <strong>{result.ai_agent_adjustments ?? 0}</strong>
+                  </span>
+                </>
+              )}
             </div>
             <SnapshotButton tableId="bt-results-table" filename={`backtest_${selectedDate}`} />
           </div>
@@ -1837,6 +1866,7 @@ function BacktestTab() {
                     <th>Liability</th>
                     <th>Result</th>
                     <th>P&amp;L</th>
+                    {result.ai_agent_enabled && <th style={{ color: '#7c3aed' }}>AI</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1852,6 +1882,15 @@ function BacktestTab() {
                     const outcomeClass = outcomeStr === 'WON' ? 'text-success'
                       : outcomeStr === 'LOST' ? 'text-danger'
                       : outcomeStr === 'SKIPPED' ? 'bt-muted' : ''
+
+                    // Collect agent decisions across instructions for this row
+                    const agentDecisions = instructions.map(i => i.agent_decision).filter(Boolean)
+                    const agentOverruled = agentDecisions.some(d => d.action === 'OVERRULE')
+                    const agentAdjusted = agentDecisions.some(d => d.action === 'ADJUST')
+                    const agentAction = agentOverruled ? 'OVERRULE' : agentAdjusted ? 'ADJUST' : agentDecisions.length > 0 ? 'CONFIRM' : null
+                    const agentTooltip = agentDecisions.map(d =>
+                      `${d.action} (${Math.round((d.confidence || 0) * 100)}% conf)\n${d.reasoning}`
+                    ).join('\n\n')
 
                     return (
                       <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
@@ -1871,6 +1910,14 @@ function BacktestTab() {
                         <td className={pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}>
                           {skipped ? '—' : `${pnl >= 0 ? '+' : ''}£${pnl.toFixed(2)}`}
                         </td>
+                        {result.ai_agent_enabled && (
+                          <td title={agentTooltip || ''} style={{ cursor: agentTooltip ? 'help' : 'default', whiteSpace: 'nowrap' }}>
+                            {agentAction === 'OVERRULE' && <span style={{ color: '#dc2626', fontWeight: 600, fontSize: 11 }}>✗ OVRL</span>}
+                            {agentAction === 'ADJUST' && <span style={{ color: '#d97706', fontWeight: 600, fontSize: 11 }}>~ ADJ</span>}
+                            {agentAction === 'CONFIRM' && <span style={{ color: '#16a34a', fontWeight: 600, fontSize: 11 }}>✓ OK</span>}
+                            {!agentAction && skipped && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
