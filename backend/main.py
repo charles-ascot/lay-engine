@@ -2142,6 +2142,17 @@ def backtest_run(req: BacktestRunRequest):
     it searches the web for runner intelligence (only info available before req.date)
     and may CONFIRM, OVERRULE, or ADJUST each bet. This is strictly backtest-only.
     """
+    try:
+        return _backtest_run_inner(req)
+    except Exception as _exc:
+        logger.exception(f"Backtest run crashed: {_exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Backtest failed", "detail": str(_exc)},
+        )
+
+
+def _backtest_run_inner(req):
     from datetime import datetime, timezone as _tz
 
     # ── AI Internet Check Agent setup (backtest-only, lazy init) ───────────
