@@ -1912,3 +1912,439 @@ h3 { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
   .registry-storage-grid { grid-template-columns: 1fr; }
   .report-section-nav { flex-wrap: wrap; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   DARK THEME + GLASSMORPHISM OVERRIDE
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Background: gradient + hero image overlay ── */
+body {
+  background: linear-gradient(135deg, #0a0e1a 0%, #0d1220 50%, #150d1f 100%) !important;
+  background-attachment: fixed !important;
+  color: #dde1f0 !important;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: url('/bg-hero.png') center right / cover no-repeat;
+  opacity: 0.18;
+  z-index: 0;
+  pointer-events: none;
+}
+#root { position: relative; z-index: 1; }
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+
+/* ── Login ── */
+.login-panel { background: transparent !important; }
+.login-box {
+  background: rgba(12, 16, 32, 0.65) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5) !important;
+}
+.login-box h1 { color: #e8eaf6 !important; }
+.login-box .subtitle { color: #7a7a9a !important; }
+.login-box input {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #e8eaf6 !important;
+}
+.login-box input::placeholder { color: rgba(255,255,255,0.30) !important; }
+.login-box input:focus { box-shadow: 0 0 0 2px rgba(96,165,250,0.25) !important; border-color: rgba(96,165,250,0.5) !important; }
+.login-box .error { color: #f87171 !important; }
+
+/* ── Header ── */
+.app-header {
+  background: rgba(8, 12, 24, 0.80) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.09) !important;
+}
+.header-left h1 { color: #e8eaf6 !important; }
+.date { color: #5a5a7a !important; }
+.balance { color: #4ade80 !important; }
+.btn-logout { color: #6a6a8a !important; }
+.btn-logout:hover { color: #f87171 !important; }
+
+/* ── Stats ribbon ── */
+.stats-ribbon {
+  background: rgba(8, 12, 24, 0.72) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+}
+.stat { color: #9090b0 !important; }
+.stat strong { color: #dde1f0 !important; }
+.next-race { color: #9090b0 !important; }
+.next-race strong { color: #dde1f0 !important; }
+.next-race-mins { color: #5a5a7a !important; }
+.next-race-mins.in-window { color: #60a5fa !important; }
+
+/* ── Tabs ── */
+.tabs {
+  background: rgba(8, 12, 24, 0.78) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+.tabs button { color: #6a6a8a !important; }
+.tabs button:hover { color: #dde1f0 !important; }
+.tabs button.active { color: #60a5fa !important; border-bottom-color: #60a5fa !important; }
+.sub-tabs {
+  background: rgba(255,255,255,0.03) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+}
+.sub-tabs button { color: #6a6a8a !important; }
+.sub-tabs button:hover { color: #dde1f0 !important; }
+.sub-tabs button.active { color: #60a5fa !important; border-bottom-color: #60a5fa !important; }
+
+/* ── Tab content background ── */
+.tab-content { background: transparent !important; }
+
+/* ── Global text ── */
+h2, .tab-toolbar h2, .backtest-tab h2 { color: #dde1f0 !important; }
+h3 { color: #c0c0d8 !important; }
+.empty, .empty-state, .loading { color: #5a5a7a !important; }
+.text-muted { color: #5a5a7a !important; }
+.api-description { color: #7a7a9a !important; }
+
+/* ── Glassmorphism panel mixin (applied to all card-like panels) ── */
+.card,
+.engine-section,
+.collapsible-section,
+.date-range-filter,
+.matched-date-group,
+.settled-date-group,
+.bt-hist-card,
+.placeholder-section,
+.report-controls,
+.report-viewer,
+.registry-storage-card,
+.new-key-box {
+  background: rgba(255,255,255,0.06) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+}
+
+/* ── Cards ── */
+.card:hover {
+  border-color: rgba(96,165,250,0.35) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35) !important;
+}
+
+/* ── Engine section ── */
+.engine-section h3 { color: #5a5a7a !important; border-bottom: 1px solid rgba(255,255,255,0.07) !important; }
+.engine-label { color: #9090b0 !important; }
+.engine-info { color: #9090b0 !important; }
+
+/* ── Tables ── */
+thead th {
+  background: rgba(255,255,255,0.05) !important;
+  color: #5a5a7a !important;
+  border-bottom: 1px solid rgba(255,255,255,0.09) !important;
+}
+tbody td { color: #dde1f0 !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+tbody tr:hover { background: rgba(255,255,255,0.06) !important; }
+tr.row-win td { background: rgba(22,163,74,0.10) !important; }
+tr.row-win:hover td { background: rgba(22,163,74,0.17) !important; }
+tr.row-loss td { background: rgba(220,38,38,0.10) !important; }
+tr.row-loss:hover td { background: rgba(220,38,38,0.17) !important; }
+tr.row-dry td { color: #5a5a7a !important; }
+
+/* ── Inputs & Selects ── */
+select {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #dde1f0 !important;
+}
+select:focus { border-color: rgba(96,165,250,0.5) !important; }
+input[type="date"] {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #dde1f0 !important;
+}
+.bt-select {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #dde1f0 !important;
+}
+.api-key-form input {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #dde1f0 !important;
+}
+
+/* ── Buttons ── */
+.btn-secondary {
+  background: rgba(255,255,255,0.07) !important;
+  color: #b0b0c8 !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255,255,255,0.13) !important;
+  border-color: rgba(255,255,255,0.22) !important;
+}
+.btn-toggle {
+  background: rgba(255,255,255,0.06) !important;
+  color: #9090b0 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+.btn-toggle:hover { background: rgba(255,255,255,0.12) !important; border-color: rgba(255,255,255,0.20) !important; }
+.btn-toggle.active { background: rgba(96,165,250,0.18) !important; color: #93c5fd !important; border-color: rgba(96,165,250,0.35) !important; }
+.btn-filter {
+  background: rgba(255,255,255,0.06) !important;
+  color: #9090b0 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+.btn-filter:hover { background: rgba(255,255,255,0.12) !important; }
+.btn-filter.active { background: #2563eb !important; color: #fff !important; border-color: #2563eb !important; }
+.btn-preset {
+  background: rgba(255,255,255,0.06) !important;
+  color: #9090b0 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+.btn-preset:hover { background: rgba(255,255,255,0.12) !important; }
+.btn-sm:not(.btn-primary):not(.btn-secondary):not(.btn-danger) {
+  background: rgba(255,255,255,0.07) !important;
+  color: #9090b0 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+.btn-warning { background: rgba(217,119,6,0.20) !important; color: #fbbf24 !important; border: 1px solid rgba(217,119,6,0.35) !important; }
+.btn-warning:hover { background: rgba(217,119,6,0.30) !important; }
+.btn-sm-active { background: rgba(96,165,250,0.18) !important; color: #93c5fd !important; border-color: rgba(96,165,250,0.35) !important; }
+.btn-sm-view { background: rgba(96,165,250,0.12) !important; color: #93c5fd !important; border: 1px solid rgba(96,165,250,0.25) !important; }
+.btn-sm-view:hover { background: rgba(96,165,250,0.22) !important; }
+
+/* ── Code ── */
+code { background: rgba(255,255,255,0.09) !important; color: #a0c4ff !important; }
+
+/* ── Collapsible sections ── */
+.collapsible-header {
+  background: rgba(255,255,255,0.04) !important;
+  color: #9090b0 !important;
+}
+.collapsible-header:hover { background: rgba(255,255,255,0.08) !important; }
+.collapsible-header span { color: #dde1f0 !important; }
+.collapsible-count { background: rgba(255,255,255,0.10) !important; color: #9090b0 !important; }
+.collapsible-chevron { color: #5a5a7a !important; }
+.collapsible-body { border-top: 1px solid rgba(255,255,255,0.07) !important; }
+
+/* ── Date range filter ── */
+.date-inputs { color: #9090b0 !important; }
+
+/* ── Matched / Settled bets ── */
+.matched-date-header, .settled-date-header {
+  background: rgba(255,255,255,0.04) !important;
+}
+.matched-date-header:hover, .settled-date-header:hover { background: rgba(255,255,255,0.08) !important; }
+.matched-date-label, .settled-date-label { color: #dde1f0 !important; }
+.matched-date-stats, .settled-date-stats { color: #6a6a8a !important; }
+.matched-bet-row { border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+.matched-bet-row:hover { background: rgba(255,255,255,0.05) !important; }
+.matched-bet-time { color: #6a6a8a !important; }
+.matched-bet-runner { color: #dde1f0 !important; }
+.matched-bet-detail { color: #9090b0 !important; }
+.matched-summary { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: #9090b0 !important; }
+.matched-summary strong { color: #dde1f0 !important; }
+.settled-summary.pl-positive { background: rgba(22,163,74,0.12) !important; border-color: rgba(22,163,74,0.28) !important; }
+.settled-summary.pl-negative { background: rgba(220,38,38,0.12) !important; border-color: rgba(220,38,38,0.28) !important; }
+.settled-summary strong { color: #dde1f0 !important; }
+.settled-won { background: rgba(22,163,74,0.10) !important; border-color: rgba(22,163,74,0.22) !important; }
+.settled-lost { background: rgba(220,38,38,0.10) !important; border-color: rgba(220,38,38,0.22) !important; }
+.settled-runner { color: #dde1f0 !important; }
+.settled-venue { color: #6a6a8a !important; }
+.settled-card-details { color: #9090b0 !important; }
+.snapshots-date-label { color: #dde1f0 !important; }
+.snapshots-date-count { color: #6a6a8a !important; }
+.snapshots-date-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; }
+
+/* ── Session cards ── */
+.session-card-time { color: #6a6a8a !important; }
+.session-card-details { color: #9090b0 !important; }
+.session-card-details strong { color: #dde1f0 !important; }
+.session-card-countries { color: #6a6a8a !important; }
+.session-detail-header h2 { color: #dde1f0 !important; }
+.session-stats { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: #9090b0 !important; }
+.session-stats strong { color: #dde1f0 !important; }
+
+/* ── Backtest ── */
+.bt-hist-card-header { background: rgba(255,255,255,0.04) !important; }
+.bt-hist-card-header:hover { background: rgba(255,255,255,0.08) !important; }
+.bt-hist-card-body { background: rgba(255,255,255,0.03) !important; border-top: 1px solid rgba(255,255,255,0.07) !important; }
+.bt-hist-date { color: #dde1f0 !important; }
+.bt-hist-stat { color: #9090b0 !important; }
+.bt-hist-card.expanded { border-color: rgba(124,58,237,0.40) !important; }
+.bt-hist-card.selected { border-color: rgba(6,182,212,0.45) !important; background: rgba(6,182,212,0.07) !important; }
+.bt-hist-card.selected .bt-hist-card-header { background: rgba(6,182,212,0.07) !important; }
+.bt-hist-section-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; }
+.bt-hist-section-header h3 { color: #dde1f0 !important; }
+.bt-hist-card-meta { color: #9090b0 !important; }
+.bt-market-row { color: #dde1f0 !important; }
+.bt-market-row:hover { background: rgba(255,255,255,0.06) !important; }
+.bt-market-time { color: #6a6a8a !important; }
+.bt-venue-header { color: #5a5a7a !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+.bt-checkbox-label { color: #9090b0 !important; }
+.bt-toggle-label { color: #9090b0 !important; }
+.bt-error { color: #f87171 !important; }
+.bt-cycle-progress-bar { background: rgba(255,255,255,0.10) !important; }
+
+/* ── Placeholder sections ── */
+.placeholder-section h3 { color: #5a5a7a !important; }
+.placeholder-section p { color: #9090b0 !important; }
+
+/* ── Reports ── */
+.report-viewer { color: #dde1f0 !important; }
+.report-viewer h1 { border-bottom: 2px solid rgba(96,165,250,0.5) !important; }
+.report-viewer hr { border-top: 1px solid rgba(255,255,255,0.08) !important; }
+.report-date-row { color: #9090b0 !important; }
+.report-session-item {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  color: #9090b0 !important;
+}
+.report-session-item:hover { background: rgba(255,255,255,0.08) !important; }
+.report-session-time { color: #9090b0 !important; }
+.report-session-stats { color: #6a6a8a !important; }
+.report-template-select {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+}
+.report-template-item:hover { background: rgba(255,255,255,0.06) !important; }
+.template-desc { color: #6a6a8a !important; }
+.report-card-info strong { color: #dde1f0 !important; }
+.report-card-meta { color: #6a6a8a !important; }
+
+/* ── Chat drawer ── */
+.chat-drawer {
+  background: rgba(8, 12, 24, 0.88) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-left: 3px solid rgba(96,165,250,0.45) !important;
+}
+.chat-header {
+  background: rgba(255,255,255,0.05) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.09) !important;
+}
+.chat-header h3 { color: #dde1f0 !important; }
+.chat-messages { background: rgba(255,255,255,0.02) !important; }
+.chat-msg-assistant .chat-msg-content {
+  background: rgba(255,255,255,0.08) !important;
+  color: #dde1f0 !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+}
+.chat-input-row {
+  background: rgba(255,255,255,0.04) !important;
+  border-top: 1px solid rgba(255,255,255,0.09) !important;
+}
+.chat-input-row input {
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  color: #dde1f0 !important;
+}
+.chat-input-row input:focus { border-color: rgba(96,165,250,0.5) !important; }
+.btn-mic { background: rgba(255,255,255,0.07) !important; border: 1px solid rgba(255,255,255,0.12) !important; }
+.btn-mic:hover { background: rgba(255,255,255,0.13) !important; }
+.btn-mic.listening { background: rgba(220,38,38,0.18) !important; border-color: rgba(220,38,38,0.35) !important; }
+
+/* ── Live racing tab ── */
+.live-control-bar {
+  background: rgba(8, 12, 24, 0.80) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+.live-settings-note { color: #fbbf24 !important; }
+.live-settings-note.ready { color: #4ade80 !important; }
+.live-settings-note.warn { color: #fbbf24 !important; }
+.live-scan-time { color: #5a5a7a !important; }
+.dryrun-pnl-strip {
+  background: rgba(253,200,60,0.08) !important;
+  border-bottom: 1px solid rgba(253,200,60,0.18) !important;
+  color: #9090b0 !important;
+}
+.live-racing-list {
+  background: rgba(8, 12, 24, 0.70) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-right: 1px solid rgba(255,255,255,0.08) !important;
+}
+.live-venue-header {
+  background: rgba(255,255,255,0.05) !important;
+  color: #6a6a8a !important;
+  border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+}
+.live-race-row { border-bottom: 1px solid rgba(255,255,255,0.04) !important; }
+.live-race-row:hover { background: rgba(255,255,255,0.05) !important; }
+.live-race-row.selected { background: rgba(37,99,235,0.18) !important; border-left-color: #60a5fa !important; }
+.live-race-row.in-play { background: rgba(22,163,74,0.10) !important; }
+.live-race-row.in-window { background: rgba(217,119,6,0.10) !important; }
+.live-race-time { color: #dde1f0 !important; }
+.live-race-name { color: #dde1f0 !important; }
+.live-race-meta { color: #6a6a8a !important; }
+.race-bet-runner { color: #9090b0 !important; }
+.live-error-bar {
+  background: rgba(220,38,38,0.12) !important;
+  border: 1px solid rgba(220,38,38,0.28) !important;
+  color: #f87171 !important;
+}
+.live-pnl-bar.pnl-pos { background: rgba(22,163,74,0.12) !important; border-color: rgba(22,163,74,0.28) !important; color: #4ade80 !important; }
+.live-pnl-bar.pnl-neg { background: rgba(220,38,38,0.12) !important; border-color: rgba(220,38,38,0.28) !important; color: #f87171 !important; }
+.live-active-badge { background: rgba(22,163,74,0.18) !important; border: 1px solid rgba(22,163,74,0.35) !important; color: #4ade80 !important; }
+
+/* ── Error items ── */
+.error-item {
+  background: rgba(220,38,38,0.12) !important;
+  border: 1px solid rgba(220,38,38,0.28) !important;
+  color: #f87171 !important;
+}
+.error-time { color: #6a6a8a !important; }
+
+/* ── Market / Betfair table ── */
+.market-title { color: #dde1f0 !important; }
+.market-header { border-bottom: 1px solid rgba(255,255,255,0.08) !important; }
+.market-meta { color: #6a6a8a !important; }
+.market-matched { color: #9090b0 !important; }
+.runner-name { color: #dde1f0 !important; }
+.runner-cloth { background: rgba(255,255,255,0.14) !important; color: #dde1f0 !important; }
+.runner-jockey { color: #f87171 !important; }
+.bf-back-header { background: rgba(29,78,216,0.40) !important; color: #93c5fd !important; }
+.bf-lay-header  { background: rgba(157,23,77,0.40) !important; color: #f9a8d4 !important; }
+.bf-back-1 { background: rgba(114,187,239,0.40) !important; }
+.bf-back-2 { background: rgba(114,187,239,0.25) !important; }
+.bf-back-3 { background: rgba(114,187,239,0.14) !important; }
+.bf-lay-1  { background: rgba(250,169,186,0.40) !important; }
+.bf-lay-2  { background: rgba(250,169,186,0.25) !important; }
+.bf-lay-3  { background: rgba(250,169,186,0.14) !important; }
+.bf-empty  { background: rgba(255,255,255,0.05) !important; color: #5a5a7a !important; }
+.bf-price { color: #dde1f0 !important; }
+
+/* ── Registry ── */
+.registry-storage-key { color: #7a7a9a !important; }
+.registry-storage-desc { color: #7a7a9a !important; }
+.registry-path { color: #a0a0c0 !important; }
+.registry-path.gcs { color: #60a5fa !important; }
+.registry-path.local { color: #4ade80 !important; }
+.registry-totals { color: #6a6a8a !important; }
+.registry-table th { background: rgba(255,255,255,0.05) !important; color: #5a5a7a !important; border-bottom: 1px solid rgba(255,255,255,0.08) !important; }
+.registry-table td { color: #dde1f0 !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+.registry-table tr:hover td { background: rgba(255,255,255,0.06) !important; }
+.registry-none { color: #3a3a5a !important; }
+.registry-storage h3, .registry-entries h3 { color: #dde1f0 !important; }
+
+/* ── Dry run archive ── */
+.badge-archived { background: rgba(255,255,255,0.09) !important; color: #9090b0 !important; }
+.dryrun-archive-stats { color: #9090b0 !important; }
+
+/* ── Network banners stay bold — no override needed ── */
+
+/* ── Tag badges ── */
+.tag-on { background: rgba(109,40,217,0.22) !important; color: #c4b5fd !important; }
+.tag-off { background: rgba(255,255,255,0.08) !important; color: #6a6a8a !important; }
