@@ -2447,3 +2447,32 @@ body.theme-dark .theme-option:hover { border-color: #60a5fa !important; }
 body.theme-dark .theme-option.active { border-color: #60a5fa !important; box-shadow: 0 0 0 3px rgba(96,165,250,0.20) !important; }
 body.theme-dark .theme-option-label { color: var(--t1) !important; }
 body.theme-dark .theme-option-desc { color: var(--t2) !important; }
+
+/* ── CollapsibleMonth (History / Reports / Matched / Settled) ── */
+body.theme-dark .collapsible-month,
+body.theme-light .collapsible-month {
+  background: var(--panel) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid var(--border) !important;
+}
+body.theme-dark .collapsible-month-header,
+body.theme-light .collapsible-month-header {
+  background: var(--panel-hd) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+body.theme-dark .collapsible-month-header:hover,
+body.theme-light .collapsible-month-header:hover { background: var(--hover) !important; }
+body.theme-dark .collapsible-month-body,
+body.theme-light .collapsible-month-body { background: transparent !important; }
+body.theme-dark .collapse-label { color: var(--t1) !important; }
+body.theme-dark .collapse-arrow { color: var(--t3) !important; }
+body.theme-dark .collapse-count { background: rgba(255,255,255,0.10) !important; color: var(--t2) !important; }
+
+/* ── Live racing list — reduce opacity so hero image shows through ── */
+body.theme-dark .live-racing-list {
+  background: rgba(8,12,24,0.45) !important;
+}
+body.theme-dark .live-control-bar {
+  background: rgba(8,12,24,0.60) !important;
+}
