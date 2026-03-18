@@ -1975,16 +1975,17 @@ h3 { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
 /* ── Dark-glass variables ── */
 body.theme-dark {
   --t1: #dde1f0; --t2: #9090b0; --t3: #5a5a7a;
-  --panel:    rgba(255,255,255,0.06);
-  --panel-hd: rgba(255,255,255,0.04);
+  --panel:    rgba(8,12,24,0.55);
+  --panel-hd: rgba(8,12,24,0.70);
   --chrome:   rgba(8,12,24,0.82);
   --border:   rgba(255,255,255,0.10);
   --border-s: rgba(255,255,255,0.06);
-  --hover:    rgba(255,255,255,0.06);
+  --hover:    rgba(255,255,255,0.08);
   --input-bg: rgba(255,255,255,0.07);
   --input-br: rgba(255,255,255,0.14);
   --scroll:   rgba(255,255,255,0.16);
-  background: url('/bg-hero.png') center right / cover no-repeat fixed !important;
+  background-color: #0a0e1a !important;
+  background: #0a0e1a url('/bg-hero.png') center right / cover no-repeat fixed !important;
   color: var(--t1) !important;
 }
 
@@ -2465,6 +2466,18 @@ body.theme-dark .collapsible-month-header:hover,
 body.theme-light .collapsible-month-header:hover { background: var(--hover) !important; }
 body.theme-dark .collapsible-month-body,
 body.theme-light .collapsible-month-body { background: transparent !important; }
+
+/* ── Cards inside CollapsibleMonth: no nested backdrop-filter (avoids white-backdrop bug) ── */
+body.theme-dark .collapsible-month-body .card {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(255,255,255,0.07) !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+}
+body.theme-dark .collapsible-month-body .card:hover {
+  background: rgba(255,255,255,0.11) !important;
+  border-color: rgba(96,165,250,0.35) !important;
+}
 body.theme-dark .collapse-label { color: var(--t1) !important; }
 body.theme-dark .collapse-arrow { color: var(--t3) !important; }
 body.theme-dark .collapse-count { background: rgba(255,255,255,0.10) !important; color: var(--t2) !important; }
