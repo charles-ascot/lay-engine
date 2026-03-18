@@ -421,6 +421,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
   const [book, setBook] = useState(null)
   const [loadingBook, setLoadingBook] = useState(false)
   const [countryFilter, setCountryFilter] = useState('all')
+  const [expandedMonths, setExpandedMonths] = useState(new Set())
   const [settingsConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
   )
@@ -919,7 +920,30 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
             <p className="empty" style={{ padding: '12px 16px' }}>No snapshots yet. Select markets and run a dry run.</p>
           ) : (
             <div className="snapshot-history-list">
-              {snapshotHistory.map(snap => {
+              {(() => {
+                const groups = {}
+                snapshotHistory.forEach(snap => {
+                  const key = new Date(snap.created_at).toLocaleString([], { year: 'numeric', month: 'long' })
+                  if (!groups[key]) groups[key] = []
+                  groups[key].push(snap)
+                })
+                return Object.entries(groups).map(([month, snaps]) => {
+                  const isMonthOpen = expandedMonths.has(month)
+                  return (
+                    <div key={month}>
+                      <div
+                        className="snapshot-month-header"
+                        onClick={() => setExpandedMonths(prev => {
+                          const next = new Set(prev)
+                          isMonthOpen ? next.delete(month) : next.add(month)
+                          return next
+                        })}
+                      >
+                        <span>{month}</span>
+                        <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'inherit', opacity: 0.7 }}>{snaps.length} snapshot{snaps.length !== 1 ? 's' : ''}</span>
+                        <span className="snapshot-month-chevron">{isMonthOpen ? '▲' : '▼'}</span>
+                      </div>
+                      {isMonthOpen && snaps.map(snap => {
                 const isExpanded = expandedSnapshotId === snap.snapshot_id
                 return (
                   <div key={snap.snapshot_id} className={`snapshot-card${isExpanded ? ' expanded' : ''}`}>
@@ -999,6 +1023,10 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
                   </div>
                 )
               })}
+                    </div>
+                  )
+                })
+              })()}
             </div>
           )}
         </div>
@@ -3724,7 +3752,7 @@ const AI_CAPABILITY_LABELS = {
 }
 
 // ── Settings Tab ──
-function SettingsTab() {
+function SettingsTab({ theme, setTheme }) {
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [newEmail, setNewEmail] = useState('')
@@ -3918,6 +3946,29 @@ function SettingsTab() {
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {/* ── Appearance ── */}
+      <div className="engine-section" style={{ marginTop: 12 }}>
+        <h2>Appearance</h2>
+        <p className="api-description">Choose the visual theme for the CHIMERA interface.</p>
+        <div className="theme-switcher">
+          {[
+            { id: 'classic', label: 'Classic', desc: 'Light professional theme' },
+            { id: 'dark',    label: 'Dark Glass', desc: 'Dark background with glass panels' },
+            { id: 'light',   label: 'Light Glass', desc: 'Light background with frosted panels' },
+          ].map(t => (
+            <div
+              key={t.id}
+              className={`theme-option${theme === t.id ? ' active' : ''}`}
+              onClick={() => setTheme(t.id)}
+            >
+              <div className={`theme-option-preview theme-preview-${t.id}`} />
+              <span className="theme-option-label">{t.label}</span>
+              <span className="theme-option-desc">{t.desc}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -4670,6 +4721,13 @@ function Dashboard() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [wasOffline, setWasOffline] = useState(false)
 
+  // ── Theme ──
+  const [theme, setTheme] = useState(() => localStorage.getItem('chimera-theme') || 'dark')
+  useEffect(() => {
+    document.body.className = `theme-${theme}`
+    localStorage.setItem('chimera-theme', theme)
+  }, [theme])
+
   // ── Dry Run snapshot state (lifted for tab persistence) ──
   const [checkedMarkets, setCheckedMarkets] = useState(new Set())
   const [snapshotLoading, setSnapshotLoading] = useState(false)
@@ -4943,7 +5001,7 @@ function Dashboard() {
             onSetKelly={handleSetKelly}
           />
         )}
-        {tab === 'settings' && <SettingsTab />}
+        {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}
         {tab === 'reports' && <ReportsTab />}
       </div>
 
