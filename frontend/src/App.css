@@ -2014,7 +2014,7 @@ body.theme-light::before {
   pointer-events: none;
 }
 body.theme-dark::before {
-  background: linear-gradient(135deg, rgba(10,14,26,0.76) 0%, rgba(13,18,32,0.65) 50%, rgba(21,13,31,0.72) 100%);
+  background: linear-gradient(135deg, rgba(10,14,26,0.58) 0%, rgba(13,18,32,0.50) 50%, rgba(21,13,31,0.55) 100%);
 }
 body.theme-light::before {
   background: linear-gradient(135deg, rgba(230,242,255,0.78) 0%, rgba(215,232,255,0.70) 50%, rgba(232,240,255,0.76) 100%);
@@ -2469,10 +2469,10 @@ body.theme-dark .collapse-label { color: var(--t1) !important; }
 body.theme-dark .collapse-arrow { color: var(--t3) !important; }
 body.theme-dark .collapse-count { background: rgba(255,255,255,0.10) !important; color: var(--t2) !important; }
 
-/* ── Live racing list — reduce opacity so hero image shows through ── */
+/* ── Live racing list — frosted glass so hero image shows through ── */
 body.theme-dark .live-racing-list {
-  background: rgba(8,12,24,0.45) !important;
+  background: rgba(255,255,255,0.07) !important;
 }
 body.theme-dark .live-control-bar {
-  background: rgba(8,12,24,0.60) !important;
+  background: rgba(10,14,26,0.55) !important;
 }
