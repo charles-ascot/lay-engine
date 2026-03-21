@@ -1613,14 +1613,15 @@ def generate_report(req: GenerateReportRequest):
 
     try:
         client = get_anthropic()
-        message = client.messages.create(
+        with client.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=32768,
             messages=[{"role": "user", "content": prompt}],
-        )
-        if message.stop_reason == "max_tokens":
+        ) as stream:
+            report_text = stream.get_final_text()
+            final_msg = stream.get_final_message()
+        if final_msg.stop_reason == "max_tokens":
             logging.warning(f"Report response truncated — hit max_tokens ({32768})")
-        report_text = message.content[0].text
 
         # Parse the JSON response — strip any markdown fencing if present
         import re
