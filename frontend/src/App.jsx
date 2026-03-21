@@ -1036,7 +1036,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -1190,6 +1190,62 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
                 <option key={v} value={v}>{v} pts</option>
               ))}
             </select>
+          )}
+        </div>
+      </div>
+
+      {/* Signal Filters */}
+      <div className="engine-section">
+        <h3>Signal Filters</h3>
+        <div className="engine-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <span className="engine-label">Overround:</span>
+          <button
+            className={`btn-toggle ${state.signal_overround_enabled ? 'active' : ''}`}
+            onClick={onToggleSignalOverround}
+            title="Halve stake when book >115%, skip when >120% — filters illiquid markets"
+          >
+            {state.signal_overround_enabled ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>Field Size:</span>
+          <button
+            className={`btn-toggle ${state.signal_field_size_enabled ? 'active' : ''}`}
+            onClick={onToggleSignalFieldSize}
+            title="Cap stake at £10 when field >10 runners and fav odds ≥3.0 — large NH field filter"
+          >
+            {state.signal_field_size_enabled ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>Steam Gate:</span>
+          <button
+            className={`btn-toggle ${state.signal_steam_gate_enabled ? 'active' : ''}`}
+            onClick={onToggleSignalSteamGate}
+            title="Skip bet when favourite has shortened ≥3% since first monitoring snapshot (live only)"
+          >
+            {state.signal_steam_gate_enabled ? 'ON' : 'OFF'}
+          </button>
+          <span className="engine-label" style={{ marginLeft: 16 }}>Band Perf:</span>
+          <button
+            className={`btn-toggle ${state.signal_band_perf_enabled ? 'active' : ''}`}
+            onClick={onToggleSignalBandPerf}
+            title="Cap stake at £10 when 5-day win rate for this odds band falls below 50%"
+          >
+            {state.signal_band_perf_enabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div className="engine-info" style={{ marginTop: 8 }}>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Overround: book &gt;115% → halve stake · &gt;120% → skip (illiquid market filter)
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Field Size: &gt;10 runners + odds ≥3.0 → cap £10 (high-variance NH field filter)
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Steam Gate: favourite shortening ≥3% → skip (laying into backed money, live only)
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Band Perf: 5-day win rate &lt;50% per odds band → cap £10 (rolling performance filter)
+          </span>
+          {(state.summary?.signal_rejections || 0) > 0 && (
+            <span>Signal filtered this session: <strong style={{ color: '#f59e0b' }}>{state.summary.signal_rejections}</strong></span>
           )}
         </div>
       </div>
@@ -4812,6 +4868,22 @@ function Dashboard() {
     await api('/api/engine/jofs-control', { method: 'POST' })
     fetchState()
   }
+  const handleToggleSignalOverround = async () => {
+    await api('/api/engine/signal/overround', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleSignalFieldSize = async () => {
+    await api('/api/engine/signal/field-size', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleSignalSteamGate = async () => {
+    await api('/api/engine/signal/steam-gate', { method: 'POST' })
+    fetchState()
+  }
+  const handleToggleSignalBandPerf = async () => {
+    await api('/api/engine/signal/band-perf', { method: 'POST' })
+    fetchState()
+  }
   const handleToggleMarkCeiling = async () => {
     await api('/api/engine/mark-ceiling', { method: 'POST' })
     fetchState()
@@ -5008,6 +5080,10 @@ function Dashboard() {
             onSetProcessWindow={handleSetProcessWindow}
             onSetPointValue={handleSetPointValue}
             onSetKelly={handleSetKelly}
+            onToggleSignalOverround={handleToggleSignalOverround}
+            onToggleSignalFieldSize={handleToggleSignalFieldSize}
+            onToggleSignalSteamGate={handleToggleSignalSteamGate}
+            onToggleSignalBandPerf={handleToggleSignalBandPerf}
           />
         )}
         {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}

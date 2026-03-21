@@ -24,6 +24,7 @@ from typing import Optional
 from betfair_client import BetfairClient
 from rules import Runner, apply_rules, RuleResult, check_spread
 from kelly import KellyConfig, calculate_kelly_stake
+from signal_filters import SignalConfig, apply_signal_filters, get_odds_band
 
 logger = logging.getLogger("engine")
 
@@ -136,6 +137,10 @@ class LayEngine:
         # ── Kelly Criterion ──
         self.kelly_config: KellyConfig = KellyConfig()
 
+        # ── Signal Filters (market intelligence layer) ──
+        self.signal_config: SignalConfig = SignalConfig()
+        self.signal_rejections: list[dict] = []  # Log of signal-filtered bets
+
         # ── Processing window ──
         self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
         self.monitoring: dict = {}      # market_id → list of odds snapshots
@@ -227,6 +232,11 @@ class LayEngine:
                 "kelly_edge_pct": self.kelly_config.edge_pct,
                 "kelly_min_stake": self.kelly_config.min_stake,
                 "kelly_max_stake": self.kelly_config.max_stake,
+                # Signal filters
+                "signal_overround_enabled": self.signal_config.overround_enabled,
+                "signal_field_size_enabled": self.signal_config.field_size_enabled,
+                "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
+                "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -300,6 +310,11 @@ class LayEngine:
             self.process_window = data.get("process_window", PROCESS_WINDOW_MINUTES)
             self.balance = data.get("balance")
             self.kelly_config = KellyConfig.from_dict(data)
+            # Signal filter config
+            self.signal_config.overround_enabled = data.get("signal_overround_enabled", False)
+            self.signal_config.field_size_enabled = data.get("signal_field_size_enabled", False)
+            self.signal_config.steam_gate_enabled = data.get("signal_steam_gate_enabled", False)
+            self.signal_config.band_perf_enabled = data.get("signal_band_perf_enabled", False)
 
             logger.info(
                 f"Restored state: {len(self.processed_markets)} processed markets, "
@@ -754,6 +769,7 @@ class LayEngine:
             self.next_race = None
             self.errors = []
             self.spread_rejections = []
+            self.signal_rejections = []
             self.day_started = today
             self._session_bets_start_index = 0
 
@@ -931,6 +947,51 @@ class LayEngine:
         except Exception as e:
             logger.debug(f"Monitor snapshot failed for {market_id}: {e}")
 
+    # ──────────────────────────────────────────────
+    #  SIGNAL FILTER HELPERS
+    # ──────────────────────────────────────────────
+
+    def _get_previous_prices(self, market_id: str) -> dict:
+        """
+        Return the earliest monitoring snapshot prices for a market.
+        Used by the Steam Gate signal to detect price shortening.
+        Returns {selection_id: lay_odds}
+        """
+        snapshots = self.monitoring.get(market_id, [])
+        if not snapshots:
+            return {}
+        oldest = snapshots[0]
+        return {
+            r["selection_id"]: r["lay_odds"]
+            for r in oldest.get("runners", [])
+            if r.get("lay_odds") is not None
+        }
+
+    def _compute_band_stats(self, lookback_days: int = 5) -> dict:
+        """
+        Compute win rates per odds band over the last N days from settled bets.
+        Returns {band_name: {"wins": int, "total": int, "win_rate": float}}
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        ).isoformat()
+        stats: dict = {}
+        for bet in self.bets_placed:
+            if bet.get("outcome") not in ("WIN", "LOSS"):
+                continue
+            if bet.get("timestamp", "") < cutoff:
+                continue
+            band = get_odds_band(bet.get("price", 0))
+            if band not in stats:
+                stats[band] = {"wins": 0, "total": 0}
+            stats[band]["total"] += 1
+            if bet.get("outcome") == "WIN":
+                stats[band]["wins"] += 1
+        for band_data in stats.values():
+            t = band_data["total"]
+            band_data["win_rate"] = round(band_data["wins"] / t, 4) if t > 0 else 0.0
+        return stats
+
     def _process_market(self, market: dict):
         """
         Fetch prices, apply rules, place bets for a single market.
@@ -1006,6 +1067,10 @@ class LayEngine:
         # Build runner lookup for spread checks
         runner_lookup = {r.selection_id: r for r in runners_with_prices}
 
+        # ── Step 2.6: Pre-compute signal filter inputs (once per market) ──
+        previous_prices = self._get_previous_prices(market_id)
+        band_stats = self._compute_band_stats(self.signal_config.band_perf_lookback_days)
+
         # ── Step 3: Place the bets ──
         logger.info(
             f"Rule applied: {result.rule_applied} — "
@@ -1020,6 +1085,51 @@ class LayEngine:
                     f"already bet on for race {market['race_time']}"
                 )
                 continue
+
+            # ── Signal filters (market intelligence layer) ──
+            any_signal_enabled = (
+                self.signal_config.overround_enabled or
+                self.signal_config.field_size_enabled or
+                self.signal_config.steam_gate_enabled or
+                self.signal_config.band_perf_enabled
+            )
+            if any_signal_enabled:
+                sig_result = apply_signal_filters(
+                    selection_id=instruction.selection_id,
+                    current_price=instruction.price,
+                    original_stake=instruction.size,
+                    all_runners=runners_with_prices,
+                    previous_prices=previous_prices,
+                    band_stats=band_stats,
+                    config=self.signal_config,
+                )
+                if not sig_result.allowed:
+                    logger.warning(
+                        f"[SIGNAL FILTER] BLOCKED: {instruction.runner_name} "
+                        f"@ {market['venue']} — {sig_result.skip_reason}"
+                    )
+                    self.signal_rejections.append({
+                        "runner": instruction.runner_name,
+                        "venue": market["venue"],
+                        "country": market.get("country", ""),
+                        "market_id": market_id,
+                        "price": instruction.price,
+                        "original_stake": sig_result.original_stake,
+                        "rule": instruction.rule_applied,
+                        "signals_fired": sig_result.to_dict()["signals_fired"],
+                        "reason": sig_result.skip_reason,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    self.processed_runners.add(runner_key)
+                    continue
+                # Apply adjusted stake if signals modified it
+                if sig_result.final_stake != sig_result.original_stake:
+                    logger.info(
+                        f"[SIGNAL FILTER] STAKE ADJUSTED: {instruction.runner_name} "
+                        f"£{sig_result.original_stake} → £{sig_result.final_stake} "
+                        f"({', '.join(v.signal for v in sig_result.verdicts if v.fired)})"
+                    )
+                    instruction.size = sig_result.final_stake
 
             # ── Spread control check ──
             if self.spread_control:
@@ -1291,6 +1401,11 @@ class LayEngine:
             "kelly_edge_pct": self.kelly_config.edge_pct,
             "kelly_min_stake": self.kelly_config.min_stake,
             "kelly_max_stake": self.kelly_config.max_stake,
+            # Signal filter config
+            "signal_overround_enabled": self.signal_config.overround_enabled,
+            "signal_field_size_enabled": self.signal_config.field_size_enabled,
+            "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
+            "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
@@ -1305,6 +1420,7 @@ class LayEngine:
                 "monitoring": len(self.monitoring),
                 "bets_placed": len(self.bets_placed),
                 "spread_rejections": len(self.spread_rejections),
+                "signal_rejections": len(self.signal_rejections),
                 "jofs_splits": sum(
                     1 for b in self.bets_placed
                     if "JOINT" in b.get("rule_applied", "")
@@ -1475,6 +1591,31 @@ class LayEngine:
             if self.point_value != 1.0:
                 for instruction in result.instructions:
                     instruction.size = round(instruction.size * self.point_value, 2)
+
+            # Apply signal filters (backtest mode — no previous prices / steam data)
+            any_signal_enabled = (
+                self.signal_config.overround_enabled or
+                self.signal_config.field_size_enabled or
+                self.signal_config.band_perf_enabled
+                # steam_gate skipped in snapshot mode — no monitoring history
+            )
+            if any_signal_enabled and not result.skipped:
+                bt_band_stats = self._compute_band_stats(self.signal_config.band_perf_lookback_days)
+                filtered_instructions = []
+                for inst in result.instructions:
+                    sig_result = apply_signal_filters(
+                        selection_id=inst.selection_id,
+                        current_price=inst.price,
+                        original_stake=inst.size,
+                        all_runners=runners_with_prices,
+                        previous_prices={},   # not available in snapshot mode
+                        band_stats=bt_band_stats,
+                        config=self.signal_config,
+                    )
+                    if sig_result.allowed:
+                        inst.size = sig_result.final_stake
+                        filtered_instructions.append(inst)
+                result.instructions = filtered_instructions
 
             # Build per-market result dict
             bets_list = []

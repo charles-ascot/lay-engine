@@ -406,6 +406,42 @@ def set_mark_uplift_stake(req: MarkUpliftStakeRequest):
     return {"mark_uplift_stake": engine.mark_uplift_stake}
 
 
+@app.post("/api/engine/signal/overround")
+def toggle_signal_overround():
+    """Toggle Signal 1: Market Overround filter.
+    When enabled, halves stake when book > 115% and skips when > 120%."""
+    engine.signal_config.overround_enabled = not engine.signal_config.overround_enabled
+    engine._save_state()
+    return {"signal_overround_enabled": engine.signal_config.overround_enabled}
+
+
+@app.post("/api/engine/signal/field-size")
+def toggle_signal_field_size():
+    """Toggle Signal 2: Field Size filter.
+    When enabled, caps stake at £10 for fields > 10 runners when fav odds ≥ 3.0."""
+    engine.signal_config.field_size_enabled = not engine.signal_config.field_size_enabled
+    engine._save_state()
+    return {"signal_field_size_enabled": engine.signal_config.field_size_enabled}
+
+
+@app.post("/api/engine/signal/steam-gate")
+def toggle_signal_steam_gate():
+    """Toggle Signal 3: Steam Gate filter.
+    When enabled, skips bets where the favourite has shortened ≥3% since first monitoring snapshot."""
+    engine.signal_config.steam_gate_enabled = not engine.signal_config.steam_gate_enabled
+    engine._save_state()
+    return {"signal_steam_gate_enabled": engine.signal_config.steam_gate_enabled}
+
+
+@app.post("/api/engine/signal/band-perf")
+def toggle_signal_band_perf():
+    """Toggle Signal 4: Rolling Band Performance filter.
+    When enabled, caps stake at £10 when the 5-day win rate for the odds band is < 50%."""
+    engine.signal_config.band_perf_enabled = not engine.signal_config.band_perf_enabled
+    engine._save_state()
+    return {"signal_band_perf_enabled": engine.signal_config.band_perf_enabled}
+
+
 @app.post("/api/engine/point-value")
 def set_point_value(req: PointValueRequest):
     """Set the point value (£ per point). Multiplies all rule stakes."""
