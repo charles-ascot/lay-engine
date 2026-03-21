@@ -1419,7 +1419,6 @@ interface ChimeraReport {{
       pl: number;
       roi: number;                 // Decimal
       rating: string;              // SUPERB|EXCELLENT|GOOD|FAIR|MARGINAL|MIXED|POOR
-      notes?: string;
     }}>;
     narrative: string;
   }};
@@ -1434,10 +1433,6 @@ interface ChimeraReport {{
     pl: number;                    // +stake for WIN, -liability for LOSS
     result: string;                // "WIN" | "LOSS" | "VOID" | "NR"
     band_label: string;            // Which odds band this falls in
-    rule?: string;                 // e.g. "RULE_1", "RULE_2"
-    excluded?: boolean;            // true if sub-2.0
-    exclusion_reason?: string;     // e.g. "Sub-2.0"
-    notes?: string;
   }}>;
   timing_analysis: null;           // Set to null unless timing data available
   weekday_weekend: null;           // Set to null unless weekend data available
@@ -1511,11 +1506,12 @@ ENGINE STATE:
 1. The PRE-COMPUTED AGGREGATIONS above are authoritative. Use them exactly for summary totals and band P&Ls. Do not recount or resum from raw data.
 2. Use SETTLED BETS data to populate the individual bets[] array (runner name, venue, odds, stake, liability, pl, result, band_label). Cross-reference by runner name and venue.
 3. If settled data is empty (e.g. dry run mode or Betfair not authenticated), calculate P/L from session data using: WIN = +stake, LOSS = -liability.
-4. For cumulative_performance.by_day, include ALL historical operating days plus today.
+4. For cumulative_performance.by_day, include the most recent 30 operating days (plus today). Older days can be omitted to keep output concise.
 5. For cumulative_performance.by_band, aggregate across ALL days (historical + today).
 6. Strike rates and ROI are DECIMAL values (0.615 not 61.5, 0.266 not 26.6).
 7. P/L values are raw GBP numbers (use -5.60 not "-£5.60").
 8. Be precise with numbers — do not invent data. Only use the data provided.
+8a. Keep all narrative and notes fields concise — maximum 2 sentences each.
 9. The day_number should be calculated from the historical data (count of unique operating dates + 1 for today).
 10. Include ALL bets with WIN or LOSS outcome in the bets array. Exclude VOID, NR, or unknown-result bets from all sections.
 11. Output ONLY the JSON object. No backticks, no markdown fences, no explanatory text."""
@@ -1619,11 +1615,11 @@ def generate_report(req: GenerateReportRequest):
         client = get_anthropic()
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=16384,
+            max_tokens=32768,
             messages=[{"role": "user", "content": prompt}],
         )
         if message.stop_reason == "max_tokens":
-            logging.warning(f"Report response truncated — hit max_tokens ({16384})")
+            logging.warning(f"Report response truncated — hit max_tokens ({32768})")
         report_text = message.content[0].text
 
         # Parse the JSON response — strip any markdown fencing if present

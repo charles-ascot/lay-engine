@@ -4336,7 +4336,16 @@ function ReportsTab() {
         trimmed = trimmed.replace(/^```\w*\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
       }
       if (trimmed.startsWith('{')) {
-        try { content = JSON.parse(trimmed) } catch (e) {}
+        try {
+          content = JSON.parse(trimmed)
+        } catch (e) {
+          // JSON is malformed — most likely truncated due to output token limit
+          return `<div style="padding:2rem;text-align:center;color:#e88;">
+            <h2>⚠️ Report Render Error</h2>
+            <p>The AI response was truncated before completing the report JSON.<br/>
+            Please delete this report and regenerate it — the fix has been applied to prevent this happening again.</p>
+          </div>`
+        }
       }
     }
     if (typeof content === 'object') return renderJsonReport(content)
