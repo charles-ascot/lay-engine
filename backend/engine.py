@@ -970,23 +970,40 @@ class LayEngine:
     def _compute_band_stats(self, lookback_days: int = 5) -> dict:
         """
         Compute win rates per odds band over the last N days from settled bets.
+        Scans both today's bets (self.bets_placed) and historical session
+        records (self.sessions) so the full lookback window is populated
+        from day one — not just the current session.
         Returns {band_name: {"wins": int, "total": int, "win_rate": float}}
         """
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=lookback_days)
         ).isoformat()
         stats: dict = {}
-        for bet in self.bets_placed:
+
+        def _tally(bet):
             if bet.get("outcome") not in ("WIN", "LOSS"):
-                continue
+                return
             if bet.get("timestamp", "") < cutoff:
-                continue
+                return
             band = get_odds_band(bet.get("price", 0))
             if band not in stats:
                 stats[band] = {"wins": 0, "total": 0}
             stats[band]["total"] += 1
             if bet.get("outcome") == "WIN":
                 stats[band]["wins"] += 1
+
+        # Today's live bets
+        for bet in self.bets_placed:
+            _tally(bet)
+
+        # Historical sessions (covers the lookback window across past days)
+        for session in self.sessions:
+            # Skip the current active session — already covered by bets_placed
+            if self.current_session and session.get("session_id") == self.current_session.get("session_id"):
+                continue
+            for bet in session.get("bets", []):
+                _tally(bet)
+
         for band_data in stats.values():
             t = band_data["total"]
             band_data["win_rate"] = round(band_data["wins"] / t, 4) if t > 0 else 0.0
