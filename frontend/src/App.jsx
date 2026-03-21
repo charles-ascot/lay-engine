@@ -1414,6 +1414,10 @@ function BacktestTab() {
   const [kellyEdgePct, setKellyEdgePct] = useState(5)
   const [kellyMinStake, setKellyMinStake] = useState(0.5)
   const [kellyMaxStake, setKellyMaxStake] = useState(50)
+  const [sigOverround, setSigOverround] = useState(false)
+  const [sigFieldSize, setSigFieldSize] = useState(false)
+  const [sigSteamGate, setSigSteamGate] = useState(false)
+  const [sigBandPerf, setSigBandPerf] = useState(false)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1526,6 +1530,10 @@ function BacktestTab() {
           kelly_edge_pct: kellyEdgePct,
           kelly_min_stake: kellyMinStake,
           kelly_max_stake: kellyMaxStake,
+          signal_overround_enabled: sigOverround,
+          signal_field_size_enabled: sigFieldSize,
+          signal_steam_gate_enabled: sigSteamGate,
+          signal_band_perf_enabled: sigBandPerf,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1569,6 +1577,10 @@ function BacktestTab() {
           kelly_edge_pct: kellyEdgePct,
           kelly_min_stake: kellyMinStake,
           kelly_max_stake: kellyMaxStake,
+          signal_overround_enabled: sigOverround,
+          signal_field_size_enabled: sigFieldSize,
+          signal_steam_gate_enabled: sigSteamGate,
+          signal_band_perf_enabled: sigBandPerf,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1724,6 +1736,10 @@ function BacktestTab() {
             kelly_edge_pct: kellyEdgePct,
             kelly_min_stake: kellyMinStake,
             kelly_max_stake: kellyMaxStake,
+            signal_overround_enabled: sigOverround,
+            signal_field_size_enabled: sigFieldSize,
+            signal_steam_gate_enabled: sigSteamGate,
+            signal_band_perf_enabled: sigBandPerf,
           }),
         })
         if (!r.ok) throw new Error(`${r.status}`)
@@ -1770,6 +1786,10 @@ function BacktestTab() {
         mark_uplift_enabled: markUplift,
         mark_uplift_stake: markUpliftStake,
         point_value: pointValue,
+        signal_overround_enabled: sigOverround,
+        signal_field_size_enabled: sigFieldSize,
+        signal_steam_gate_enabled: sigSteamGate,
+        signal_band_perf_enabled: sigBandPerf,
       },
       summary,
       days,
@@ -1958,6 +1978,10 @@ function BacktestTab() {
               ['ceil', markCeiling, setMarkCeiling, 'Mark Ceiling (≤8.0)'],
               ['floor', markFloor, setMarkFloor, 'Mark Floor (≥1.5)'],
               ['uplift', markUplift, setMarkUplift, 'Mark Uplift (2.5–3.5)'],
+              ['sig-overround', sigOverround, setSigOverround, 'Signal: Overround'],
+              ['sig-field', sigFieldSize, setSigFieldSize, 'Signal: Field Size'],
+              ['sig-steam', sigSteamGate, setSigSteamGate, 'Signal: Steam Gate'],
+              ['sig-band', sigBandPerf, setSigBandPerf, 'Signal: Band Perf'],
             ].map(([key, val, setter, label]) => (
               <label key={key} className="bt-toggle-label">
                 <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />

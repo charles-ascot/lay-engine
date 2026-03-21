@@ -2323,6 +2323,11 @@ class BacktestRunRequest(BaseModel):
     kelly_edge_pct: float = 5.0         # assumed edge % over market-implied probability
     kelly_min_stake: float = 0.50       # stake floor £
     kelly_max_stake: float = 50.0       # stake ceiling £
+    # Signal filters (market intelligence layer)
+    signal_overround_enabled: bool = False
+    signal_field_size_enabled: bool = False
+    signal_steam_gate_enabled: bool = False   # samples price 15 mins before target_iso
+    signal_band_perf_enabled: bool = False
 
 
 @app.get("/api/backtest/dates")
@@ -2436,6 +2441,23 @@ def _backtest_run_inner(req):
         except Exception as _oe:
             logger.warning(f"AI odds agent init failed: {_oe}")
 
+    # ── Signal filter setup ──────────────────────────────────────────────────
+    from signal_filters import SignalConfig as _SigConfig, apply_signal_filters as _apply_sigs
+    _sig_config = _SigConfig(
+        overround_enabled=req.signal_overround_enabled,
+        field_size_enabled=req.signal_field_size_enabled,
+        steam_gate_enabled=req.signal_steam_gate_enabled,
+        band_perf_enabled=req.signal_band_perf_enabled,
+    )
+    # Band performance stats — drawn from live session history (same source as live engine)
+    _any_signal = any([
+        req.signal_overround_enabled,
+        req.signal_field_size_enabled,
+        req.signal_steam_gate_enabled,
+        req.signal_band_perf_enabled,
+    ])
+    _band_stats = engine._compute_band_stats(_sig_config.band_perf_lookback_days) if _any_signal else {}
+
     client = FSUClient(base_url=FSU_URL, date=req.date)
     client.login()  # fetches GCP identity token on Cloud Run
     markets = client.get_todays_win_markets(countries=req.countries)
@@ -2474,6 +2496,30 @@ def _backtest_run_inner(req):
 
         client.set_virtual_time(target_iso)
         runners, valid = client.get_market_prices(market_id)
+
+        # ── Steam Gate: sample prices 15 mins before target to detect shortening ──
+        _previous_prices: dict = {}
+        if req.signal_steam_gate_enabled and valid:
+            try:
+                _steam_lookback_secs = 15 * 60
+                _early_ts = datetime.fromtimestamp(
+                    datetime.fromisoformat(target_iso.replace("Z", "+00:00")).timestamp()
+                    - _steam_lookback_secs,
+                    tz=_tz.utc,
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                client.set_virtual_time(_early_ts)
+                _early_runners, _early_valid = client.get_market_prices(market_id)
+                if _early_valid and _early_runners:
+                    _previous_prices = {
+                        r.selection_id: r.best_available_to_lay
+                        for r in _early_runners
+                        if r.best_available_to_lay is not None
+                    }
+            except Exception as _se:
+                logger.warning(f"Steam Gate price sampling failed for {market_id}: {_se}")
+            finally:
+                # Always restore to evaluation time
+                client.set_virtual_time(target_iso)
 
         if not valid:
             results.append({
@@ -2558,6 +2604,29 @@ def _backtest_run_inner(req):
                     config=_kelly_cfg,
                     base_stake=instr.size,
                 )
+
+        # ── Signal filters (market intelligence layer) ─────────────────────
+        if _any_signal and not rule_result.skipped and rule_result.instructions:
+            _sig_kept = []
+            for _instr in rule_result.instructions:
+                _sig_result = _apply_sigs(
+                    selection_id=_instr.selection_id,
+                    current_price=_instr.price,
+                    original_stake=_instr.size,
+                    all_runners=runners,
+                    previous_prices=_previous_prices,
+                    band_stats=_band_stats,
+                    config=_sig_config,
+                )
+                if _sig_result.allowed:
+                    _instr.size = _sig_result.final_stake
+                    _sig_kept.append(_instr)
+                else:
+                    logger.info(
+                        f"[SIGNAL FILTER] BT BLOCKED: {_instr.runner_name} "
+                        f"@ {m['venue']} — {_sig_result.skip_reason}"
+                    )
+            rule_result.instructions = _sig_kept
 
         # ── AI Research Agent overlay (backtest-only) ──────────────────────
         # Runs AFTER the strategy has decided to bet, BEFORE settlement lookup.
