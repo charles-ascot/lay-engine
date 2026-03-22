@@ -2458,7 +2458,7 @@ def _backtest_run_inner(req):
     ])
     _band_stats = engine._compute_band_stats(_sig_config.band_perf_lookback_days) if _any_signal else {}
 
-    client = FSUClient(base_url=FSU_URL, date=req.date)
+    client = FSUClient(base_url=FSU_URL, date=req.date, timeout=15)
     client.login()  # fetches GCP identity token on Cloud Run
     markets = client.get_todays_win_markets(countries=req.countries)
     if req.market_ids:
@@ -2496,32 +2496,7 @@ def _backtest_run_inner(req):
 
         client.set_virtual_time(target_iso)
         runners, valid = client.get_market_prices(market_id)
-
-        # ── Steam Gate: sample prices 15 mins before target to detect shortening ──
-        _previous_prices: dict = {}
-        if req.signal_steam_gate_enabled and valid:
-            _orig_timeout = client.timeout
-            client.timeout = 8  # short timeout — skip steam check rather than hang
-            try:
-                _steam_lookback_secs = 15 * 60
-                _early_ts = datetime.fromtimestamp(
-                    datetime.fromisoformat(target_iso.replace("Z", "+00:00")).timestamp()
-                    - _steam_lookback_secs,
-                    tz=_tz.utc,
-                ).strftime("%Y-%m-%dT%H:%M:%SZ")
-                client.set_virtual_time(_early_ts)
-                _early_runners, _early_valid = client.get_market_prices(market_id)
-                if _early_valid and _early_runners:
-                    _previous_prices = {
-                        r.selection_id: r.best_available_to_lay
-                        for r in _early_runners
-                        if r.best_available_to_lay is not None
-                    }
-            except Exception as _se:
-                logger.warning(f"Steam Gate price sampling failed for {market_id}: {_se}")
-            finally:
-                client.timeout = _orig_timeout
-                client.set_virtual_time(target_iso)
+        _previous_prices: dict = {}   # populated later if Steam Gate fires
 
         if not valid:
             results.append({
@@ -2606,6 +2581,29 @@ def _backtest_run_inner(req):
                     config=_kelly_cfg,
                     base_stake=instr.size,
                 )
+
+        # ── Steam Gate: only fetch early prices when rules produced a bet ──
+        # Moved here from pre-rules to avoid wasting FSU calls on skipped markets.
+        if req.signal_steam_gate_enabled and not rule_result.skipped and rule_result.instructions:
+            try:
+                _steam_lookback_secs = 15 * 60
+                _early_ts = datetime.fromtimestamp(
+                    datetime.fromisoformat(target_iso.replace("Z", "+00:00")).timestamp()
+                    - _steam_lookback_secs,
+                    tz=_tz.utc,
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                client.set_virtual_time(_early_ts)
+                _early_runners, _early_valid = client.get_market_prices(market_id)
+                if _early_valid and _early_runners:
+                    _previous_prices = {
+                        r.selection_id: r.best_available_to_lay
+                        for r in _early_runners
+                        if r.best_available_to_lay is not None
+                    }
+            except Exception as _se:
+                logger.warning(f"Steam Gate price sampling failed for {market_id}: {_se}")
+            finally:
+                client.set_virtual_time(target_iso)
 
         # ── Signal filters (market intelligence layer) ─────────────────────
         if _any_signal and not rule_result.skipped and rule_result.instructions:
