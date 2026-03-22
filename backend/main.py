@@ -2500,6 +2500,8 @@ def _backtest_run_inner(req):
         # ── Steam Gate: sample prices 15 mins before target to detect shortening ──
         _previous_prices: dict = {}
         if req.signal_steam_gate_enabled and valid:
+            _orig_timeout = client.timeout
+            client.timeout = 8  # short timeout — skip steam check rather than hang
             try:
                 _steam_lookback_secs = 15 * 60
                 _early_ts = datetime.fromtimestamp(
@@ -2518,7 +2520,7 @@ def _backtest_run_inner(req):
             except Exception as _se:
                 logger.warning(f"Steam Gate price sampling failed for {market_id}: {_se}")
             finally:
-                # Always restore to evaluation time
+                client.timeout = _orig_timeout
                 client.set_virtual_time(target_iso)
 
         if not valid:

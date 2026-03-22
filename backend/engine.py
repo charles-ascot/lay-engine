@@ -1683,8 +1683,12 @@ class LayEngine:
             "mark_ceiling_enabled": self.mark_ceiling_enabled,
             "mark_floor_enabled": self.mark_floor_enabled,
             "mark_uplift_enabled": self.mark_uplift_enabled,
-                "mark_uplift_stake": self.mark_uplift_stake,
+            "mark_uplift_stake": self.mark_uplift_stake,
             "process_window": getattr(self, 'process_window', 12),
+            "signal_overround_enabled": self.signal_config.overround_enabled,
+            "signal_field_size_enabled": self.signal_config.field_size_enabled,
+            "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
+            "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
             "results": per_market_results,
         }
 

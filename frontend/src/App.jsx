@@ -762,6 +762,10 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
                 <span className={snapshotResult.mark_ceiling_enabled ? 'tag-on' : 'tag-off'}>Ceiling {snapshotResult.mark_ceiling_enabled ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.mark_floor_enabled ? 'tag-on' : 'tag-off'}>Floor {snapshotResult.mark_floor_enabled ? 'ON' : 'OFF'}</span>
                 <span className={snapshotResult.mark_uplift_enabled ? 'tag-on' : 'tag-off'}>Uplift {snapshotResult.mark_uplift_enabled ? `${snapshotResult.mark_uplift_stake || 3} pts` : 'OFF'}</span>
+                {snapshotResult.signal_overround_enabled && <span className="tag-on">Overround</span>}
+                {snapshotResult.signal_field_size_enabled && <span className="tag-on">Field Size</span>}
+                {snapshotResult.signal_steam_gate_enabled && <span className="tag-on">Steam Gate</span>}
+                {snapshotResult.signal_band_perf_enabled && <span className="tag-on">Band Perf</span>}
               </div>
               <div className="snapshot-results-header">
                 <h3>Snapshot Results</h3>
