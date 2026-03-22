@@ -3,13 +3,13 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last endpoint audit: 2026-03-18**
+**Last updated: 2026-03-22**
 
 ---
 
 ## Overview
 
-CHIMERA scans Betfair Exchange for horse racing WIN markets across configurable countries (GB, IE, ZA, FR), fetches live prices, identifies the favourite and second favourite, then applies one of four stake rules based on the favourite's odds and the gap to the second favourite. Bets are placed automatically before the off. A full dry-run mode lets you watch the engine work with real market data without risking real money.
+CHIMERA scans Betfair Exchange for horse racing WIN markets across configurable countries (GB, IE, ZA, FR), fetches live prices, identifies the favourite and second favourite, then applies one of four stake rules based on the favourite's odds and the gap to the second favourite. Bets are placed automatically before the off. A full dry-run mode lets you watch the engine work with real market data without risking real money. A historic backtest mode replays any past date via FSU1 with full rule, signal, and AI agent overlays.
 
 ---
 
@@ -68,9 +68,10 @@ CHIMERA is a multi-service platform running on Google Cloud Platform (project: `
 - **4-rule lay strategy** — Deterministic rules based on favourite odds and the gap to second favourite
 - **Points Value** — Configurable stake multiplier (£0.50–£100 per point) applied to all rule stakes
 - **Dynamic Spread Control** — Validates back-lay spread against odds-based thresholds (toggleable)
-- **JOFS Control** — Close-odds split filter: skips markets where the gap between favourite and second favourite is very small (toggleable)
+- **JOFS Control** — Close-odds split filter: splits stake across joint favourites when gap ≤ 0.2 (toggleable)
 - **Mark Rules** — Ceiling (no lays above 8.0), Floor (no lays below 1.5), and Uplift (boosted stake in 2.5–3.5 band) — each independently toggleable
 - **Kelly Criterion** — Optional Kelly-fraction stake sizing with bankroll, edge %, min/max stake controls
+- **Signal Filters** — Four independently switchable market intelligence signals that sit between rule evaluation and execution (see Signal Filters section below)
 - **Process Window** — Configurable minutes-before-off window (0.05–60 min) within which the engine will consider placing a bet
 - **Dry run mode** — Fetches real markets and prices, logs everything, skips actual bet placement
 - **Dry run snapshots** — Instant point-in-time dry-run snapshots for selected markets; archived to GCS
@@ -80,7 +81,9 @@ CHIMERA is a multi-service platform running on Google Cloud Platform (project: `
 - **Settled bets** — Race results with actual P/L from Betfair cleared orders
 - **Session tracking** — Every engine run is a session with full bet/result history
 - **Data Registry** — Full inventory of all data records (sessions, snapshots, reports) with storage locations
-- **AI reports** — Structured daily performance reports (JSON) with odds band analysis, venue analysis, cumulative performance, and recommendations
+- **AI reports** — Structured daily performance reports with odds band analysis, venue analysis, cumulative performance, and recommendations; generated via Claude streaming
+- **AI Research Agent** — Web-searches for runner intelligence pre-race and may overrule or adjust individual bets (backtest only)
+- **AI Odds Movement Agent** — Samples historical price series at configurable intervals, analyses drift/steam, and may overrule or adjust bets (backtest only; no internet required)
 - **AI chat** — Interactive conversational analysis powered by Claude Sonnet 4.6 with full session data context
 - **Voice interface** — OpenAI Whisper STT + TTS for hands-free interaction with the AI
 - **API key auth** — External FSU/agent access with key-based authentication (`X-API-Key` header)
@@ -107,15 +110,17 @@ All bets are **LAY** bets on horse racing **WIN** markets, placed pre-off. Base 
 | **RULE 3A** | Favourite odds > 5.0 AND gap to 2nd fav < 2 | Lay favourite @ **1 pt** + Lay 2nd favourite @ **1 pt** |
 | **RULE 3B** | Favourite odds > 5.0 AND gap to 2nd fav >= 2 | Lay favourite @ **1 pt** |
 
+**JOFS (Joint/Close Favourite Split) — applied to Rules 1 & 2:**
+When the gap between 1st and 2nd favourite is ≤ 0.2, the market is treated as a joint-favourite race and the full stake is split evenly across both runners.
+
 **Guards applied before rule evaluation:**
 - Markets with favourite odds > 50.0 are skipped (illiquid/bogus)
 - In-play markets are skipped (pre-off only)
 - Duplicate bets on the same runner/race are prevented
 - **Spread Control** (optional) — rejects bets where back-lay spread exceeds odds-based thresholds
-- **JOFS Control** (optional) — rejects markets where odds gap is too small (jump-on-favourite scenario)
 - **Mark Ceiling** (optional) — rejects any lay where odds > 8.0
 - **Mark Floor** (optional) — rejects any lay where odds < 1.5
-- **Mark Uplift** (optional) — applies a 3 pt uplift stake (adjustable 2–10 pts) to bets in the 2.5–3.5 odds band
+- **Mark Uplift** (optional) — applies a configurable uplift stake (2–10 pts) to bets in the 2.5–3.5 odds band
 
 ### Spread Control Thresholds
 
@@ -129,6 +134,63 @@ All bets are **LAY** bets on horse racing **WIN** markets, placed pre-off. Base 
 
 ---
 
+## Signal Filters (Market Intelligence Layer)
+
+Signal filters are a post-rules, pre-execution layer derived from the dickreuter methodology analysis (Day 33 post-mortem, 2026-03-19). They sit between rule evaluation and bet placement — they never modify the rules themselves, only adjust stakes or block individual bets. All signals are **OFF by default** and independently switchable in both Live and Backtest modes.
+
+Module: `backend/signal_filters.py`
+
+### Signal 1 — Market Overround
+
+Computes the market book percentage (sum of implied win probabilities from all runners' back prices). A high overround indicates an illiquid or unreliable market where the favourite's price is less trustworthy.
+
+| Book % | Action |
+|--------|--------|
+| > 120% (hard threshold) | SKIP — market too illiquid |
+| > 115% (soft threshold) | HALVE stake |
+| ≤ 115% | No action |
+
+### Signal 2 — Field Size
+
+Large NH fields at mid-to-high odds significantly increase variance. A 3.10 favourite in a 14-runner novice hurdle is a very different proposition to the same price in a 6-runner conditions chase.
+
+**Trigger:** Active runners > 10 AND favourite odds ≥ 3.0 → cap stake at £10.
+
+### Signal 3 — Steam Gate
+
+Detects favourites that are being backed heavily into the race. Laying into a steaming horse is betting against the live information flow.
+
+**Live:** Uses the engine's in-memory monitoring snapshots (price at first poll vs current price).
+**Backtest:** Samples FSU1 prices at `target_iso − 15 minutes` (8-second timeout; skipped gracefully if FSU is slow), comparing to prices at evaluation time.
+
+**Trigger:** Favourite price has shortened ≥ 3% since the earlier snapshot AND odds ≥ 3.0 → SKIP.
+
+### Signal 4 — Rolling Band Performance
+
+Tracks the 5-day win rate per odds band across all settled sessions. When a band has been losing consistently, stakes are automatically reduced rather than betting full size into a deteriorating band.
+
+**Data source:** Reads from both `self.bets_placed` (today) and `self.sessions` (historical) to populate the full lookback window from day one.
+
+**Trigger:** 5-day win rate in band < 50% AND minimum 10 bets in sample → cap stake at £10.
+
+### Signal Priority (when multiple signals fire)
+
+1. Any **SKIP** verdict → bet blocked entirely
+2. **HALVE_STAKE** verdicts → each halves the current stake (compounding)
+3. **CAP_STAKE** verdicts → most restrictive cap across all fired signals
+4. Stake never drops below £2.00 when the original stake was ≥ £2.00
+
+### Signal Availability by Mode
+
+| Signal | Live | Dry Run | Backtest (Single) | Backtest (Cycle) |
+|--------|------|---------|-------------------|-----------------|
+| Overround | ✅ | ✅ | ✅ | ✅ |
+| Field Size | ✅ | ✅ | ✅ | ✅ |
+| Steam Gate | ✅ | ✅ | ✅ | ✅ |
+| Band Perf | ✅ | ✅ | ✅ | ✅ |
+
+---
+
 ## Dashboard Tabs
 
 | Tab | Description |
@@ -138,7 +200,7 @@ All bets are **LAY** bets on horse racing **WIN** markets, placed pre-off. Base 
 | **Backtest** | Historic market replay — single date run, multi-date cycle run, history with export |
 | **Strategy** | Strategy visualisation and rule documentation |
 | **History** | Three sub-tabs: Sessions (live session history), Matched (bets on Betfair), Settled (P/L from Betfair) |
-| **Bet Settings** | All betting parameters: timing, stake, countries, rules, JOFS, Spread Control, Mark Rules, Kelly, Process Window |
+| **Bet Settings** | All betting parameters: timing, stake, countries, rules, JOFS, Spread Control, Mark Rules, Kelly, Signal Filters, Process Window |
 | **Settings** | Report recipients, AI data source toggles, AI capability toggles, theme selection |
 | **Reports** | AI-generated daily performance reports with structured tables; generate, view, email, save to Drive |
 
@@ -153,11 +215,20 @@ chimera-lay-engine/
 ├── CHANGELOG.md                # Version history
 ├── test_rules.py               # Rule verification tests
 ├── .gitignore
+├── docs/
+│   ├── CHIMERA_Platform_Architecture.md   # Platform overview and FSU breakdown
+│   ├── Lay_Engine_Infographic.md          # Component map and workflow descriptions
+│   └── Day33_Loss_Analysis_and_Methodology_Signals.md  # Day 33 post-mortem + signal rationale
 ├── backend/
-│   ├── main.py                 # FastAPI app — all 60 API endpoints
-│   ├── engine.py               # Core engine: scan → rules → bet loop
-│   ├── betfair_client.py       # Betfair Exchange API client
-│   ├── rules.py                # Rule definitions, spread control, data classes
+│   ├── main.py                 # FastAPI app — all API endpoints
+│   ├── engine.py               # Core engine: scan → rules → signal filters → bet loop
+│   ├── rules.py                # Rule definitions, spread control, JOFS, data classes
+│   ├── signal_filters.py       # Four market intelligence signal filters (post-rules layer)
+│   ├── betfair_client.py       # Betfair Exchange API client (live)
+│   ├── fsu_client.py           # FSU1 historic data client with virtual time support
+│   ├── kelly.py                # Kelly Criterion stake sizing
+│   ├── ai_backtest_agent.py    # AI Research Agent (web search overlay for backtest)
+│   ├── ai_odds_agent.py        # AI Odds Movement Agent (price drift analysis for backtest)
 │   └── requirements.txt        # Python dependencies
 ├── frontend/
 │   ├── index.html              # HTML entry point
@@ -177,7 +248,6 @@ chimera-lay-engine/
 
 > **Base URL (production):** `https://lay-engine-950990732577.europe-west2.run.app`
 > **Authentication (Data API):** `X-API-Key: <key>` header or `?api_key=<key>` query param
-> **Total endpoints: 60**
 
 ---
 
@@ -197,7 +267,7 @@ chimera-lay-engine/
 | Method | Path | Body / Params | Response | Description |
 |--------|------|---------------|----------|-------------|
 | `GET` | `/api/state` | — | Full engine state JSON | Full engine state for dashboard |
-| `GET` | `/api/rules` | — | `{strategy, version, timing, markets, rules[], spread_control, jofs_control}` | Active rule set with all control config |
+| `GET` | `/api/rules` | — | `{strategy, version, timing, markets, rules[], spread_control, jofs_control, signal_config}` | Active rule set with all control config including signals |
 
 ---
 
@@ -220,6 +290,17 @@ chimera-lay-engine/
 | `POST` | `/api/engine/kelly` | `{enabled, fraction (0–1), bankroll, edge_pct (0–50), min_stake, max_stake}` | `{kelly: {...}}` | Update Kelly Criterion config |
 | `POST` | `/api/engine/reset-bets` | — | `{status}` | Clear dry-run bets and re-process markets |
 | `GET` | `/api/engine/spread-rejections` | — | `{rejections: [...]}` | View last 50 spread control rejections |
+
+---
+
+### Signal Filter Controls
+
+| Method | Path | Body / Params | Response | Description |
+|--------|------|---------------|----------|-------------|
+| `POST` | `/api/engine/signal/overround` | — | `{signal_overround_enabled: bool}` | Toggle Market Overround signal |
+| `POST` | `/api/engine/signal/field-size` | — | `{signal_field_size_enabled: bool}` | Toggle Field Size signal |
+| `POST` | `/api/engine/signal/steam-gate` | — | `{signal_steam_gate_enabled: bool}` | Toggle Steam Gate signal |
+| `POST` | `/api/engine/signal/band-perf` | — | `{signal_band_perf_enabled: bool}` | Toggle Rolling Band Performance signal |
 
 ---
 
@@ -280,7 +361,7 @@ chimera-lay-engine/
 | Method | Path | Body / Params | Response | Description |
 |--------|------|---------------|----------|-------------|
 | `GET` | `/api/reports/templates` | — | `{templates: [{id, name, description}]}` | List available report templates |
-| `POST` | `/api/reports/generate` | `{date, session_ids: [], template}` | Full report JSON | Generate AI daily report (auto-emails recipients) |
+| `POST` | `/api/reports/generate` | `{date, session_ids: [], template}` | Full report JSON | Generate AI daily report via streaming (auto-emails recipients) |
 | `GET` | `/api/reports` | — | `{reports: [{id, date, template, title, created_at}]}` | List all reports (without content) |
 | `GET` | `/api/reports/{report_id}` | — | Full report with content | Get report with full content |
 | `DELETE` | `/api/reports/{report_id}` | — | `{status, message}` | Delete a report |
@@ -330,9 +411,42 @@ chimera-lay-engine/
 |--------|------|---------------|----------|-------------|
 | `GET` | `/api/backtest/dates` | — | `{dates: [...]}` | Available replay dates from FSU1 |
 | `GET` | `/api/backtest/markets` | `?date=YYYY-MM-DD&countries=GB,IE` | `{markets: [...]}` | Markets for date + country filter |
-| `POST` | `/api/backtest/run` | `{date, countries, jofs_enabled, spread_control, mark_ceiling, mark_floor, mark_uplift, mark_uplift_stake, point_value, process_window, kelly_enabled, ai_agent_enabled, odds_agent_enabled, market_ids?: [...]}` | `{job_id, status}` | Start backtest job (async — poll for result) |
+| `POST` | `/api/backtest/run` | See Backtest Request below | `{job_id, status}` | Start backtest job (async — poll for result) |
 | `GET` | `/api/backtest/job/{job_id}` | — | `{job_id, status, result?, error?}` | Poll backtest job status / retrieve results |
 | `POST` | `/api/backtest/export-sheets` | `{entries: [backtest run objects]}` | `{url: spreadsheet URL, spreadsheet_id}` | Export backtest runs to Google Sheets |
+
+#### Backtest Request Body (`POST /api/backtest/run`)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `date` | str | — | Date to replay (YYYY-MM-DD) |
+| `countries` | list[str] | `["GB","IE"]` | Country filter |
+| `process_window_mins` | float | 5 | Minutes before off to evaluate |
+| `jofs_enabled` | bool | true | JOFS close-odds split |
+| `spread_control` | bool | false | Spread control filter |
+| `mark_ceiling_enabled` | bool | false | Mark ceiling (≤8.0) |
+| `mark_floor_enabled` | bool | false | Mark floor (≥1.5) |
+| `mark_uplift_enabled` | bool | false | Mark uplift (2.5–3.5 band) |
+| `mark_uplift_stake` | float | 3.0 | Uplift stake in points |
+| `point_value` | float | 1.0 | Stake multiplier |
+| `market_ids` | list[str] | `[]` | Specific markets (empty = all) |
+| `ai_agent_enabled` | bool | false | AI Research Agent overlay |
+| `ai_agent_max_searches` | int | 4 | Max web searches per runner |
+| `ai_agent_overrule_confidence` | float | 0.65 | Min confidence to overrule |
+| `odds_agent_enabled` | bool | false | AI Odds Movement Agent overlay |
+| `odds_agent_interval_mins` | int | 5 | Price sampling interval (mins) |
+| `odds_agent_lookback_mins` | int | 30 | Price history window (mins) |
+| `odds_agent_overrule_confidence` | float | 0.65 | Min confidence to overrule |
+| `kelly_enabled` | bool | false | Kelly Criterion stake sizing |
+| `kelly_fraction` | float | 0.25 | Fraction of Kelly to apply |
+| `kelly_bankroll` | float | 1000.0 | Total bankroll (£) |
+| `kelly_edge_pct` | float | 5.0 | Assumed edge % |
+| `kelly_min_stake` | float | 0.50 | Minimum stake floor (£) |
+| `kelly_max_stake` | float | 50.0 | Maximum stake ceiling (£) |
+| `signal_overround_enabled` | bool | false | Market Overround signal |
+| `signal_field_size_enabled` | bool | false | Field Size signal |
+| `signal_steam_gate_enabled` | bool | false | Steam Gate signal (samples FSU at −15 mins) |
+| `signal_band_perf_enabled` | bool | false | Rolling Band Performance signal |
 
 ---
 
@@ -341,21 +455,26 @@ chimera-lay-engine/
 ### Single Run
 1. Select a date from the dropdown (populated from FSU1 historic data).
 2. Configure rules (JOFS, Spread Control, Mark Ceiling/Floor/Uplift, Point Value, Process Window, Kelly).
-3. Optionally filter the market browser to include only specific races.
-4. Click **Run Backtest** — the engine calls `/api/backtest/run` (async job) and polls `/api/backtest/job/{job_id}` until complete.
-5. Results appear as a settlement table with P&L per race.
-6. Each run is saved to **History** (browser localStorage, max 50 runs).
+3. Optionally enable Signal Filters (Overround, Field Size, Steam Gate, Band Perf).
+4. Optionally enable AI agent overlays (Research Agent, Odds Movement Agent).
+5. Optionally filter the market browser to include only specific races.
+6. Click **Run Backtest** — the engine calls `/api/backtest/run` (async job) and polls `/api/backtest/job/{job_id}` until complete.
+7. Results appear as a settlement table with P&L per race.
+8. Each run is saved to **History** (browser localStorage, max 50 runs).
+
+> **Note on Steam Gate in Backtest:** FSU1 is queried at `target_iso − 15 minutes` per market to obtain earlier prices for shortening detection. A hard 8-second timeout is applied per market — if FSU is slow, the steam check is silently skipped and the bet proceeds normally.
 
 ### Cycle Run
 1. Tick any number of dates in the **Dates** grid.
 2. Click **Run Cycle** — calls `/api/backtest/run` once per date (all markets, no pre-filtering) with a live progress bar.
-3. When complete the cycle is saved to **Cycle History** (separate localStorage key, max 20 runs).
+3. Signal filters and Kelly settings carry through to the cycle run.
+4. When complete the cycle is saved to **Cycle History** (separate localStorage key, max 20 runs).
 
 ### History & Export
 Both History sections support:
 - **Select / Deselect All** for bulk operations
 - **Download XLS** — exports selected runs to a local Excel file
-- **Google Sheets** — exports to a new Google Spreadsheet (requires service account with Sheets API scope — currently requires SA to have Sheets API permission)
+- **Google Sheets** — exports to a new Google Spreadsheet (requires SA with Sheets API permission — currently returns 403)
 - **Delete** — removes selected entries from localStorage
 - **Clear All** — wipes the entire history section
 
@@ -363,6 +482,18 @@ Both History sections support:
 |-------|-----------------|-------------|
 | Single runs | `chimera_backtest_history` | 50 |
 | Cycle runs | `chimera_backtest_cycle_history` | 20 |
+
+---
+
+## AI Agents (Backtest)
+
+### AI Research Agent
+Searches the web for runner intelligence (form, news, trainer/jockey info) before the race date and may CONFIRM, OVERRULE, or ADJUST individual bet instructions. Slows backtest runs significantly — allow extra time per race. Controlled by `ai_agent_enabled` and `ai_agent_max_searches`.
+
+### AI Odds Movement Agent
+Samples FSU1 historical prices at configurable intervals (`odds_agent_interval_mins`) over a configurable lookback window (`odds_agent_lookback_mins`), analyses the price trend (SHORTENING / DRIFTING / STABLE), and may CONFIRM, OVERRULE, or ADJUST each instruction's stake. No internet required — uses historic data only. Virtual time is always restored to `target_iso` after sampling.
+
+Both agents run **after Kelly** and **after Signal Filters** in the backtest pipeline, before settlement lookup.
 
 ---
 
@@ -381,7 +512,7 @@ The chat drawer (AI Chat button, or opened from History) provides:
 
 ## AI Reports
 
-Daily performance reports conform to the ChimeraReport JSON schema:
+Daily performance reports are generated via Anthropic Claude streaming (required for large outputs):
 
 - Executive summary with headline and key findings
 - Day performance slices (all bets, sub-2.0, 2.0+)
@@ -507,7 +638,7 @@ gcloud scheduler jobs create http chimera-keepalive \
 | `STATE_FILE` | Cloud Run | `/tmp/chimera_engine_state.json` | Local state file path |
 | `SESSIONS_FILE` | Cloud Run | `/tmp/chimera_sessions.json` | Session history file path |
 | `GCS_BUCKET` | Cloud Run | — | GCS bucket for persistent state |
-| `ANTHROPIC_API_KEY` | Cloud Run | — | Claude Sonnet API key for AI reports/chat |
+| `ANTHROPIC_API_KEY` | Cloud Run | — | Claude Sonnet API key for AI reports/chat/agents |
 | `OPENAI_API_KEY` | Cloud Run | — | OpenAI API key for Whisper STT + TTS |
 | `SENDGRID_API_KEY` | Cloud Run | — | SendGrid key for report email dispatch |
 | `EMAIL_FROM` | Cloud Run | `chimera@thync.online` | Sender email address |
@@ -538,4 +669,4 @@ gcloud scheduler jobs create http chimera-keepalive \
 | Tag | Version | Description |
 |-----|---------|-------------|
 | `v1.0-reports` | 1.0 | Stable release with Anthropic Claude-based AI agent |
-| `v5.0.0` | 5.0.0 | Current — unified version across all services, dark glass UI, full FSU platform |
+| `v5.0.0` | 5.0.0 | Current — unified version, dark glass UI, full FSU platform, signal filters, AI agents, Kelly Criterion |
