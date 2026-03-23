@@ -25,6 +25,7 @@ from betfair_client import BetfairClient
 from rules import Runner, apply_rules, RuleResult, check_spread
 from kelly import KellyConfig, calculate_kelly_stake
 from signal_filters import SignalConfig, apply_signal_filters, get_odds_band
+from market_overlay import apply_market_overlay
 
 logger = logging.getLogger("engine")
 
@@ -141,6 +142,9 @@ class LayEngine:
         self.signal_config: SignalConfig = SignalConfig()
         self.signal_rejections: list[dict] = []  # Log of signal-filtered bets
 
+        # ── Market Overlay Modifier ──
+        self.market_overlay_enabled: bool = False  # Off by default
+
         # ── Processing window ──
         self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
         self.monitoring: dict = {}      # market_id → list of odds snapshots
@@ -237,6 +241,7 @@ class LayEngine:
                 "signal_field_size_enabled": self.signal_config.field_size_enabled,
                 "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
                 "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
+                "market_overlay_enabled": self.market_overlay_enabled,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -315,6 +320,7 @@ class LayEngine:
             self.signal_config.field_size_enabled = data.get("signal_field_size_enabled", False)
             self.signal_config.steam_gate_enabled = data.get("signal_steam_gate_enabled", False)
             self.signal_config.band_perf_enabled = data.get("signal_band_perf_enabled", False)
+            self.market_overlay_enabled = data.get("market_overlay_enabled", False)
 
             logger.info(
                 f"Restored state: {len(self.processed_markets)} processed markets, "
@@ -1088,6 +1094,16 @@ class LayEngine:
         previous_prices = self._get_previous_prices(market_id)
         band_stats = self._compute_band_stats(self.signal_config.band_perf_lookback_days)
 
+        # ── Market Overlay Modifier — computed once per market ──
+        mom_result = apply_market_overlay(runners_with_prices, enabled=self.market_overlay_enabled)
+        if self.market_overlay_enabled:
+            logger.info(
+                f"[MARKET OVERLAY] {mom_result.market_overlay_state}: "
+                f"overround={mom_result.exchange_overround:.4f} "
+                f"×{mom_result.overlay_multiplier}"
+                + (" [TOP-OF-MARKET CONCENTRATION]" if mom_result.market_concentration_flag else "")
+            )
+
         # ── Step 3: Place the bets ──
         logger.info(
             f"Rule applied: {result.rule_applied} — "
@@ -1173,6 +1189,14 @@ class LayEngine:
                         })
                         self.processed_runners.add(runner_key)
                         continue
+
+            # ── Market Overlay Modifier: apply multiplier to surviving stake ──
+            if mom_result.overlay_multiplier != 1.0:
+                pre_mom_size = instruction.size
+                instruction.size = round(instruction.size * mom_result.overlay_multiplier, 2)
+                # Preserve Betfair minimum stake floor
+                if pre_mom_size >= 2.0:
+                    instruction.size = max(instruction.size, 2.0)
 
             self._place_bet(
                 instruction,
@@ -1423,6 +1447,7 @@ class LayEngine:
             "signal_field_size_enabled": self.signal_config.field_size_enabled,
             "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
             "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
+            "market_overlay_enabled": self.market_overlay_enabled,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
@@ -1634,6 +1659,16 @@ class LayEngine:
                         filtered_instructions.append(inst)
                 result.instructions = filtered_instructions
 
+            # ── Market Overlay Modifier ──
+            if not result.skipped and result.instructions:
+                snap_mom = apply_market_overlay(runners_with_prices, enabled=self.market_overlay_enabled)
+                if snap_mom.overlay_multiplier != 1.0:
+                    for inst in result.instructions:
+                        pre = inst.size
+                        inst.size = round(inst.size * snap_mom.overlay_multiplier, 2)
+                        if pre >= 2.0:
+                            inst.size = max(inst.size, 2.0)
+
             # Build per-market result dict
             bets_list = []
             for inst in result.instructions:
@@ -1689,6 +1724,7 @@ class LayEngine:
             "signal_field_size_enabled": self.signal_config.field_size_enabled,
             "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
             "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
+            "market_overlay_enabled": self.market_overlay_enabled,
             "results": per_market_results,
         }
 

@@ -1134,7 +1134,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf, onToggleMarketOverlay }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -1348,6 +1348,32 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
         </div>
       </div>
 
+      {/* Market Overlay Modifier */}
+      <div className="engine-section">
+        <h3>Market Overlay Modifier</h3>
+        <div className="engine-row">
+          <span className="engine-label">Market Overlay:</span>
+          <button
+            className={`btn-toggle ${state.market_overlay_enabled ? 'active' : ''}`}
+            onClick={onToggleMarketOverlay}
+            title="Scales stakes by exchange overround: >1.02 ×1.15 · 1.00–1.02 ×1.00 · <1.00 ×0.80"
+          >
+            {state.market_overlay_enabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div className="engine-info" style={{ marginTop: 8 }}>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Overround &gt;1.02: ×1.15 stake (HIGH_OVERROUND — market unsettled, signals weighted higher)
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Overround 1.00–1.02: ×1.00 (NEUTRAL — no adjustment)
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            Overround &lt;1.00: ×0.80 stake (EFFICIENT_MARKET — edge already priced in, reduce aggression)
+          </span>
+        </div>
+      </div>
+
       {/* Kelly Criterion */}
       <div className="engine-section">
         <h3>Kelly Criterion</h3>
@@ -1516,6 +1542,7 @@ function BacktestTab() {
   const [sigFieldSize, setSigFieldSize] = useState(false)
   const [sigSteamGate, setSigSteamGate] = useState(false)
   const [sigBandPerf, setSigBandPerf] = useState(false)
+  const [sigMarketOverlay, setSigMarketOverlay] = useState(false)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1632,6 +1659,7 @@ function BacktestTab() {
           signal_field_size_enabled: sigFieldSize,
           signal_steam_gate_enabled: sigSteamGate,
           signal_band_perf_enabled: sigBandPerf,
+          market_overlay_enabled: sigMarketOverlay,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1679,6 +1707,7 @@ function BacktestTab() {
           signal_field_size_enabled: sigFieldSize,
           signal_steam_gate_enabled: sigSteamGate,
           signal_band_perf_enabled: sigBandPerf,
+          market_overlay_enabled: sigMarketOverlay,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1838,6 +1867,7 @@ function BacktestTab() {
             signal_field_size_enabled: sigFieldSize,
             signal_steam_gate_enabled: sigSteamGate,
             signal_band_perf_enabled: sigBandPerf,
+            market_overlay_enabled: sigMarketOverlay,
           }),
         })
         if (!r.ok) throw new Error(`${r.status}`)
@@ -1888,6 +1918,7 @@ function BacktestTab() {
         signal_field_size_enabled: sigFieldSize,
         signal_steam_gate_enabled: sigSteamGate,
         signal_band_perf_enabled: sigBandPerf,
+        market_overlay_enabled: sigMarketOverlay,
       },
       summary,
       days,
@@ -2080,6 +2111,7 @@ function BacktestTab() {
               ['sig-field', sigFieldSize, setSigFieldSize, 'Signal: Field Size'],
               ['sig-steam', sigSteamGate, setSigSteamGate, 'Signal: Steam Gate'],
               ['sig-band', sigBandPerf, setSigBandPerf, 'Signal: Band Perf'],
+              ['market-overlay', sigMarketOverlay, setSigMarketOverlay, 'Market Overlay Modifier'],
             ].map(([key, val, setter, label]) => (
               <label key={key} className="bt-toggle-label">
                 <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />
@@ -5006,6 +5038,10 @@ function Dashboard() {
     await api('/api/engine/signal/band-perf', { method: 'POST' })
     fetchState()
   }
+  const handleToggleMarketOverlay = async () => {
+    await api('/api/engine/market-overlay', { method: 'POST' })
+    fetchState()
+  }
   const handleToggleMarkCeiling = async () => {
     await api('/api/engine/mark-ceiling', { method: 'POST' })
     fetchState()
@@ -5206,6 +5242,7 @@ function Dashboard() {
             onToggleSignalFieldSize={handleToggleSignalFieldSize}
             onToggleSignalSteamGate={handleToggleSignalSteamGate}
             onToggleSignalBandPerf={handleToggleSignalBandPerf}
+            onToggleMarketOverlay={handleToggleMarketOverlay}
           />
         )}
         {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}

@@ -446,6 +446,17 @@ def toggle_signal_band_perf():
     return {"signal_band_perf_enabled": engine.signal_config.band_perf_enabled}
 
 
+@app.post("/api/engine/market-overlay")
+def toggle_market_overlay():
+    """Toggle Market Overlay Modifier on/off.
+    Scales stakes based on exchange overround: >1.02 → ×1.15 (HIGH_OVERROUND),
+    1.00–1.02 → ×1.00 (NEUTRAL), <1.00 → ×0.80 (EFFICIENT_MARKET).
+    Applied after signal filters, before bet placement."""
+    engine.market_overlay_enabled = not engine.market_overlay_enabled
+    engine._save_state()
+    return {"market_overlay_enabled": engine.market_overlay_enabled}
+
+
 @app.post("/api/engine/point-value")
 def set_point_value(req: PointValueRequest):
     """Set the point value (£ per point). Multiplies all rule stakes."""
@@ -2537,6 +2548,7 @@ class BacktestRunRequest(BaseModel):
     signal_field_size_enabled: bool = False
     signal_steam_gate_enabled: bool = False   # samples price 15 mins before target_iso
     signal_band_perf_enabled: bool = False
+    market_overlay_enabled: bool = False
 
 
 @app.get("/api/backtest/dates")
@@ -2836,6 +2848,23 @@ def _backtest_run_inner(req):
                         f"@ {m['venue']} — {_sig_result.skip_reason}"
                     )
             rule_result.instructions = _sig_kept
+
+        # ── Market Overlay Modifier ─────────────────────────────────────────
+        if req.market_overlay_enabled and not rule_result.skipped and rule_result.instructions:
+            from market_overlay import apply_market_overlay as _apply_mom
+            _mom = _apply_mom(runners, enabled=True)
+            if _mom.overlay_multiplier != 1.0:
+                for _instr in rule_result.instructions:
+                    _pre = _instr.size
+                    _instr.size = round(_instr.size * _mom.overlay_multiplier, 2)
+                    if _pre >= 2.0:
+                        _instr.size = max(_instr.size, 2.0)
+                logger.info(
+                    f"[MARKET OVERLAY] BT {_mom.market_overlay_state}: "
+                    f"{m['venue']} overround={_mom.exchange_overround:.4f} "
+                    f"×{_mom.overlay_multiplier}"
+                    + (" [CONCENTRATION]" if _mom.market_concentration_flag else "")
+                )
 
         # ── AI Research Agent overlay (backtest-only) ──────────────────────
         # Runs AFTER the strategy has decided to bet, BEFORE settlement lookup.
