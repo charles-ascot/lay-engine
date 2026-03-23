@@ -54,6 +54,10 @@ def _cleanup_old_jobs():
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _anthropic_client = None
 
+# ── Lazy caches for AI data sources ──
+_betfair_history_cache = None       # parsed Betfair account history CSV
+_market_data_inventory_cache = None  # betfair-historic-adv bucket inventory
+
 def get_anthropic():
     global _anthropic_client
     if _anthropic_client is None:
@@ -1179,6 +1183,158 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
     }
 
 
+def _load_betfair_history(target_date: str = None) -> dict:
+    """Load and parse Betfair account history CSV from GCS.
+
+    Returns a summary for all dates, or per-date rows if target_date is given.
+    Results are cached in memory for the lifetime of the container.
+    """
+    global _betfair_history_cache
+    if _betfair_history_cache is None:
+        try:
+            import csv as _csv
+            from collections import defaultdict
+            raw = _gcs_read("betfair_betting_history.csv")
+            if not raw:
+                _betfair_history_cache = {"error": "betfair_betting_history.csv not found in GCS"}
+            else:
+                reader = _csv.DictReader(io.StringIO(raw))
+                rows = list(reader)
+                by_date = defaultdict(list)
+                total_pl = 0.0
+                wins = 0
+                losses = 0
+                for row in rows:
+                    bet_placed = row.get("Bet placed", "").strip()
+                    try:
+                        from datetime import datetime as _dt
+                        dt = _dt.strptime(bet_placed, "%d-%b-%y %H:%M")
+                        date_str = dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        date_str = "unknown"
+                    pl = 0.0
+                    try:
+                        pl = float(row.get("Profit/Loss (£)", 0) or 0)
+                    except (ValueError, TypeError):
+                        pass
+                    total_pl += pl
+                    if pl > 0:
+                        wins += 1
+                    elif pl < 0:
+                        losses += 1
+                    by_date[date_str].append({
+                        "market": row.get("Market", ""),
+                        "selection": row.get("Selection", ""),
+                        "bet_id": row.get("Bet ID", ""),
+                        "odds_req": row.get("Odds req.", ""),
+                        "stake": row.get("Stake (£)", ""),
+                        "liability": row.get("Liability (£)", ""),
+                        "avg_odds": row.get("Avg. odds matched", ""),
+                        "pl": pl,
+                    })
+                dates = sorted(d for d in by_date if d != "unknown")
+                date_summaries = []
+                for d in dates:
+                    bets = by_date[d]
+                    day_pl = sum(b["pl"] for b in bets)
+                    day_wins = sum(1 for b in bets if b["pl"] > 0)
+                    day_losses = sum(1 for b in bets if b["pl"] < 0)
+                    date_summaries.append({
+                        "date": d,
+                        "bets": len(bets),
+                        "wins": day_wins,
+                        "losses": day_losses,
+                        "pl": round(day_pl, 2),
+                        "strike_rate": round(day_wins / len(bets) * 100, 1) if bets else 0,
+                    })
+                _betfair_history_cache = {
+                    "source": "Betfair Account History CSV (exported 23 March 2026)",
+                    "total_bets": len(rows),
+                    "total_wins": wins,
+                    "total_losses": losses,
+                    "total_pl": round(total_pl, 2),
+                    "overall_strike_rate": round(wins / len(rows) * 100, 1) if rows else 0,
+                    "date_range": {"from": dates[0] if dates else None, "to": dates[-1] if dates else None},
+                    "days_traded": len(by_date),
+                    "date_summaries": date_summaries,
+                    "_by_date": dict(by_date),
+                }
+        except Exception as e:
+            logging.error(f"Failed to load Betfair history: {e}")
+            _betfair_history_cache = {"error": str(e)}
+
+    if target_date and _betfair_history_cache and "_by_date" in _betfair_history_cache:
+        day_bets = _betfair_history_cache["_by_date"].get(target_date, [])
+        summary = next(
+            (d for d in _betfair_history_cache.get("date_summaries", []) if d["date"] == target_date),
+            None,
+        )
+        return {"date": target_date, "summary": summary, "bets": day_bets}
+
+    # Return summary without the large _by_date index
+    if _betfair_history_cache and "_by_date" in _betfair_history_cache:
+        return {k: v for k, v in _betfair_history_cache.items() if k != "_by_date"}
+    return _betfair_history_cache or {}
+
+
+def _get_market_data_inventory() -> dict:
+    """Build an inventory of available Betfair historic market data from betfair-historic-adv.
+
+    Structure: ADVANCED/BASIC -> year -> month -> [days available]
+    Cached for container lifetime (changes rarely).
+    """
+    global _market_data_inventory_cache
+    if _market_data_inventory_cache is not None:
+        return _market_data_inventory_cache
+
+    HIST_BUCKET = "betfair-historic-adv"
+    try:
+        from google.cloud import storage as _gcs
+        client = _gcs.Client()
+        inventory = {}
+
+        for tier in ["ADVANCED", "BASIC"]:
+            tier_data = {}
+            # List years
+            blobs = client.list_blobs(HIST_BUCKET, prefix=f"{tier}/", delimiter="/")
+            year_prefixes = []
+            for page in blobs.pages:
+                year_prefixes.extend(page.prefixes)
+
+            for year_p in year_prefixes:
+                year = year_p.rstrip("/").split("/")[-1]
+                month_data = {}
+                blobs2 = client.list_blobs(HIST_BUCKET, prefix=year_p, delimiter="/")
+                month_prefixes = []
+                for page in blobs2.pages:
+                    month_prefixes.extend(page.prefixes)
+
+                for month_p in month_prefixes:
+                    month = month_p.rstrip("/").split("/")[-1]
+                    blobs3 = client.list_blobs(HIST_BUCKET, prefix=month_p, delimiter="/")
+                    day_prefixes = []
+                    for page in blobs3.pages:
+                        day_prefixes.extend(page.prefixes)
+                    days = sorted(
+                        [p.rstrip("/").split("/")[-1] for p in day_prefixes],
+                        key=lambda x: int(x) if x.isdigit() else x,
+                    )
+                    month_data[month] = days
+
+                tier_data[year] = month_data
+            inventory[tier] = tier_data
+
+        _market_data_inventory_cache = {
+            "bucket": HIST_BUCKET,
+            "description": "Betfair historic market data (bz2 stream files). ADVANCED = full price ladder + traded volume. BASIC = last-traded-price only.",
+            "available_data": inventory,
+        }
+        return _market_data_inventory_cache
+    except Exception as e:
+        logging.error(f"Failed to build market data inventory: {e}")
+        return {"error": str(e)}
+
+
 RULES_DESCRIPTION = """The CHIMERA Lay Engine uses these rules on horse racing WIN markets:
 - RULE 1: Favourite odds < 2.0 -> £3 lay on favourite
   RULE 1 JOINT (JOFS): if gap to 2nd fav <= 0.2 -> £1.50 lay fav + £1.50 lay 2nd fav
@@ -1319,8 +1475,26 @@ Balance: {engine.balance}"""
     if ds.get("rule_definitions", True):
         rules_ctx = RULES_DESCRIPTION
 
+    # Betfair account history CSV
+    betfair_history_ctx = ""
+    if ds.get("betfair_history", True):
+        bh = _load_betfair_history(target_date=req.date)
+        betfair_history_ctx = f"""
+
+BETFAIR ACCOUNT HISTORY (exported CSV — actual Betfair account bets with real P/L):
+{json.dumps(bh, indent=2, default=str)}"""
+
+    # Betfair historic market data inventory
+    market_inventory_ctx = ""
+    if ds.get("market_data_inventory", True):
+        inv = _get_market_data_inventory()
+        market_inventory_ctx = f"""
+
+BETFAIR HISTORIC MARKET DATA INVENTORY (available for backtesting via FSU1):
+{json.dumps(inv, indent=2, default=str)}"""
+
     date_context_note = (
-        f"You are viewing data for a specific date: {req.date}. Full bet detail is included."
+        f"You are viewing data for a specific date: {req.date}. Full bet detail is included where available."
         if req.date else
         "You have access to ALL sessions from the full history (summaries only — ask about a specific date for full bet detail). "
         "Win/loss P&L data is only available for dates where a daily report has been generated; "
@@ -1340,9 +1514,12 @@ SESSION DATA (bets placed by the engine):
 
 HISTORICAL SUMMARY (all operating days, including DRY_RUN and LIVE):
 {json.dumps(historical, indent=2, default=str) if historical else "(Historical data not enabled)"}
+{betfair_history_ctx}
+{market_inventory_ctx}
 
 Answer questions about this data concisely. Be specific with numbers.
-You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes.
+You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes, and available historic market data.
+If asked about backtesting availability, refer to the market data inventory.
 If asked for analysis, provide actionable insights. Keep responses conversational but data-driven.
 Never say data is missing for a date — if P&L is unavailable, say so clearly but still report bet counts and stake/liability from the session summaries."""
 
