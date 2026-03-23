@@ -1109,38 +1109,46 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
 
     Returns aggregated stats across all previous operating days,
     broken down by day, odds band, rule, and venue.
+    Includes both LIVE and DRY_RUN sessions.
     """
-    days = {}  # date -> {bets, wins, losses, pl, stake, liability}
+    days = {}  # date -> {live_bets, dry_bets, stake, liability, sessions, dry_sessions}
 
     for s in engine.sessions:
         date = s.get("date", "")
         if exclude_date and date == exclude_date:
             continue
-        if s.get("mode") != "LIVE":
-            continue
+
+        is_dry = s.get("mode") == "DRY_RUN"
 
         if date not in days:
             days[date] = {
                 "date": date,
-                "bets": 0, "stake": 0.0, "liability": 0.0,
-                "sessions": 0,
+                "live_bets": 0, "dry_run_bets": 0,
+                "live_stake": 0.0, "live_liability": 0.0,
+                "dry_run_stake": 0.0, "dry_run_liability": 0.0,
+                "live_sessions": 0, "dry_run_sessions": 0,
             }
-        days[date]["sessions"] += 1
+
+        if is_dry:
+            days[date]["dry_run_sessions"] += 1
+        else:
+            days[date]["live_sessions"] += 1
 
         for b in s.get("bets", []):
-            if b.get("dry_run"):
-                continue
-            days[date]["bets"] += 1  # was incorrectly: += len(s.get("bets", []))
-            days[date]["stake"] = round(days[date]["stake"] + b.get("size", 0), 2)
-            days[date]["liability"] = round(days[date]["liability"] + b.get("liability", 0), 2)
+            if b.get("dry_run") or is_dry:
+                days[date]["dry_run_bets"] += 1
+                days[date]["dry_run_stake"] = round(days[date]["dry_run_stake"] + b.get("size", 0), 2)
+                days[date]["dry_run_liability"] = round(days[date]["dry_run_liability"] + b.get("liability", 0), 2)
+            else:
+                days[date]["live_bets"] += 1
+                days[date]["live_stake"] = round(days[date]["live_stake"] + b.get("size", 0), 2)
+                days[date]["live_liability"] = round(days[date]["live_liability"] + b.get("liability", 0), 2)
 
-    # Also gather all session data compactly (LIVE sessions only)
+    # Gather all session data compactly (LIVE and DRY_RUN)
     all_sessions = []
     for s in engine.sessions:
         date = s.get("date", "")
         if exclude_date and date == exclude_date:
-            continue
-        if s.get("mode") != "LIVE":
             continue
         all_sessions.append({
             "session_id": s["session_id"],
@@ -1165,8 +1173,9 @@ def _get_historical_summary(exclude_date: str = None) -> dict:
     return {
         "total_sessions": len(all_sessions),
         "operating_days": sorted(days.keys()),
-        "day_summaries": list(days.values()),
+        "day_summaries": sorted(days.values(), key=lambda d: d["date"]),
         "sessions": all_sessions,
+        "note": "pl/wins/losses only available for dates where a daily report has been generated. Bet counts and stake/liability are available for all dates.",
     }
 
 
@@ -1265,10 +1274,22 @@ def chat(req: ChatRequest):
     session_data = []
     if ds.get("session_data", True):
         if req.date:
+            # Full detail (with bets) for a specific date
             context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
+            session_data = _compact_session_data(context_sessions)
         else:
-            context_sessions = engine.sessions[-10:]
-        session_data = _compact_session_data(context_sessions)
+            # No date: pass all sessions as lightweight summaries (no individual bets)
+            # so the AI has full history without blowing up the context window
+            session_data = [
+                {
+                    "session_id": s["session_id"],
+                    "mode": s["mode"],
+                    "date": s.get("date"),
+                    "status": s.get("status"),
+                    "summary": s.get("summary", {}),
+                }
+                for s in engine.sessions
+            ]
 
     # Fetch settled data for the relevant date
     settled_context = ""
@@ -1298,8 +1319,18 @@ Balance: {engine.balance}"""
     if ds.get("rule_definitions", True):
         rules_ctx = RULES_DESCRIPTION
 
+    date_context_note = (
+        f"You are viewing data for a specific date: {req.date}. Full bet detail is included."
+        if req.date else
+        "You have access to ALL sessions from the full history (summaries only — ask about a specific date for full bet detail). "
+        "Win/loss P&L data is only available for dates where a daily report has been generated; "
+        "for earlier dates you have bet counts, stake, and liability from session summaries."
+    )
+
     system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
 You have access to data from the CHIMERA Lay Engine (only the data sources enabled by the user).
+
+{date_context_note}
 
 {rules_ctx}
 {engine_state_ctx}
@@ -1307,12 +1338,13 @@ You have access to data from the CHIMERA Lay Engine (only the data sources enabl
 SESSION DATA (bets placed by the engine):
 {json.dumps(session_data, indent=2, default=str) if session_data else "(Session data not enabled)"}{settled_context}
 
-HISTORICAL SUMMARY (all operating days):
+HISTORICAL SUMMARY (all operating days, including DRY_RUN and LIVE):
 {json.dumps(historical, indent=2, default=str) if historical else "(Historical data not enabled)"}
 
 Answer questions about this data concisely. Be specific with numbers.
 You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes.
-If asked for analysis, provide actionable insights. Keep responses conversational but data-driven."""
+If asked for analysis, provide actionable insights. Keep responses conversational but data-driven.
+Never say data is missing for a date — if P&L is unavailable, say so clearly but still report bet counts and stake/liability from the session summaries."""
 
     messages = [{"role": h.role, "content": h.content} for h in req.history]
     messages.append({"role": "user", "content": req.message})
