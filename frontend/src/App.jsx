@@ -166,6 +166,36 @@ function LoginPanel({ onLogin }) {
   )
 }
 
+// ── Chat Markdown helpers ──
+const renderChatMarkdown = (md) => {
+  if (!md) return ''
+  let html = md
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/^---$/gm, '<hr/>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+  html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, (match, headerRow, bodyRows) => {
+    const headers = headerRow.split('|').map(h => h.trim()).filter(Boolean)
+    const rows = bodyRows.trim().split('\n').map(row =>
+      row.split('|').map(c => c.trim()).filter(Boolean)
+    )
+    let table = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>'
+    rows.forEach(r => {
+      table += '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>'
+    })
+    table += '</tbody></table>'
+    return table
+  })
+  html = html.replace(/^(?!<[hultdor])((?!<).+)$/gm, '<p>$1</p>')
+  return html
+}
+const chatHasTable = (text) => /\|.+\|\n\|[-| :]+\|/m.test(text)
+
 // ── Chat Drawer ──
 function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   const [messages, setMessages] = useState([])
@@ -173,6 +203,7 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
   const [speakEnabled, setSpeakEnabled] = useState(true)
+  const [docContent, setDocContent] = useState(null)
   const [date] = useState(initialDate || null)
   const messagesEndRef = useRef(null)
   const mediaRecorderRef = useRef(null)
@@ -245,6 +276,35 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
         window.speechSynthesis.speak(utterance)
       }
     }
+  }
+
+  const downloadDoc = (content) => {
+    const html = renderChatMarkdown(content)
+    const fullHtml = `<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<title>CHIMERA AI Analysis — ${new Date().toLocaleDateString('en-GB')}</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 24px; color: #1a1a2e; }
+  h1, h2, h3 { color: #1a1a2e; margin-top: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13px; }
+  th { background: #1a1a2e; color: #fff; padding: 8px 12px; text-align: left; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+  tr:nth-child(even) td { background: #f8f9fa; }
+  p { line-height: 1.6; margin: 8px 0; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  code { background: #f3f4f6; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  strong { font-weight: 600; }
+  hr { border: none; border-top: 1px solid #e5e7eb; margin: 20px 0; }
+</style>
+</head><body>${html}</body></html>`
+    const blob = new Blob([fullHtml], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chimera-analysis-${new Date().toISOString().slice(0, 10)}.html`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const sendMessage = async (text) => {
@@ -371,7 +431,23 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
           )}
           {messages.map((m, i) => (
             <div key={i} className={`chat-msg chat-msg-${m.role}`}>
-              <div className="chat-msg-content">{m.content}</div>
+              {m.role === 'assistant' ? (
+                <>
+                  <div
+                    className="chat-msg-content chat-msg-markdown"
+                    dangerouslySetInnerHTML={{ __html: renderChatMarkdown(m.content) }}
+                  />
+                  {chatHasTable(m.content) && (
+                    <div className="chat-msg-actions">
+                      <button className="chat-doc-btn" onClick={() => setDocContent(m.content)}>
+                        📄 View as Document
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="chat-msg-content">{m.content}</div>
+              )}
             </div>
           ))}
           {loading && (
@@ -404,6 +480,24 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
           </button>
         </form>
       </div>
+
+      {docContent && (
+        <div className="chat-doc-overlay" onClick={() => setDocContent(null)}>
+          <div className="chat-doc-modal" onClick={e => e.stopPropagation()}>
+            <div className="chat-doc-header">
+              <span>CHIMERA AI — Document View</span>
+              <div className="chat-doc-header-actions">
+                <button className="btn-sm" onClick={() => downloadDoc(docContent)}>⬇ Download</button>
+                <button className="btn-sm" onClick={() => setDocContent(null)}>✕ Close</button>
+              </div>
+            </div>
+            <div
+              className="chat-doc-body report-viewer"
+              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(docContent) }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
