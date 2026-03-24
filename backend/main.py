@@ -34,6 +34,7 @@ import time
 from engine import LayEngine
 from fsu_client import FSUClient
 from rules import apply_rules as apply_betting_rules
+from strategy_sandbox import RuleSandbox
 
 # ── Async backtest job store ──────────────────────────────────────────────────
 # Backtests (especially with AI agents) can run for minutes — far beyond the
@@ -49,6 +50,9 @@ def _cleanup_old_jobs():
         stale = [k for k, v in _backtest_jobs.items() if v["started_at"] < cutoff]
         for k in stale:
             del _backtest_jobs[k]
+
+# ── Strategy Rule Sandbox (in-memory, FSU-ready endpoint namespace) ──────────
+_sandbox = RuleSandbox()
 
 # ── Anthropic client (lazy — only created when analysis is requested) ──
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -1426,9 +1430,317 @@ Format each point as a single line starting with a bullet (•). Be specific wit
         )
 
 
+def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
+    """
+    Execute a tool call from the CHIMERA AI chat agent.
+
+    All external interactions (FSU1, backtest engine) go through HTTP-style
+    calls so this block can be extracted to a separate service unchanged
+    when the architecture migrates to full FSU separation.
+    """
+    import requests as _req
+
+    try:
+        # ── FSU1: list available backtest dates ───────────────────────────────
+        if tool_name == "list_available_dates":
+            r = _req.get(
+                f"{FSU_URL}/api/dates",
+                headers=_fsu_auth_header(),
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return {
+                "dates": data.get("dates", []),
+                "count": data.get("count", 0),
+                "note": (
+                    "Dates before 2026-01-01 use ADVANCED data (full price ladder). "
+                    "Dates from 2026-01-01 onwards use BASIC data (last-traded-price only — "
+                    "backtest will skip all markets on these dates as lay prices are unavailable)."
+                ),
+            }
+
+        # ── FSU1: list markets for a date ─────────────────────────────────────
+        elif tool_name == "list_markets_for_date":
+            date = tool_input.get("date", "")
+            countries = tool_input.get("countries", "GB,IE")
+            r = _req.get(
+                f"{FSU_URL}/api/markets",
+                params={"date": date, "market_type": "WIN", "countries": countries},
+                headers=_fsu_auth_header(),
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+            markets = data.get("markets", [])
+            return {
+                "date": date,
+                "market_count": len(markets),
+                "markets": [
+                    {
+                        "market_id": m["market_id"],
+                        "venue": m["venue"],
+                        "race_time": m["race_time"],
+                        "runner_count": len(m.get("runners", [])),
+                    }
+                    for m in markets
+                ],
+            }
+
+        # ── Backtest: start a job ─────────────────────────────────────────────
+        elif tool_name == "run_backtest":
+            from pydantic import ValidationError
+            try:
+                bt_req = BacktestRunRequest(**tool_input)
+            except (ValidationError, Exception) as e:
+                return {"error": f"Invalid backtest parameters: {e}"}
+            job_id = str(uuid.uuid4())
+            with _backtest_jobs_lock:
+                _backtest_jobs[job_id] = {
+                    "status": "running",
+                    "result": None,
+                    "error": None,
+                    "started_at": time.time(),
+                }
+            def _run():
+                try:
+                    result = _backtest_run_inner(bt_req)
+                    with _backtest_jobs_lock:
+                        _backtest_jobs[job_id]["status"] = "done"
+                        _backtest_jobs[job_id]["result"] = result
+                except Exception as _exc:
+                    with _backtest_jobs_lock:
+                        _backtest_jobs[job_id]["status"] = "error"
+                        _backtest_jobs[job_id]["error"] = str(_exc)
+            threading.Thread(target=_run, daemon=True).start()
+            return {"job_id": job_id, "status": "running", "message": "Backtest started. Use get_backtest_job to poll for results."}
+
+        # ── Backtest: poll job status / retrieve results ──────────────────────
+        elif tool_name == "get_backtest_job":
+            job_id = tool_input.get("job_id", "")
+            with _backtest_jobs_lock:
+                job = _backtest_jobs.get(job_id)
+            if not job:
+                return {"error": f"Job '{job_id}' not found"}
+            resp = {"job_id": job_id, "status": job["status"]}
+            if job["status"] == "done":
+                result = job["result"] or {}
+                resp["summary"] = {
+                    "date": result.get("date"),
+                    "markets_evaluated": result.get("markets_evaluated", 0),
+                    "bets_placed": result.get("bets_placed", 0),
+                    "markets_skipped": result.get("markets_skipped", 0),
+                    "total_stake": result.get("total_stake", 0.0),
+                    "total_liability": result.get("total_liability", 0.0),
+                    "total_pnl": result.get("total_pnl", 0.0),
+                    "roi": result.get("roi", 0.0),
+                }
+                resp["results"] = result.get("results", [])
+            elif job["status"] == "error":
+                resp["error"] = job["error"]
+            return resp
+
+        # ── Sandbox: create a rule ────────────────────────────────────────────
+        elif tool_name == "create_sandbox_rule":
+            rule, error = _sandbox.add_rule(
+                name=tool_input.get("name", "Unnamed Rule"),
+                description=tool_input.get("description", ""),
+                rule_type=tool_input.get("rule_type", "STAKE_MODIFIER"),
+                conditions=tool_input.get("conditions", []),
+                effect=tool_input.get("effect", {}),
+            )
+            if error:
+                return {"error": error}
+            return {"created": rule.to_dict()}
+
+        # ── Sandbox: list rules ───────────────────────────────────────────────
+        elif tool_name == "list_sandbox_rules":
+            return {"rules": _sandbox.list_rules(), "count": _sandbox.size()}
+
+        # ── Sandbox: delete a rule ────────────────────────────────────────────
+        elif tool_name == "delete_sandbox_rule":
+            rule_id = tool_input.get("rule_id", "")
+            removed = _sandbox.remove_rule(rule_id)
+            return {"deleted": removed, "rule_id": rule_id}
+
+        # ── Sandbox: clear all rules ──────────────────────────────────────────
+        elif tool_name == "clear_sandbox_rules":
+            count = _sandbox.clear()
+            return {"cleared": count}
+
+        else:
+            return {"error": f"Unknown tool: {tool_name}"}
+
+    except Exception as e:
+        logging.error(f"Tool '{tool_name}' failed: {e}")
+        return {"error": str(e)}
+
+
+# Tool schema definitions for the CHIMERA AI chat agent
+_CHAT_TOOLS = [
+    {
+        "name": "list_available_dates",
+        "description": (
+            "List all dates that have historic Betfair market data available in the GCS bucket "
+            "via FSU1. Use this before running a backtest to confirm data exists for the target date. "
+            "Dates before 2026-01-01 use ADVANCED data (full price ladder — backtest works fully). "
+            "Dates from 2026-01-01 use BASIC data (last-traded-price only — backtest will skip all markets)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "list_markets_for_date",
+        "description": "List WIN markets available for a specific date via FSU1. Shows venue, race time, and runner count.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYY-MM-DD format, e.g. 2025-07-13",
+                },
+                "countries": {
+                    "type": "string",
+                    "description": "Comma-separated country codes, e.g. 'GB,IE'. Defaults to GB,IE.",
+                },
+            },
+            "required": ["date"],
+        },
+    },
+    {
+        "name": "run_backtest",
+        "description": (
+            "Start a backtest job for a specific date. Returns a job_id immediately. "
+            "Poll with get_backtest_job until status is 'done'. "
+            "Set sandbox_enabled=true to apply any active sandbox rules during the backtest. "
+            "Key parameters: date (required), countries, process_window_mins, "
+            "rule1_enabled through rule4_enabled, mark_rules_enabled, jofs_enabled, "
+            "market_overlay_enabled, sandbox_enabled."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Backtest date, YYYY-MM-DD"},
+                "countries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Country codes, e.g. ['GB', 'IE']",
+                },
+                "process_window_mins": {
+                    "type": "number",
+                    "description": "Minutes before race time to evaluate (default 5)",
+                },
+                "rule1_enabled": {"type": "boolean"},
+                "rule2_enabled": {"type": "boolean"},
+                "rule3_enabled": {"type": "boolean"},
+                "rule4_enabled": {"type": "boolean"},
+                "mark_rules_enabled": {"type": "boolean"},
+                "jofs_enabled": {"type": "boolean"},
+                "market_overlay_enabled": {"type": "boolean"},
+                "sandbox_enabled": {
+                    "type": "boolean",
+                    "description": "Apply active sandbox rules during this backtest",
+                },
+            },
+            "required": ["date"],
+        },
+    },
+    {
+        "name": "get_backtest_job",
+        "description": (
+            "Poll a running backtest job for status and results. "
+            "Status values: 'running' (still in progress), 'done' (results available), 'error'. "
+            "When done, returns a summary (P&L, ROI, bet count) and full per-market results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "The job_id returned by run_backtest"},
+            },
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "create_sandbox_rule",
+        "description": (
+            "Create a temporary sandbox rule for strategy testing. Rules are held in memory "
+            "and applied to backtests when sandbox_enabled=true. "
+            "rule_type options: STAKE_MODIFIER (scale stake), BET_FILTER (veto bet), SIGNAL_AMPLIFIER (scale signal confidence). "
+            "Condition fields: exchange_overround, favourite_price, price_gap_1_2, price_gap_2_3, runner_count. "
+            "Condition operators: gt, lt, gte, lte, eq. "
+            "Effect fields: stake_multiplier (float), skip (bool), signal_multiplier (float), reason (string)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Short rule name, e.g. 'High overround amplifier'"},
+                "description": {"type": "string", "description": "What this rule does and why"},
+                "rule_type": {
+                    "type": "string",
+                    "enum": ["STAKE_MODIFIER", "BET_FILTER", "SIGNAL_AMPLIFIER"],
+                },
+                "conditions": {
+                    "type": "array",
+                    "description": "All conditions must be true for the rule to fire (AND logic)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string"},
+                            "operator": {"type": "string", "enum": ["gt", "lt", "gte", "lte", "eq"]},
+                            "value": {"type": "number"},
+                        },
+                        "required": ["field", "operator", "value"],
+                    },
+                },
+                "effect": {
+                    "type": "object",
+                    "properties": {
+                        "stake_multiplier": {"type": "number"},
+                        "skip": {"type": "boolean"},
+                        "signal_multiplier": {"type": "number"},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+            "required": ["name", "rule_type", "conditions", "effect"],
+        },
+    },
+    {
+        "name": "list_sandbox_rules",
+        "description": "List all active sandbox rules currently in memory.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "delete_sandbox_rule",
+        "description": "Delete a specific sandbox rule by its ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rule_id": {"type": "string", "description": "The rule ID returned by create_sandbox_rule"},
+            },
+            "required": ["rule_id"],
+        },
+    },
+    {
+        "name": "clear_sandbox_rules",
+        "description": "Remove all sandbox rules from memory. Use after a test cycle is complete.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    """Interactive chat with AI about session data."""
+    """
+    Interactive chat with CHIMERA AI agent.
+
+    Supports an agentic tool-use loop: Claude can call tools to query FSU1
+    historic data, trigger and monitor backtests, and manage sandbox rules —
+    all within a single conversational turn.
+    """
     if not ANTHROPIC_API_KEY:
         return JSONResponse(
             status_code=500,
@@ -1441,12 +1753,9 @@ def chat(req: ChatRequest):
     session_data = []
     if ds.get("session_data", True):
         if req.date:
-            # Full detail (with bets) for a specific date
             context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
             session_data = _compact_session_data(context_sessions)
         else:
-            # No date: pass all sessions as lightweight summaries (no individual bets)
-            # so the AI has full history without blowing up the context window
             session_data = [
                 {
                     "session_id": s["session_id"],
@@ -1458,7 +1767,6 @@ def chat(req: ChatRequest):
                 for s in engine.sessions
             ]
 
-    # Fetch settled data for the relevant date
     settled_context = ""
     if ds.get("settled_bets", True) and req.date:
         settled = _get_settled_for_date(req.date)
@@ -1468,12 +1776,10 @@ def chat(req: ChatRequest):
 SETTLED BETS FROM BETFAIR (actual race outcomes with real P/L):
 {json.dumps(settled, indent=2, default=str)}"""
 
-    # Include historical summary for cumulative context
     historical = {}
     if ds.get("historical_summary", True):
         historical = _get_historical_summary()
 
-    # Engine state
     engine_state_ctx = ""
     if ds.get("engine_state", True):
         engine_state_ctx = f"""
@@ -1481,12 +1787,10 @@ Active countries: {', '.join(engine.countries)}
 Engine mode: {"DRY_RUN" if engine.dry_run else "LIVE"}
 Balance: {engine.balance}"""
 
-    # Rules
     rules_ctx = ""
     if ds.get("rule_definitions", True):
         rules_ctx = RULES_DESCRIPTION
 
-    # Betfair account history CSV
     betfair_history_ctx = ""
     if ds.get("betfair_history", True):
         bh = _load_betfair_history(target_date=req.date)
@@ -1495,7 +1799,6 @@ Balance: {engine.balance}"""
 BETFAIR ACCOUNT HISTORY (exported CSV — actual Betfair account bets with real P/L):
 {json.dumps(bh, indent=2, default=str)}"""
 
-    # Betfair historic market data inventory
     market_inventory_ctx = ""
     if ds.get("market_data_inventory", True):
         inv = _get_market_data_inventory()
@@ -1512,8 +1815,18 @@ BETFAIR HISTORIC MARKET DATA INVENTORY (available for backtesting via FSU1):
         "for earlier dates you have bet counts, stake, and liability from session summaries."
     )
 
-    system_prompt = f"""You are CHIMERA, an expert horse racing lay betting analyst and assistant.
-You have access to data from the CHIMERA Lay Engine (only the data sources enabled by the user).
+    # Sandbox state for context
+    sandbox_ctx = ""
+    if _sandbox.size() > 0:
+        sandbox_ctx = f"""
+
+ACTIVE SANDBOX RULES ({_sandbox.size()} rules in memory):
+{json.dumps(_sandbox.list_rules(), indent=2)}
+These rules will be applied to any backtest run with sandbox_enabled=true."""
+
+    system_prompt = f"""You are CHIMERA, an expert horse racing lay betting AI agent and analyst.
+You have access to data from the CHIMERA Lay Engine and a suite of tools to query historic data,
+run and monitor backtests, and create/manage sandbox rules for strategy testing.
 
 {date_context_note}
 
@@ -1527,25 +1840,61 @@ HISTORICAL SUMMARY (all operating days, including DRY_RUN and LIVE):
 {json.dumps(historical, indent=2, default=str) if historical else "(Historical data not enabled)"}
 {betfair_history_ctx}
 {market_inventory_ctx}
+{sandbox_ctx}
 
-Answer questions about this data concisely. Be specific with numbers.
-You can answer questions about any aspect: bets, P/L, venues, rules, cumulative performance, settled outcomes, and available historic market data.
-If asked about backtesting availability, refer to the market data inventory.
-If asked for analysis, provide actionable insights. Keep responses conversational but data-driven.
-Never say data is missing for a date — if P&L is unavailable, say so clearly but still report bet counts and stake/liability from the session summaries."""
+TOOL USE GUIDELINES:
+- Before running a backtest, always call list_available_dates to confirm data exists for the target date.
+- Only ADVANCED data (pre-2026) has full price ladders required for backtesting. BASIC data (2026+) will result in all markets being skipped.
+- When testing a new rule, use create_sandbox_rule to define it, run_backtest with sandbox_enabled=true, then get_backtest_job to retrieve results.
+- Sandbox rules persist until deleted. Always clean up with clear_sandbox_rules after a test cycle.
+- Backtest jobs run asynchronously. Poll get_backtest_job every few seconds until status is 'done'.
+- Be specific with numbers. Keep responses concise and data-driven.
+- Never say data is missing for a date — if P&L is unavailable, say so but still report what is available."""
 
     messages = [{"role": h.role, "content": h.content} for h in req.history]
     messages.append({"role": "user", "content": req.message})
 
     try:
         client = get_anthropic()
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=system_prompt,
-            messages=messages,
-        )
-        return {"reply": response.content[0].text}
+        # Agentic tool-use loop — runs until Claude produces a final text response
+        max_iterations = 10  # guard against infinite loops
+        for _ in range(max_iterations):
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                system=system_prompt,
+                tools=_CHAT_TOOLS,
+                messages=messages,
+            )
+
+            if response.stop_reason == "end_turn":
+                # Extract the final text block
+                text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+                reply = text_blocks[0] if text_blocks else "(No response)"
+                return {"reply": reply}
+
+            if response.stop_reason == "tool_use":
+                # Execute all requested tools and collect results
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        result = _chat_execute_tool(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps(result),
+                        })
+                # Append assistant turn + tool results to messages for next iteration
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+                continue
+
+            # Unexpected stop reason — return whatever text exists
+            text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+            return {"reply": text_blocks[0] if text_blocks else "(No response)"}
+
+        return {"reply": "I reached the maximum number of tool calls for this request. Please try a more specific question."}
+
     except Exception as e:
         logging.error(f"Chat failed: {e}")
         return JSONResponse(
@@ -2549,6 +2898,7 @@ class BacktestRunRequest(BaseModel):
     signal_steam_gate_enabled: bool = False   # samples price 15 mins before target_iso
     signal_band_perf_enabled: bool = False
     market_overlay_enabled: bool = False
+    sandbox_enabled: bool = False   # apply strategy sandbox rules during this backtest
 
 
 @app.get("/api/backtest/dates")
@@ -2865,6 +3215,32 @@ def _backtest_run_inner(req):
                     f"×{_mom.overlay_multiplier}"
                     + (" [CONCENTRATION]" if _mom.market_concentration_flag else "")
                 )
+
+        # ── Strategy Rule Sandbox ────────────────────────────────────────────
+        # Runs after MOM, before AI agents.  Only active when sandbox_enabled=True
+        # and at least one rule is defined.  Applies STAKE_MODIFIER, BET_FILTER,
+        # and SIGNAL_AMPLIFIER rules defined by Claude for strategy testing.
+        if req.sandbox_enabled and _sandbox.size() > 0 and not rule_result.skipped and rule_result.instructions:
+            _sb_eval = _sandbox.evaluate(runners)
+            if _sb_eval.triggered_rules:
+                if _sb_eval.skip:
+                    rule_result.instructions = []
+                    rule_result.skipped = True
+                    rule_result.skip_reason = f"[SANDBOX] {_sb_eval.reason}"
+                    logger.info(
+                        f"[SANDBOX] BT VETOED: {m['venue']} — {_sb_eval.reason}"
+                    )
+                else:
+                    if _sb_eval.stake_multiplier != 1.0:
+                        for _instr in rule_result.instructions:
+                            _pre = _instr.size
+                            _instr.size = round(_instr.size * _sb_eval.stake_multiplier, 2)
+                            if _pre >= 2.0:
+                                _instr.size = max(_instr.size, 2.0)
+                    logger.info(
+                        f"[SANDBOX] BT {m['venue']}: {_sb_eval.reason} "
+                        f"stake×{_sb_eval.stake_multiplier} signal×{_sb_eval.signal_multiplier}"
+                    )
 
         # ── AI Research Agent overlay (backtest-only) ──────────────────────
         # Runs AFTER the strategy has decided to bet, BEFORE settlement lookup.
@@ -3220,6 +3596,66 @@ def _do_export_sheets(req: BacktestExportRequest, _requests):
             logging.warning(f"Drive move failed: {move_resp.status_code} {move_resp.text[:300]}")
 
     return {"url": spreadsheet_url, "spreadsheet_id": spreadsheet_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  STRATEGY — RULE SANDBOX
+#  Endpoint namespace: /api/strategy/sandbox/...
+#  Designed as a future FSU extract — only the base URL changes on migration.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SandboxRuleRequest(BaseModel):
+    name: str
+    description: str = ""
+    rule_type: str                   # STAKE_MODIFIER | BET_FILTER | SIGNAL_AMPLIFIER
+    conditions: list[dict]           # [{field, operator, value}, ...]
+    effect: dict                     # {stake_multiplier?, skip?, signal_multiplier?, reason?}
+
+
+@app.get("/api/strategy/sandbox/rules")
+def sandbox_list_rules():
+    """List all active sandbox rules."""
+    return {"rules": _sandbox.list_rules(), "count": _sandbox.size()}
+
+
+@app.post("/api/strategy/sandbox/rules")
+def sandbox_create_rule(req: SandboxRuleRequest):
+    """Create a new sandbox rule. Returns the created rule on success."""
+    rule, error = _sandbox.add_rule(
+        name=req.name,
+        description=req.description,
+        rule_type=req.rule_type,
+        conditions=req.conditions,
+        effect=req.effect,
+    )
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    return {"rule": rule.to_dict()}
+
+
+@app.delete("/api/strategy/sandbox/rules/{rule_id}")
+def sandbox_delete_rule(rule_id: str):
+    """Delete a sandbox rule by ID."""
+    removed = _sandbox.remove_rule(rule_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
+    return {"deleted": rule_id}
+
+
+@app.delete("/api/strategy/sandbox/rules")
+def sandbox_clear_rules():
+    """Clear all sandbox rules."""
+    count = _sandbox.clear()
+    return {"cleared": count}
+
+
+@app.get("/api/strategy/sandbox/status")
+def sandbox_status():
+    """Return sandbox status — rule count and summary."""
+    return {
+        "active_rules": _sandbox.size(),
+        "rules": _sandbox.list_rules(),
+    }
 
 
 @app.post("/api/reports/{report_id}/save-drive")
