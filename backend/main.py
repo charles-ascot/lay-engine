@@ -1568,6 +1568,25 @@ def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
             count = _sandbox.clear()
             return {"cleared": count}
 
+        # ── Sandbox trays: create ─────────────────────────────────────────────
+        elif tool_name == "create_sandbox_tray":
+            tray, error = _sandbox.create_tray(tool_input)
+            if error:
+                return {"error": error}
+            return {"created": tray.to_dict()}
+
+        # ── Sandbox trays: update ─────────────────────────────────────────────
+        elif tool_name == "update_tray":
+            tray_id = tool_input.pop("tray_id", "")
+            tray, error = _sandbox.update_tray(tray_id, tool_input)
+            if error:
+                return {"error": error}
+            return {"updated": tray.to_dict()}
+
+        # ── Sandbox trays: list ───────────────────────────────────────────────
+        elif tool_name == "list_sandbox_trays":
+            return {"trays": _sandbox.list_trays(), "count": _sandbox.tray_count()}
+
         else:
             return {"error": f"Unknown tool: {tool_name}"}
 
@@ -1729,6 +1748,103 @@ _CHAT_TOOLS = [
         "description": "Remove all sandbox rules from memory. Use after a test cycle is complete.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "create_sandbox_tray",
+        "description": (
+            "Create a new sandbox tray — a full rule-testing workspace that tracks the complete "
+            "lifecycle of one rule or strategy under test. A tray stores the rule specification "
+            "(family name, priority, purpose, inputs, checkpoints, metrics, threshold bands, "
+            "sub-rules, expected output, lay action), the backtest results, and your analysis. "
+            "Create a tray at the start of each new test. Link sandbox rules and backtest results "
+            "to it using update_tray. The tray appears in the Strategy tab UI for Mark to review."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Display name, e.g. 'TOP2_CONCENTRATION Test'"},
+                "rule_family": {"type": "string", "description": "Rule family code, e.g. 'TOP2_CONCENTRATION'"},
+                "test_instruction": {"type": "string", "description": "What you were asked to test"},
+                "priority": {"type": "string", "description": "Where in the engine pipeline this runs"},
+                "purpose": {"type": "string", "description": "Objective — what problem this rule solves"},
+                "inputs_required": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Market data fields needed, e.g. ['runner_1_back_odds', 'runner_2_back_odds']",
+                },
+                "checkpoints": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "When to evaluate, e.g. ['T-30', 'T-15', 'T-5', 'T-1']",
+                },
+                "derived_metrics": {
+                    "type": "array",
+                    "description": "Calculated values, e.g. [{name, formula, description}]",
+                    "items": {"type": "object"},
+                },
+                "threshold_bands": {
+                    "type": "array",
+                    "description": "Sensitivity bands e.g. [{name, field, operator, value, severity}]",
+                    "items": {"type": "object"},
+                },
+                "sub_rules": {
+                    "type": "array",
+                    "description": "Individual rule definitions with trigger logic and effects",
+                    "items": {"type": "object"},
+                },
+                "expected_output": {
+                    "type": "object",
+                    "description": "The state object this rule returns (schema/example)",
+                },
+                "lay_action": {
+                    "type": "string",
+                    "enum": ["WATCH", "SUPPRESS", "BLOCK", "ALLOW", ""],
+                    "description": "Primary lay action when this rule fires",
+                },
+                "lay_multiplier": {"type": "number", "description": "Stake multiplier when triggered (e.g. 0.25 = 75% suppression)"},
+                "severity": {"type": "string", "description": "mild | medium | strong | extreme"},
+                "reason_codes": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Reason codes this rule can emit",
+                },
+                "sandbox_rule_ids": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "IDs of sandbox rules created for this test",
+                },
+                "notes": {"type": "string", "description": "Any additional notes"},
+            },
+            "required": ["rule_family", "test_instruction"],
+        },
+    },
+    {
+        "name": "update_tray",
+        "description": (
+            "Update an existing sandbox tray with new information — typically to save backtest "
+            "results and your analysis after a test completes. Also use to update status "
+            "(PENDING → RUNNING → COMPLETED) or to refine the rule spec. "
+            "Status values: PENDING, RUNNING, COMPLETED, PROMOTED, DISCARDED."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tray_id": {"type": "string", "description": "The tray ID returned by create_sandbox_tray"},
+                "status": {"type": "string", "enum": ["PENDING", "RUNNING", "COMPLETED", "PROMOTED", "DISCARDED"]},
+                "backtest_job_id": {"type": "string"},
+                "backtest_config": {"type": "object"},
+                "backtest_results": {"type": "object", "description": "Full results from get_backtest_job"},
+                "agent_analysis": {"type": "string", "description": "Your analysis and recommendation"},
+                "sandbox_rule_ids": {"type": "array", "items": {"type": "string"}},
+                "notes": {"type": "string"},
+                "lay_action": {"type": "string"},
+                "lay_multiplier": {"type": "number"},
+                "severity": {"type": "string"},
+                "reason_codes": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["tray_id"],
+        },
+    },
+    {
+        "name": "list_sandbox_trays",
+        "description": "List all sandbox trays currently in memory with their status and summary.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 ]
 
 
@@ -1817,16 +1933,25 @@ BETFAIR HISTORIC MARKET DATA INVENTORY (available for backtesting via FSU1):
 
     # Sandbox state for context
     sandbox_ctx = ""
-    if _sandbox.size() > 0:
-        sandbox_ctx = f"""
+    has_sandbox = _sandbox.size() > 0 or _sandbox.tray_count() > 0
+    if has_sandbox:
+        sandbox_ctx = ""
+        if _sandbox.size() > 0:
+            sandbox_ctx += f"""
 
 ACTIVE SANDBOX RULES ({_sandbox.size()} rules in memory):
 {json.dumps(_sandbox.list_rules(), indent=2)}
 These rules will be applied to any backtest run with sandbox_enabled=true."""
+        if _sandbox.tray_count() > 0:
+            sandbox_ctx += f"""
+
+ACTIVE SANDBOX TRAYS ({_sandbox.tray_count()} trays):
+{json.dumps(_sandbox.list_trays(), indent=2)}
+Each tray is a full rule-testing workspace visible in the Strategy tab."""
 
     system_prompt = f"""You are CHIMERA, an expert horse racing lay betting AI agent and analyst.
 You have access to data from the CHIMERA Lay Engine and a suite of tools to query historic data,
-run and monitor backtests, and create/manage sandbox rules for strategy testing.
+run and monitor backtests, and create/manage sandbox rules and trays for strategy testing.
 
 {date_context_note}
 
@@ -1845,8 +1970,8 @@ HISTORICAL SUMMARY (all operating days, including DRY_RUN and LIVE):
 TOOL USE GUIDELINES:
 - Before running a backtest, always call list_available_dates to confirm data exists for the target date.
 - Only ADVANCED data (pre-2026) has full price ladders required for backtesting. BASIC data (2026+) will result in all markets being skipped.
-- When testing a new rule, use create_sandbox_rule to define it, run_backtest with sandbox_enabled=true, then get_backtest_job to retrieve results.
-- Sandbox rules persist until deleted. Always clean up with clear_sandbox_rules after a test cycle.
+- When given a new rule or strategy to test: (1) call create_sandbox_tray to open a workspace, (2) call create_sandbox_rule to define the rule logic, (3) call run_backtest with sandbox_enabled=true, (4) poll get_backtest_job until done, (5) call update_tray with the results and your analysis, (6) set tray status to COMPLETED.
+- Sandbox rules persist until deleted. Clean up with clear_sandbox_rules after a test cycle.
 - Backtest jobs run asynchronously. Poll get_backtest_job every few seconds until status is 'done'.
 - Be specific with numbers. Keep responses concise and data-driven.
 - Never say data is missing for a date — if P&L is unavailable, say so but still report what is available."""
@@ -3651,11 +3776,75 @@ def sandbox_clear_rules():
 
 @app.get("/api/strategy/sandbox/status")
 def sandbox_status():
-    """Return sandbox status — rule count and summary."""
+    """Return sandbox status — rule count, tray count, and summary."""
     return {
         "active_rules": _sandbox.size(),
         "rules": _sandbox.list_rules(),
+        "active_trays": _sandbox.tray_count(),
+        "trays": _sandbox.list_trays(),
     }
+
+
+# ── Sandbox Trays ─────────────────────────────────────────────────────────────
+
+@app.get("/api/strategy/sandbox/trays")
+def sandbox_list_trays():
+    """List all sandbox trays."""
+    return {"trays": _sandbox.list_trays(), "count": _sandbox.tray_count()}
+
+
+@app.post("/api/strategy/sandbox/trays")
+def sandbox_create_tray(req: dict):
+    """Create a new sandbox tray. Returns the created tray on success."""
+    tray, error = _sandbox.create_tray(req)
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    return {"tray": tray.to_dict()}
+
+
+@app.get("/api/strategy/sandbox/trays/{tray_id}")
+def sandbox_get_tray(tray_id: str):
+    """Get a single sandbox tray by ID."""
+    tray = _sandbox.get_tray(tray_id)
+    if not tray:
+        raise HTTPException(status_code=404, detail=f"Tray '{tray_id}' not found")
+    return {"tray": tray.to_dict()}
+
+
+@app.put("/api/strategy/sandbox/trays/{tray_id}")
+def sandbox_update_tray(tray_id: str, req: dict):
+    """Update a sandbox tray (results, status, analysis, spec fields)."""
+    tray, error = _sandbox.update_tray(tray_id, req)
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    return {"tray": tray.to_dict()}
+
+
+@app.delete("/api/strategy/sandbox/trays/{tray_id}")
+def sandbox_delete_tray(tray_id: str):
+    """Delete a sandbox tray by ID."""
+    removed = _sandbox.delete_tray(tray_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Tray '{tray_id}' not found")
+    return {"deleted": tray_id}
+
+
+@app.post("/api/strategy/sandbox/trays/{tray_id}/promote")
+def sandbox_promote_tray(tray_id: str):
+    """Mark a tray as PROMOTED — rule approved for deployment."""
+    tray, error = _sandbox.update_tray(tray_id, {"status": "PROMOTED"})
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    return {"tray": tray.to_dict()}
+
+
+@app.post("/api/strategy/sandbox/trays/{tray_id}/discard")
+def sandbox_discard_tray(tray_id: str):
+    """Mark a tray as DISCARDED — rule rejected."""
+    tray, error = _sandbox.update_tray(tray_id, {"status": "DISCARDED"})
+    if error:
+        raise HTTPException(status_code=422, detail=error)
+    return {"tray": tray.to_dict()}
 
 
 @app.post("/api/reports/{report_id}/save-drive")

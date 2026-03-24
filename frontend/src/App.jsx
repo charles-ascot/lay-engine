@@ -2922,28 +2922,504 @@ function BacktestTab() {
 }
 
 // ── Strategy Tab ──
-function StrategyTab() {
+// ── Strategy Sandbox — FSU9 ───────────────────────────────────────────────────
+
+const TRAY_STATUS_COLORS = {
+  PENDING:   '#6b7280',
+  RUNNING:   '#f59e0b',
+  COMPLETED: '#10b981',
+  PROMOTED:  '#6366f1',
+  DISCARDED: '#ef4444',
+}
+
+const LAY_ACTION_COLORS = {
+  WATCH:    '#f59e0b',
+  SUPPRESS: '#f97316',
+  BLOCK:    '#ef4444',
+  ALLOW:    '#10b981',
+}
+
+function TrayStatusBadge({ status }) {
   return (
-    <div className="backtest-tab">
-      <h2>Strategy</h2>
-      <p className="empty-state">
-        Strategy builder coming soon. Define and manage custom rule sets, configure betting
-        strategies by odds bands, venue filters, and race types.
-      </p>
-      <div className="backtest-placeholder">
-        <div className="placeholder-section">
-          <h3>Rule Builder</h3>
-          <p>Create custom rules · Odds band targeting · Favourite gap thresholds · Time-of-day filters</p>
+    <span className="badge" style={{
+      background: TRAY_STATUS_COLORS[status] || '#6b7280',
+      fontSize: 11,
+      padding: '2px 8px',
+      borderRadius: 4,
+      fontWeight: 700,
+      letterSpacing: '0.04em',
+    }}>
+      {status}
+      {status === 'RUNNING' && <span style={{ marginLeft: 5 }}>●</span>}
+    </span>
+  )
+}
+
+function TrayCard({ tray, onPromote, onDiscard, onDelete, onRefresh }) {
+  const [expanded, setExpanded] = React.useState(false)
+
+  const res = tray.backtest_results || {}
+  const hasResults = res.markets_evaluated !== undefined
+
+  const layActionColor = LAY_ACTION_COLORS[tray.lay_action] || '#6b7280'
+
+  return (
+    <div className="tray-card" style={{
+      background: 'var(--card-bg, #1a1d23)',
+      border: '1px solid var(--border, #2a2d35)',
+      borderRadius: 8,
+      marginBottom: 16,
+      overflow: 'hidden',
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 16px',
+        borderBottom: '1px solid var(--border, #2a2d35)',
+        background: 'var(--card-header-bg, #14171d)',
+      }}>
+        <div style={{ flex: 1 }}>
+          <span style={{ fontWeight: 700, fontSize: 15, marginRight: 10 }}>
+            {tray.rule_family || tray.name}
+          </span>
+          <TrayStatusBadge status={tray.status} />
+          {tray.lay_action && (
+            <span className="badge" style={{
+              background: layActionColor, fontSize: 11, padding: '2px 7px',
+              borderRadius: 4, fontWeight: 700, marginLeft: 6,
+            }}>
+              {tray.lay_action}
+            </span>
+          )}
+          {tray.severity && (
+            <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 8 }}>
+              [{tray.severity}]
+            </span>
+          )}
         </div>
-        <div className="placeholder-section">
-          <h3>Venue &amp; Race Filters</h3>
-          <p>Include/exclude venues · Race discipline filters · Going conditions · Field size limits</p>
-        </div>
-        <div className="placeholder-section">
-          <h3>Stake Management</h3>
-          <p>Level stakes · Percentage of bank · Stop-loss triggers · Daily limits</p>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {tray.status === 'COMPLETED' && (
+            <>
+              <button className="bt-run-btn" style={{ padding: '4px 12px', fontSize: 12, background: '#6366f1' }}
+                onClick={() => onPromote(tray.id)}>
+                Promote
+              </button>
+              <button className="bt-run-btn" style={{ padding: '4px 12px', fontSize: 12, background: '#6b7280' }}
+                onClick={() => onDiscard(tray.id)}>
+                Discard
+              </button>
+            </>
+          )}
+          {tray.status === 'RUNNING' && (
+            <button className="bt-run-btn" style={{ padding: '4px 12px', fontSize: 12, background: '#f59e0b' }}
+              onClick={onRefresh}>
+              Refresh
+            </button>
+          )}
+          <button style={{
+            background: 'none', border: '1px solid #374151', color: '#9ca3af',
+            borderRadius: 4, padding: '4px 8px', fontSize: 12, cursor: 'pointer',
+          }} onClick={() => setExpanded(e => !e)}>
+            {expanded ? '▲ Less' : '▼ More'}
+          </button>
+          <button style={{
+            background: 'none', border: '1px solid #374151', color: '#ef4444',
+            borderRadius: 4, padding: '4px 8px', fontSize: 12, cursor: 'pointer',
+          }} onClick={() => onDelete(tray.id)}>
+            ✕
+          </button>
         </div>
       </div>
+
+      {/* ── Body ── */}
+      <div style={{ padding: '12px 16px' }}>
+
+        {/* Purpose */}
+        {tray.purpose && (
+          <p style={{ margin: '0 0 10px', color: '#d1d5db', fontSize: 13, lineHeight: 1.5 }}>
+            {tray.purpose}
+          </p>
+        )}
+
+        {/* Test instruction */}
+        {tray.test_instruction && (
+          <div style={{ marginBottom: 10 }}>
+            <span style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Test instruction
+            </span>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
+              {tray.test_instruction}
+            </p>
+          </div>
+        )}
+
+        {/* Key spec row */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 10 }}>
+          {tray.priority && (
+            <div>
+              <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>Priority</div>
+              <div style={{ fontSize: 13 }}>{tray.priority}</div>
+            </div>
+          )}
+          {tray.checkpoints?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>Checkpoints</div>
+              <div style={{ fontSize: 13 }}>{tray.checkpoints.join(', ')}</div>
+            </div>
+          )}
+          {tray.lay_multiplier !== undefined && tray.lay_multiplier !== 1.0 && (
+            <div>
+              <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>Lay Multiplier</div>
+              <div style={{ fontSize: 13, color: layActionColor }}>×{tray.lay_multiplier}</div>
+            </div>
+          )}
+          {tray.reason_codes?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>Reason Codes</div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>{tray.reason_codes.join(', ')}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Threshold bands */}
+        {tray.threshold_bands?.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+              Threshold Bands
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {tray.threshold_bands.map((b, i) => (
+                <span key={i} style={{
+                  background: '#1f2937', border: '1px solid #374151',
+                  borderRadius: 4, padding: '2px 8px', fontSize: 11,
+                }}>
+                  <span style={{ color: '#9ca3af' }}>{b.name || b.severity || `Band ${i+1}`}:</span>{' '}
+                  {b.field} {b.operator} {b.value}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Backtest results */}
+        {hasResults && (
+          <div style={{
+            background: 'var(--card-header-bg, #14171d)',
+            border: '1px solid var(--border, #2a2d35)',
+            borderRadius: 6, padding: '10px 14px', marginBottom: 10,
+          }}>
+            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>
+              Backtest Results — {res.date}
+            </div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {[
+                ['Markets', res.markets_evaluated],
+                ['Bets', res.bets_placed],
+                ['Skipped', res.markets_skipped],
+                ['Stake', `£${(res.total_stake||0).toFixed(2)}`],
+                ['Liability', `£${(res.total_liability||0).toFixed(2)}`],
+                ['P&L', <span style={{ color: (res.total_pnl||0) >= 0 ? '#10b981' : '#ef4444', fontWeight: 700 }}>
+                  {(res.total_pnl||0) >= 0 ? '+' : ''}£{(res.total_pnl||0).toFixed(2)}
+                </span>],
+                ['ROI', <span style={{ color: (res.roi||0) >= 0 ? '#10b981' : '#ef4444', fontWeight: 700 }}>
+                  {(res.roi||0) >= 0 ? '+' : ''}{(res.roi||0).toFixed(1)}%
+                </span>],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>{label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Agent analysis */}
+        {tray.agent_analysis && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+              AI Analysis
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: '#d1d5db', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {tray.agent_analysis}
+            </p>
+          </div>
+        )}
+
+        {/* Expanded detail */}
+        {expanded && (
+          <div style={{ borderTop: '1px solid #2a2d35', paddingTop: 12, marginTop: 4 }}>
+            {/* Inputs required */}
+            {tray.inputs_required?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+                  Inputs Required
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {tray.inputs_required.map((inp, i) => (
+                    <code key={i} style={{
+                      background: '#1f2937', border: '1px solid #374151',
+                      borderRadius: 3, padding: '1px 6px', fontSize: 11,
+                    }}>{inp}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Derived metrics */}
+            {tray.derived_metrics?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+                  Derived Metrics
+                </div>
+                {tray.derived_metrics.map((m, i) => (
+                  <div key={i} style={{ marginBottom: 4, fontSize: 12 }}>
+                    <code style={{ color: '#a5b4fc' }}>{m.name || m.formula || JSON.stringify(m)}</code>
+                    {m.description && <span style={{ color: '#6b7280', marginLeft: 8 }}>— {m.description}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Sub-rules */}
+            {tray.sub_rules?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Sub-Rules ({tray.sub_rules.length})
+                </div>
+                {tray.sub_rules.map((r, i) => (
+                  <div key={i} style={{
+                    background: '#1a1d23', border: '1px solid #2a2d35',
+                    borderRadius: 5, padding: '8px 10px', marginBottom: 6, fontSize: 12,
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4, color: '#e2e8f0' }}>
+                      {r.id || r.name || `Rule ${i+1}`}
+                    </div>
+                    {r.purpose && <div style={{ color: '#9ca3af', marginBottom: 2 }}>{r.purpose}</div>}
+                    {r.trigger && <div><code style={{ color: '#86efac' }}>{r.trigger}</code></div>}
+                    {r.effect && <div style={{ color: '#fcd34d', marginTop: 2 }}>→ {typeof r.effect === 'string' ? r.effect : JSON.stringify(r.effect)}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Expected output */}
+            {tray.expected_output && Object.keys(tray.expected_output).length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 4 }}>
+                  Expected Output Schema
+                </div>
+                <pre style={{
+                  background: '#111318', border: '1px solid #2a2d35', borderRadius: 5,
+                  padding: '8px 10px', fontSize: 11, color: '#a5b4fc', overflowX: 'auto', margin: 0,
+                }}>
+                  {JSON.stringify(tray.expected_output, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            {/* Full backtest per-market results */}
+            {res.results?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Per-Market Results
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #2a2d35', color: '#6b7280', textAlign: 'left' }}>
+                        {['Time','Venue','Favourite','Rule','Stake','P&L','Result'].map(h => (
+                          <th key={h} style={{ padding: '4px 8px', fontWeight: 600 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {res.results.map((r, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #1f2937' }}>
+                          <td style={{ padding: '4px 8px', color: '#9ca3af' }}>
+                            {r.race_time ? new Date(r.race_time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '—'}
+                          </td>
+                          <td style={{ padding: '4px 8px' }}>{r.venue || '—'}</td>
+                          <td style={{ padding: '4px 8px', fontSize: 11 }}>{r.favourite_name || '—'}</td>
+                          <td style={{ padding: '4px 8px', fontSize: 11, color: '#9ca3af' }}>{r.rule || r.skip_reason || '—'}</td>
+                          <td style={{ padding: '4px 8px' }}>{r.stake ? `£${r.stake}` : '—'}</td>
+                          <td style={{ padding: '4px 8px', color: (r.pnl||0) >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                            {r.pnl !== undefined ? `${r.pnl >= 0 ? '+' : ''}£${r.pnl.toFixed(2)}` : '—'}
+                          </td>
+                          <td style={{ padding: '4px 8px' }}>
+                            <span style={{
+                              fontSize: 10, fontWeight: 700,
+                              color: r.result === 'WON' ? '#10b981' : r.result === 'LOST' ? '#ef4444' : '#6b7280',
+                            }}>{r.result || 'SKIPPED'}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Timestamps */}
+            <div style={{ marginTop: 10, fontSize: 11, color: '#4b5563' }}>
+              Created: {new Date(tray.created_at).toLocaleString('en-GB')}
+              {tray.completed_at && ` · Completed: ${new Date(tray.completed_at).toLocaleString('en-GB')}`}
+              {tray.backtest_job_id && ` · Job: ${tray.backtest_job_id.slice(0,8)}…`}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StrategyTab() {
+  const [trays, setTrays] = React.useState([])
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState(null)
+  const pollRef = React.useRef(null)
+
+  const API = window.API_BASE || ''
+
+  const fetchTrays = React.useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/strategy/sandbox/trays`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const d = await r.json()
+      setTrays(d.trays || [])
+      setError(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [API])
+
+  React.useEffect(() => {
+    fetchTrays()
+    // Poll every 5s while any tray is RUNNING
+    pollRef.current = setInterval(() => {
+      setTrays(prev => {
+        if (prev.some(t => t.status === 'RUNNING')) {
+          fetchTrays()
+        }
+        return prev
+      })
+    }, 5000)
+    return () => clearInterval(pollRef.current)
+  }, [fetchTrays])
+
+  const handlePromote = async (id) => {
+    await fetch(`${API}/api/strategy/sandbox/trays/${id}/promote`, { method: 'POST' })
+    fetchTrays()
+  }
+
+  const handleDiscard = async (id) => {
+    await fetch(`${API}/api/strategy/sandbox/trays/${id}/discard`, { method: 'POST' })
+    fetchTrays()
+  }
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this tray?')) return
+    await fetch(`${API}/api/strategy/sandbox/trays/${id}`, { method: 'DELETE' })
+    fetchTrays()
+  }
+
+  // Tray summary counts
+  const counts = trays.reduce((acc, t) => {
+    acc[t.status] = (acc[t.status] || 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <div className="backtest-tab bt-wide">
+      {/* ── Header bar ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Strategy Sandbox</h2>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#6b7280' }}>
+            FSU9 — Rule testing workspace. Tests are run by the AI agent; review and promote rules here.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {Object.entries(counts).map(([status, count]) => (
+            <span key={status} style={{
+              fontSize: 12, padding: '3px 10px', borderRadius: 4,
+              background: TRAY_STATUS_COLORS[status] + '22',
+              border: `1px solid ${TRAY_STATUS_COLORS[status]}44`,
+              color: TRAY_STATUS_COLORS[status],
+              fontWeight: 600,
+            }}>
+              {count} {status}
+            </span>
+          ))}
+          <button className="bt-run-btn" style={{ padding: '5px 14px', fontSize: 12 }}
+            onClick={fetchTrays}>
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* ── Workflow hint ── */}
+      {trays.length === 0 && !loading && (
+        <div style={{
+          background: '#14171d', border: '1px solid #2a2d35', borderRadius: 8,
+          padding: '28px 24px', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>🧪</div>
+          <h3 style={{ margin: '0 0 8px', color: '#d1d5db' }}>No active tests</h3>
+          <p style={{ margin: 0, color: '#6b7280', fontSize: 13, maxWidth: 480, marginInline: 'auto' }}>
+            Ask the AI agent to test a rule or strategy. It will create a tray here, run a backtest,
+            and save results for your review. You can then promote the rule to production or discard it.
+          </p>
+          <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {[
+              'Test the TOP2_CONCENTRATION rule on a recent date',
+              'Run a backtest with the Market Overlay Modifier on 2025-11-15',
+              'What dates have backtest data available?',
+            ].map(hint => (
+              <span key={hint} style={{
+                background: '#1f2937', border: '1px solid #374151', borderRadius: 4,
+                padding: '4px 10px', fontSize: 11, color: '#9ca3af', fontStyle: 'italic',
+              }}>
+                "{hint}"
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p style={{ color: '#ef4444', fontSize: 13 }}>Error loading trays: {error}</p>
+      )}
+
+      {/* ── Tray status sections ── */}
+      {['RUNNING', 'PENDING', 'COMPLETED', 'PROMOTED', 'DISCARDED'].map(status => {
+        const group = trays.filter(t => t.status === status)
+        if (!group.length) return null
+        return (
+          <div key={status} style={{ marginBottom: 24 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+              textTransform: 'uppercase', color: TRAY_STATUS_COLORS[status],
+              borderBottom: `1px solid ${TRAY_STATUS_COLORS[status]}33`,
+              paddingBottom: 6, marginBottom: 12,
+            }}>
+              {status} ({group.length})
+            </div>
+            {group.map(tray => (
+              <TrayCard
+                key={tray.id}
+                tray={tray}
+                onPromote={handlePromote}
+                onDiscard={handleDiscard}
+                onDelete={handleDelete}
+                onRefresh={fetchTrays}
+              />
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
