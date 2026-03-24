@@ -3043,6 +3043,7 @@ class BacktestRunRequest(BaseModel):
     signal_steam_gate_enabled: bool = False   # samples price 15 mins before target_iso
     signal_band_perf_enabled: bool = False
     market_overlay_enabled: bool = False
+    top2_concentration_enabled: bool = False  # TOP2_CONCENTRATION rule family
     sandbox_enabled: bool = False   # apply strategy sandbox rules during this backtest
 
 
@@ -3343,6 +3344,37 @@ def _backtest_run_inner(req):
                         f"@ {m['venue']} — {_sig_result.skip_reason}"
                     )
             rule_result.instructions = _sig_kept
+
+        # ── TOP2_CONCENTRATION Rule Family ───────────────────────────────────
+        # Runs before MOM per spec priority order (section 11).
+        # BLOCK clears all instructions; SUPPRESS scales stakes down.
+        # WATCH fires logging only — no stake change.
+        if req.top2_concentration_enabled and not rule_result.skipped and rule_result.instructions:
+            from top2_concentration import apply_top2_concentration as _apply_top2
+            _top2 = _apply_top2(runners, enabled=True)
+            if _top2.state == "BLOCK":
+                rule_result.instructions = []
+                rule_result.skipped = True
+                rule_result.skip_reason = f"[TOP2] {_top2.reason}"
+                logger.info(f"[TOP2] BT BLOCK: {m['venue']} — {_top2.reason}")
+            elif _top2.state in ("SUPPRESS_MEDIUM", "SUPPRESS_STRONG"):
+                for _instr in rule_result.instructions:
+                    _pre = _instr.size
+                    _instr.size = round(_instr.size * _top2.lay_multiplier, 2)
+                    if _pre >= 2.0:
+                        _instr.size = max(_instr.size, 2.0)
+                logger.info(
+                    f"[TOP2] BT {_top2.state}: {m['venue']} "
+                    f"top2={_top2.top2_combined:.4f} "
+                    f"3v2={_top2.third_vs_second_ratio:.4f} "
+                    f"×{_top2.lay_multiplier}"
+                )
+            elif _top2.state == "WATCH":
+                logger.info(
+                    f"[TOP2] BT WATCH: {m['venue']} "
+                    f"top2={_top2.top2_combined:.4f} "
+                    f"3v2={_top2.third_vs_second_ratio:.4f} — no change"
+                )
 
         # ── Market Overlay Modifier ─────────────────────────────────────────
         if req.market_overlay_enabled and not rule_result.skipped and rule_result.instructions:

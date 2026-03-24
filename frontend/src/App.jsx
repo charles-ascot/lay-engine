@@ -1552,6 +1552,7 @@ function BacktestTab() {
   const [sigSteamGate, setSigSteamGate] = useState(false)
   const [sigBandPerf, setSigBandPerf] = useState(false)
   const [sigMarketOverlay, setSigMarketOverlay] = useState(false)
+  const [top2Enabled, setTop2Enabled] = useState(false)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1669,6 +1670,7 @@ function BacktestTab() {
           signal_steam_gate_enabled: sigSteamGate,
           signal_band_perf_enabled: sigBandPerf,
           market_overlay_enabled: sigMarketOverlay,
+          top2_concentration_enabled: top2Enabled,
         }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
@@ -1717,6 +1719,7 @@ function BacktestTab() {
           signal_steam_gate_enabled: sigSteamGate,
           signal_band_perf_enabled: sigBandPerf,
           market_overlay_enabled: sigMarketOverlay,
+          top2_concentration_enabled: top2Enabled,
         },
         summary: {
           markets_evaluated: data.markets_evaluated,
@@ -1877,6 +1880,7 @@ function BacktestTab() {
             signal_steam_gate_enabled: sigSteamGate,
             signal_band_perf_enabled: sigBandPerf,
             market_overlay_enabled: sigMarketOverlay,
+            top2_concentration_enabled: top2Enabled,
           }),
         })
         if (!r.ok) throw new Error(`${r.status}`)
@@ -1928,6 +1932,7 @@ function BacktestTab() {
         signal_steam_gate_enabled: sigSteamGate,
         signal_band_perf_enabled: sigBandPerf,
         market_overlay_enabled: sigMarketOverlay,
+        top2_concentration_enabled: top2Enabled,
       },
       summary,
       days,
@@ -2121,6 +2126,7 @@ function BacktestTab() {
               ['sig-steam', sigSteamGate, setSigSteamGate, 'Signal: Steam Gate'],
               ['sig-band', sigBandPerf, setSigBandPerf, 'Signal: Band Perf'],
               ['market-overlay', sigMarketOverlay, setSigMarketOverlay, 'Market Overlay Modifier'],
+              ['top2-concentration', top2Enabled, setTop2Enabled, 'TOP2 Concentration'],
             ].map(([key, val, setter, label]) => (
               <label key={key} className="bt-toggle-label">
                 <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)} />
@@ -2556,6 +2562,7 @@ function BacktestTab() {
                     {entry.config.mark_floor_enabled && <span className="tag-on">Floor</span>}
                     {entry.config.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
                     {entry.config.market_overlay_enabled && <span className="tag-on">MOM</span>}
+                    {entry.config.top2_concentration_enabled && <span className="tag-on">TOP2</span>}
                   </span>
                   <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
                 </div>
@@ -2791,6 +2798,7 @@ function BacktestTab() {
                       {entry.config?.jofs_enabled && <span className="tag-on">JOFS</span>}
                       {entry.config?.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
                       {entry.config?.market_overlay_enabled && <span className="tag-on">MOM</span>}
+                      {entry.config?.top2_concentration_enabled && <span className="tag-on">TOP2</span>}
                     </span>
                     <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
                   </div>
