@@ -43,6 +43,12 @@ from strategy_sandbox import RuleSandbox, persist_sandbox, restore_sandbox
 _backtest_jobs: dict = {}   # job_id → {"status", "result", "error", "started_at"}
 _backtest_jobs_lock = threading.Lock()
 
+# ── BSP Optimiser job store ───────────────────────────────────────────────────
+_bsp_jobs: dict = {}        # job_id → {"status", "result", "error", "progress", "started_at"}
+_bsp_jobs_lock = threading.Lock()
+
+RP_API_URL = "https://racing-post-950990732577.europe-west2.run.app"
+
 def _cleanup_old_jobs():
     """Drop jobs older than 2 hours to avoid unbounded memory growth."""
     cutoff = time.time() - 7200
@@ -50,6 +56,10 @@ def _cleanup_old_jobs():
         stale = [k for k, v in _backtest_jobs.items() if v["started_at"] < cutoff]
         for k in stale:
             del _backtest_jobs[k]
+    with _bsp_jobs_lock:
+        stale = [k for k, v in _bsp_jobs.items() if v["started_at"] < cutoff]
+        for k in stale:
+            del _bsp_jobs[k]
 
 # ── Strategy Rule Sandbox (FSU9) — persisted to GCS ─────────────────────────
 _sandbox = RuleSandbox()
@@ -3126,6 +3136,302 @@ def backtest_job_status(job_id: str):
         "result": job["result"],
         "error": job["error"],
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  BSP OPTIMISER  —  pre-race back / in-running lay contraction analysis
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BspOptimiserRequest(BaseModel):
+    date_from: str                              # YYYY-MM-DD
+    date_to: str                                # YYYY-MM-DD
+    countries: list[str] = ["GB", "IE"]
+    contraction_threshold_pct: float = 10.0    # % contraction, e.g. 10 = price drops to 90% of BSP
+    max_bsp: float | None = None                # optional upper BSP filter on favourite
+
+    @property
+    def threshold(self) -> float:
+        return 1.0 - self.contraction_threshold_pct / 100.0
+
+
+def _run_bsp_job(job_id: str, req: BspOptimiserRequest):
+    """Background worker: fetch BSP stats from FSU1, enrich with RP, compute hits."""
+    import requests as _req
+    from zoneinfo import ZoneInfo as _ZI
+
+    _LONDON = _ZI("Europe/London")
+
+    def _update(data: dict):
+        with _bsp_jobs_lock:
+            _bsp_jobs[job_id].update(data)
+
+    try:
+        # 1. Get available dates from FSU1
+        dates_resp = _req.get(
+            f"{FSU_URL}/api/dates",
+            headers=_fsu_auth_header(),
+            timeout=30,
+        )
+        dates_resp.raise_for_status()
+        all_dates = dates_resp.json().get("dates", [])
+        dates = sorted(d for d in all_dates if req.date_from <= d <= req.date_to)
+
+        if not dates:
+            _update({"status": "error", "error": f"No data available between {req.date_from} and {req.date_to}"})
+            return
+
+        countries_param = ",".join(req.countries)
+        runner_rows = []
+
+        for i, date in enumerate(dates):
+            _update({"progress": {"current": i + 1, "total": len(dates), "date": date}})
+
+            # 2. Fetch BSP stats from FSU1 for this date
+            try:
+                bsp_resp = _req.get(
+                    f"{FSU_URL}/api/bsp-analysis/{date}",
+                    params={"countries": countries_param},
+                    headers=_fsu_auth_header(),
+                    timeout=180,
+                )
+                if bsp_resp.status_code != 200:
+                    logging.warning(f"BSP analysis {date}: FSU returned {bsp_resp.status_code}")
+                    continue
+                bsp_data = bsp_resp.json()
+            except Exception as exc:
+                logging.warning(f"BSP analysis {date}: FSU error — {exc}")
+                continue
+
+            # 3. Try RP results for enrichment (class, going, pattern, surface)
+            rp_map: dict[tuple, dict] = {}   # (venue_lower, off_hhmm) -> race dict
+            try:
+                rp_resp = _req.get(
+                    f"{RP_API_URL}/api/v1/results/{date}",
+                    timeout=30,
+                )
+                if rp_resp.status_code == 200:
+                    for race in rp_resp.json().get("results", []):
+                        key = (
+                            race.get("course", "").lower().strip(),
+                            (race.get("off", "") or "")[:5],
+                        )
+                        rp_map.setdefault(key, race)
+            except Exception:
+                pass   # RP enrichment is best-effort
+
+            # 4. Process each market
+            for market in bsp_data.get("results", []):
+                runners = market.get("runners", [])
+                active = [r for r in runners if r.get("bsp") and not r.get("non_runner")]
+                if not active:
+                    continue
+
+                # BSP favourite = lowest BSP
+                sorted_by_bsp = sorted(active, key=lambda r: r["bsp"])
+                bsp_fav = sorted_by_bsp[0]
+                second_bsp = sorted_by_bsp[1]["bsp"] if len(sorted_by_bsp) > 1 else None
+
+                # Optional max BSP filter on the favourite
+                if req.max_bsp and bsp_fav["bsp"] > req.max_bsp:
+                    continue
+
+                # RP race lookup
+                off_time = market.get("off_time_local", "")
+                rp_race = rp_map.get((market.get("venue", "").lower().strip(), off_time), {})
+
+                for runner in runners:
+                    bsp = runner.get("bsp")
+                    if bsp is None:
+                        continue
+                    is_fav = runner["runner_id"] == bsp_fav["runner_id"]
+                    target = round(bsp * req.threshold, 2)
+                    ip_min = runner.get("in_play_min_price")
+                    hit = ip_min is not None and ip_min <= target
+
+                    runner_rows.append({
+                        "market_id": market["market_id"],
+                        "race_date": date,
+                        "course": market.get("venue", ""),
+                        "country": market.get("country", ""),
+                        "off_time": off_time,
+                        "market_name": market.get("market_name", ""),
+                        "distance": market.get("distance", ""),
+                        "race_type": market.get("race_type", ""),
+                        "number_of_runners": market.get("number_of_runners", 0),
+                        "runner_id": runner["runner_id"],
+                        "runner_name": runner["runner_name"],
+                        "bsp": bsp,
+                        "is_bsp_favourite": is_fav,
+                        "second_fav_bsp": second_bsp if is_fav else None,
+                        "target_price": target,
+                        "preoff_ltp": runner.get("preoff_ltp"),
+                        "in_play_min_price": ip_min,
+                        "in_play_max_price": runner.get("in_play_max_price"),
+                        "in_play_volume": runner.get("in_play_volume"),
+                        "winner": runner.get("winner", False),
+                        "non_runner": runner.get("non_runner", False),
+                        "hit": hit,
+                        # RP enrichment (best-effort)
+                        "race_class": rp_race.get("class") or rp_race.get("race_class"),
+                        "going": rp_race.get("going"),
+                        "pattern": rp_race.get("pattern"),
+                        "handicap": rp_race.get("handicap"),
+                        "surface": rp_race.get("surface"),
+                    })
+
+        # 5. Compute summary stats (favourites only)
+        fav_rows = [r for r in runner_rows if r["is_bsp_favourite"] and not r["non_runner"]]
+        markets_analysed = len(set(r["market_id"] for r in fav_rows))
+        qualified_count = sum(1 for r in fav_rows if r["hit"])
+        win_rate_pct = round(qualified_count / len(fav_rows) * 100, 1) if fav_rows else 0
+        avg_bsp = round(sum(r["bsp"] for r in fav_rows) / len(fav_rows), 2) if fav_rows else None
+        contractions = [
+            round((1 - r["in_play_min_price"] / r["bsp"]) * 100, 1)
+            for r in fav_rows
+            if r["bsp"] and r["in_play_min_price"]
+        ]
+        avg_contraction_pct = round(sum(contractions) / len(contractions), 1) if contractions else None
+
+        # BSP band breakdown
+        band_defs = [
+            ("Under 2.0",  lambda b: b < 2.0),
+            ("2.0 – 3.0",  lambda b: 2.0 <= b < 3.0),
+            ("3.0 – 5.0",  lambda b: 3.0 <= b < 5.0),
+            ("5.0+",       lambda b: b >= 5.0),
+        ]
+        bsp_bands = []
+        for label, fn in band_defs:
+            band = [r for r in fav_rows if fn(r["bsp"])]
+            if band:
+                b_hits = sum(1 for r in band if r["hit"])
+                b_ctrs = [
+                    round((1 - r["in_play_min_price"] / r["bsp"]) * 100, 1)
+                    for r in band if r["bsp"] and r["in_play_min_price"]
+                ]
+                b_ip_mins = [r["in_play_min_price"] for r in band if r["in_play_min_price"]]
+                bsp_bands.append({
+                    "band": label,
+                    "count": len(band),
+                    "qualified": b_hits,
+                    "win_rate_pct": round(b_hits / len(band) * 100, 1),
+                    "avg_contraction_pct": round(sum(b_ctrs) / len(b_ctrs), 1) if b_ctrs else None,
+                    "avg_inplay_min": round(sum(b_ip_mins) / len(b_ip_mins), 2) if b_ip_mins else None,
+                })
+
+        # Normalise runner rows for frontend
+        runners_out = [
+            {
+                "date": r["race_date"],
+                "market_id": r["market_id"],
+                "venue": r["course"],
+                "race_time": r["off_time"],
+                "distance": r.get("distance", ""),
+                "race_type": r.get("race_type", ""),
+                "runner_name": r["runner_name"],
+                "bsp": r["bsp"],
+                "pre_off_ltp": r.get("preoff_ltp"),
+                "contraction_pct": (
+                    round((1 - r["in_play_min_price"] / r["bsp"]) * 100, 1)
+                    if r["bsp"] and r.get("in_play_min_price") else None
+                ),
+                "inplay_min": r.get("in_play_min_price"),
+                "inplay_max": r.get("in_play_max_price"),
+                "won": r.get("winner"),
+                "hit": r.get("hit"),
+            }
+            for r in runner_rows if r["is_bsp_favourite"] and not r["non_runner"]
+        ]
+
+        _update({
+            "status": "done",
+            "result": {
+                "summary": {
+                    "days_analysed": len(dates),
+                    "markets_analysed": markets_analysed,
+                    "favourites_tracked": len(fav_rows),
+                    "qualified_count": qualified_count,
+                    "win_rate_pct": win_rate_pct,
+                    "avg_contraction_pct": avg_contraction_pct,
+                    "avg_bsp": avg_bsp,
+                    "threshold_pct": req.contraction_threshold_pct,
+                    "countries": req.countries,
+                },
+                "bsp_bands": bsp_bands,
+                "runners": runners_out,
+            },
+        })
+
+    except Exception as exc:
+        logging.error(f"BSP job {job_id} failed: {exc}")
+        _update({"status": "error", "error": str(exc)})
+
+
+@app.post("/api/bsp-optimiser/run", dependencies=[Depends(require_api_key)])
+def bsp_optimiser_run(req: BspOptimiserRequest):
+    """Start a BSP contraction analysis job. Returns job_id to poll."""
+    _cleanup_old_jobs()
+    job_id = str(uuid.uuid4())
+    with _bsp_jobs_lock:
+        _bsp_jobs[job_id] = {
+            "status": "running",
+            "result": None,
+            "error": None,
+            "progress": {"current": 0, "total": 0, "date": ""},
+            "started_at": time.time(),
+        }
+    t = threading.Thread(target=_run_bsp_job, args=(job_id, req), daemon=True)
+    t.start()
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/bsp-optimiser/job/{job_id}", dependencies=[Depends(require_api_key)])
+def bsp_optimiser_job_status(job_id: str):
+    """Poll BSP optimiser job status. Returns {status, progress, result?, error?}."""
+    with _bsp_jobs_lock:
+        job = _bsp_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress": job.get("progress", {}),
+        "result": job["result"],
+        "error": job["error"],
+    }
+
+
+@app.get("/api/bsp-optimiser/settings", dependencies=[Depends(require_api_key)])
+def bsp_settings_get():
+    """Get BSP Optimiser live settings plus active candidates."""
+    cfg = engine.settings.get("bsp_optimiser", {
+        "enabled": False,
+        "dry_run": True,
+        "contraction_threshold_pct": 10,
+        "stake_pts": 2,
+        "max_bsp": None,
+    })
+    candidates = [
+        {
+            "runner_name": c.get("runner_name"),
+            "venue": c.get("venue"),
+            "race_time": c.get("race_time"),
+            "bsp_proxy": c.get("bsp_proxy"),
+            "target": c.get("target"),
+            "status": "placed" if c.get("bet_placed") else "monitoring",
+        }
+        for c in engine._bsp_candidates.values()
+    ]
+    return {**cfg, "active_candidates": candidates}
+
+
+@app.post("/api/bsp-optimiser/settings", dependencies=[Depends(require_api_key)])
+def bsp_settings_set(body: dict):
+    """Update BSP Optimiser live settings."""
+    current = engine.settings.get("bsp_optimiser", {})
+    current.update(body)
+    engine.settings["bsp_optimiser"] = current
+    engine._save_settings()
+    return current
 
 
 def _backtest_run_inner(req):

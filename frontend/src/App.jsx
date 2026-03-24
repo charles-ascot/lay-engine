@@ -5419,6 +5419,476 @@ function ReportsTab() {
   )
 }
 
+// ── BSP Optimiser Tab ──
+function BspOptimiserTab() {
+  const [subTab, setSubTab] = useState('analysis')
+
+  // ── Analysis state ──
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 14)
+    return d.toISOString().slice(0, 10)
+  })
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [countries, setCountries] = useState(['GB', 'IE'])
+  const [threshold, setThreshold] = useState(10)
+  const [maxBsp, setMaxBsp] = useState(10)
+
+  const [jobId, setJobId] = useState(null)
+  const [jobStatus, setJobStatus] = useState(null) // null | 'running' | 'done' | 'error'
+  const [jobResult, setJobResult] = useState(null)
+  const [jobError, setJobError] = useState('')
+  const pollRef = useRef(null)
+
+  // ── Live settings state ──
+  const [liveSettings, setLiveSettings] = useState(null)
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [liveSaving, setLiveSaving] = useState(false)
+  const [liveError, setLiveError] = useState('')
+
+  // ── Load live settings on mount and when switching to live tab ──
+  useEffect(() => {
+    if (subTab === 'live') fetchLiveSettings()
+  }, [subTab])
+
+  function fetchLiveSettings() {
+    setLiveLoading(true)
+    api('/api/bsp-optimiser/settings')
+      .then(d => { setLiveSettings(d); setLiveLoading(false) })
+      .catch(() => setLiveLoading(false))
+  }
+
+  async function saveLiveSettings(patch) {
+    setLiveSaving(true)
+    setLiveError('')
+    try {
+      const updated = await api('/api/bsp-optimiser/settings', {
+        method: 'POST',
+        body: JSON.stringify(patch),
+      })
+      setLiveSettings(updated)
+    } catch (e) {
+      setLiveError('Save failed: ' + e.message)
+    }
+    setLiveSaving(false)
+  }
+
+  function toggleCountry(c) {
+    setCountries(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])
+  }
+
+  async function runAnalysis() {
+    setJobStatus('running')
+    setJobResult(null)
+    setJobError('')
+    setJobId(null)
+    try {
+      const res = await api('/api/bsp-optimiser/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          date_from: dateFrom,
+          date_to: dateTo,
+          countries,
+          contraction_threshold_pct: threshold,
+          max_bsp: maxBsp,
+        }),
+      })
+      if (!res.job_id) throw new Error(res.detail || 'No job ID returned')
+      setJobId(res.job_id)
+      pollRef.current = setInterval(() => pollJob(res.job_id), 2000)
+    } catch (e) {
+      setJobStatus('error')
+      setJobError(e.message)
+    }
+  }
+
+  async function pollJob(id) {
+    try {
+      const res = await api(`/api/bsp-optimiser/job/${id}`)
+      if (res.status === 'done') {
+        clearInterval(pollRef.current)
+        setJobStatus('done')
+        setJobResult(res.result)
+      } else if (res.status === 'error') {
+        clearInterval(pollRef.current)
+        setJobStatus('error')
+        setJobError(res.error || 'Unknown error')
+      }
+    } catch (e) {
+      clearInterval(pollRef.current)
+      setJobStatus('error')
+      setJobError(e.message)
+    }
+  }
+
+  useEffect(() => () => clearInterval(pollRef.current), [])
+
+  function downloadCsv() {
+    if (!jobResult?.runners) return
+    const rows = jobResult.runners
+    const headers = ['date', 'market_id', 'venue', 'race_time', 'distance', 'race_type',
+      'runner_name', 'bsp', 'pre_off_ltp', 'contraction_pct', 'inplay_min', 'inplay_max', 'won']
+    const csv = [headers.join(','),
+      ...rows.map(r => headers.map(h => {
+        const v = r[h] ?? ''
+        return typeof v === 'string' && v.includes(',') ? `"${v}"` : v
+      }).join(','))
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `bsp_analysis_${dateFrom}_${dateTo}.csv`
+    document.body.appendChild(a); a.click()
+    document.body.removeChild(a); URL.revokeObjectURL(url)
+  }
+
+  const summary = jobResult?.summary || {}
+  const bands = jobResult?.bsp_bands || []
+  const runners = jobResult?.runners || []
+
+  return (
+    <div className="backtest-tab bt-wide">
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0, fontSize: 20 }}>BSP Optimiser</h2>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#6b7280' }}>
+            Pre-race back / in-running lay contraction strategy — analysis and live rule control
+          </p>
+        </div>
+        {liveSettings && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 14px', borderRadius: 6,
+            background: liveSettings.enabled ? '#16a34a22' : '#6b728022',
+            border: `1px solid ${liveSettings.enabled ? '#16a34a44' : '#6b728044'}`,
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: liveSettings.enabled ? '#22c55e' : '#6b7280',
+            }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: liveSettings.enabled ? '#22c55e' : '#6b7280' }}>
+              {liveSettings.enabled ? 'Live Rule ACTIVE' : 'Live Rule OFF'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="sub-tabs" style={{ marginBottom: 20 }}>
+        {[{ id: 'analysis', label: 'Analysis' }, { id: 'live', label: 'Live Rule Settings' }].map(t => (
+          <button key={t.id} className={subTab === t.id ? 'active' : ''} onClick={() => setSubTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Analysis Sub-tab ── */}
+      {subTab === 'analysis' && (
+        <div>
+          {/* Controls */}
+          <div className="engine-section" style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label className="engine-label">
+                Date from
+                <input type="date" value={dateFrom}
+                  max={dateTo}
+                  onChange={e => setDateFrom(e.target.value)}
+                  style={{ display: 'block', marginTop: 4 }}
+                />
+              </label>
+              <label className="engine-label">
+                Date to
+                <input type="date" value={dateTo}
+                  min={dateFrom} max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setDateTo(e.target.value)}
+                  style={{ display: 'block', marginTop: 4 }}
+                />
+              </label>
+              <div>
+                <span className="engine-label" style={{ display: 'block', marginBottom: 4 }}>Countries</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {['GB', 'IE', 'US', 'AU', 'ZA', 'FR'].map(c => (
+                    <button key={c}
+                      className={`btn-toggle ${countries.includes(c) ? 'active' : ''}`}
+                      onClick={() => toggleCountry(c)}
+                    >{c}</button>
+                  ))}
+                </div>
+              </div>
+              <label className="engine-label">
+                Contraction threshold (%)
+                <input type="number" value={threshold} min={1} max={50}
+                  onChange={e => setThreshold(+e.target.value)}
+                  style={{ display: 'block', marginTop: 4, width: 80 }}
+                />
+              </label>
+              <label className="engine-label">
+                Max BSP filter
+                <input type="number" value={maxBsp} min={1} max={100}
+                  onChange={e => setMaxBsp(+e.target.value)}
+                  style={{ display: 'block', marginTop: 4, width: 80 }}
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                onClick={runAnalysis}
+                disabled={jobStatus === 'running' || countries.length === 0}
+              >
+                {jobStatus === 'running' ? 'Running...' : 'Run Analysis'}
+              </button>
+            </div>
+          </div>
+
+          {/* Progress / Error */}
+          {jobStatus === 'running' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, color: '#6b7280', fontSize: 13 }}>
+              <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+              Analysing markets from {dateFrom} to {dateTo}...
+            </div>
+          )}
+          {jobStatus === 'error' && (
+            <div className="alert alert-danger" style={{ marginBottom: 16 }}>{jobError}</div>
+          )}
+
+          {/* Results */}
+          {jobStatus === 'done' && jobResult && (
+            <div>
+              {/* Summary cards */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+                {[
+                  { label: 'Days Analysed', value: summary.days_analysed ?? '—' },
+                  { label: 'Markets', value: summary.markets_analysed ?? '—' },
+                  { label: 'Favourites', value: summary.favourites_tracked ?? '—' },
+                  { label: 'Qualified', value: summary.qualified_count ?? '—', highlight: true },
+                  { label: 'Win Rate', value: summary.win_rate_pct != null ? summary.win_rate_pct.toFixed(1) + '%' : '—' },
+                  { label: 'Avg Contraction', value: summary.avg_contraction_pct != null ? summary.avg_contraction_pct.toFixed(1) + '%' : '—' },
+                  { label: 'Avg BSP', value: summary.avg_bsp != null ? summary.avg_bsp.toFixed(2) : '—' },
+                ].map(({ label, value, highlight }) => (
+                  <div key={label} style={{
+                    padding: '12px 18px', borderRadius: 8, minWidth: 100,
+                    background: highlight ? '#1d4ed822' : 'var(--card-bg, #1a1a2e)',
+                    border: `1px solid ${highlight ? '#1d4ed844' : 'var(--border, #2a2a3e)'}`,
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#60a5fa' : 'var(--text, #e2e8f0)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* BSP band breakdown */}
+              {bands.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>BSP Band Breakdown</h3>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="bt-table" style={{ minWidth: 500 }}>
+                      <thead>
+                        <tr>
+                          <th>BSP Band</th>
+                          <th>Count</th>
+                          <th>Qualified</th>
+                          <th>Win Rate</th>
+                          <th>Avg Contraction</th>
+                          <th>Avg In-play Min</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bands.map((b, i) => (
+                          <tr key={i}>
+                            <td>{b.band}</td>
+                            <td>{b.count}</td>
+                            <td>{b.qualified}</td>
+                            <td>{b.win_rate_pct != null ? b.win_rate_pct.toFixed(1) + '%' : '—'}</td>
+                            <td>{b.avg_contraction_pct != null ? b.avg_contraction_pct.toFixed(1) + '%' : '—'}</td>
+                            <td>{b.avg_inplay_min != null ? b.avg_inplay_min.toFixed(2) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Full runner table */}
+              {runners.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                      Runner Data ({runners.length} rows)
+                    </h3>
+                    <button className="btn btn-secondary btn-sm" onClick={downloadCsv}>
+                      Download CSV
+                    </button>
+                  </div>
+                  <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto' }}>
+                    <table className="bt-table" style={{ minWidth: 800, fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Venue</th>
+                          <th>Time</th>
+                          <th>Distance</th>
+                          <th>Type</th>
+                          <th>Runner</th>
+                          <th>BSP</th>
+                          <th>Pre-off LTP</th>
+                          <th>Contraction</th>
+                          <th>In-play Min</th>
+                          <th>In-play Max</th>
+                          <th>Won</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runners.map((r, i) => (
+                          <tr key={i}>
+                            <td>{r.date}</td>
+                            <td>{r.venue}</td>
+                            <td>{r.race_time}</td>
+                            <td>{r.distance || '—'}</td>
+                            <td>{r.race_type || '—'}</td>
+                            <td>{r.runner_name}</td>
+                            <td>{r.bsp != null ? r.bsp.toFixed(2) : '—'}</td>
+                            <td>{r.pre_off_ltp != null ? r.pre_off_ltp.toFixed(2) : '—'}</td>
+                            <td style={{ color: r.contraction_pct >= threshold ? '#22c55e' : undefined }}>
+                              {r.contraction_pct != null ? r.contraction_pct.toFixed(1) + '%' : '—'}
+                            </td>
+                            <td>{r.inplay_min != null ? r.inplay_min.toFixed(2) : '—'}</td>
+                            <td>{r.inplay_max != null ? r.inplay_max.toFixed(2) : '—'}</td>
+                            <td>{r.won == null ? '—' : r.won ? 'Yes' : 'No'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {runners.length === 0 && (
+                <p style={{ color: '#6b7280', fontSize: 13 }}>No qualifying favourites found in this date range.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Live Rule Settings Sub-tab ── */}
+      {subTab === 'live' && (
+        <div>
+          {liveLoading ? (
+            <p style={{ color: '#6b7280', fontSize: 13 }}>Loading settings...</p>
+          ) : !liveSettings ? (
+            <p style={{ color: '#ef4444', fontSize: 13 }}>Could not load settings.</p>
+          ) : (
+            <div className="engine-section">
+              {liveError && <div className="alert alert-danger" style={{ marginBottom: 12 }}>{liveError}</div>}
+
+              {/* Enable toggle */}
+              <div className="engine-row" style={{ marginBottom: 16 }}>
+                <label className="engine-label" style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+                  <div style={{ position: 'relative', width: 40, height: 22 }}>
+                    <input type="checkbox" checked={liveSettings.enabled}
+                      onChange={e => saveLiveSettings({ enabled: e.target.checked })}
+                      style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+                    />
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                      borderRadius: 22, cursor: 'pointer',
+                      background: liveSettings.enabled ? '#16a34a' : '#374151',
+                      transition: 'background 0.2s',
+                    }}
+                      onClick={() => saveLiveSettings({ enabled: !liveSettings.enabled })}
+                    >
+                      <div style={{
+                        position: 'absolute', height: 18, width: 18, borderRadius: '50%',
+                        background: '#fff', top: 2,
+                        left: liveSettings.enabled ? 20 : 2,
+                        transition: 'left 0.2s',
+                      }} />
+                    </div>
+                  </div>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>
+                    {liveSettings.enabled ? 'BSP Rule ENABLED' : 'BSP Rule DISABLED'}
+                  </span>
+                </label>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280' }}>
+                  When enabled, the engine monitors favourites after they go in-play and places a lay bet when the LTP contracts to the target.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+                <label className="engine-label">
+                  Contraction threshold (%)
+                  <input type="number" value={liveSettings.contraction_threshold_pct ?? 10}
+                    min={1} max={50}
+                    onChange={e => saveLiveSettings({ contraction_threshold_pct: +e.target.value })}
+                    style={{ display: 'block', marginTop: 4, width: 80 }}
+                    disabled={liveSaving}
+                  />
+                </label>
+                <label className="engine-label">
+                  Stake (pts)
+                  <input type="number" value={liveSettings.stake_pts ?? 2}
+                    min={0.5} max={50} step={0.5}
+                    onChange={e => saveLiveSettings({ stake_pts: +e.target.value })}
+                    style={{ display: 'block', marginTop: 4, width: 80 }}
+                    disabled={liveSaving}
+                  />
+                </label>
+                <label className="engine-label">
+                  Max BSP
+                  <input type="number" value={liveSettings.max_bsp ?? 10}
+                    min={1} max={100}
+                    onChange={e => saveLiveSettings({ max_bsp: +e.target.value })}
+                    style={{ display: 'block', marginTop: 4, width: 80 }}
+                    disabled={liveSaving}
+                  />
+                </label>
+                <label className="engine-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={liveSettings.dry_run ?? true}
+                    onChange={e => saveLiveSettings({ dry_run: e.target.checked })}
+                    disabled={liveSaving}
+                  />
+                  Dry run mode
+                </label>
+              </div>
+
+              {liveSaving && <span style={{ fontSize: 12, color: '#6b7280' }}>Saving...</span>}
+
+              {/* Active candidates */}
+              <div style={{ marginTop: 20 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Active Candidates</h3>
+                {(liveSettings.active_candidates || []).length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#6b7280' }}>No candidates registered. Candidates are set when eligible markets start in-play.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {liveSettings.active_candidates.map((c, i) => (
+                      <div key={i} style={{
+                        padding: '10px 14px', borderRadius: 6,
+                        background: 'var(--card-bg, #1a1a2e)',
+                        border: '1px solid var(--border, #2a2a3e)',
+                        display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13,
+                      }}>
+                        <span><strong>{c.runner_name}</strong></span>
+                        <span style={{ color: '#6b7280' }}>{c.venue} {c.race_time}</span>
+                        <span>BSP proxy: <strong>{c.bsp_proxy?.toFixed(2) ?? '—'}</strong></span>
+                        <span>Target: <strong>{c.target?.toFixed(2) ?? '—'}</strong></span>
+                        <span style={{
+                          color: c.status === 'monitoring' ? '#f59e0b' : c.status === 'placed' ? '#22c55e' : '#6b7280',
+                          fontWeight: 600,
+                        }}>{c.status ?? 'pending'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Tab config ──
 const TAB_CONFIG = [
   { id: 'live', label: 'Live' },
@@ -5429,6 +5899,7 @@ const TAB_CONFIG = [
   { id: 'bet-settings', label: 'Bet Settings' },
   { id: 'settings', label: 'Settings' },
   { id: 'reports', label: 'Reports' },
+  { id: 'bsp', label: 'BSP Optimiser' },
 ]
 
 // ── Dashboard ──
@@ -5751,6 +6222,7 @@ function Dashboard() {
         )}
         {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}
         {tab === 'reports' && <ReportsTab />}
+        {tab === 'bsp' && <BspOptimiserTab />}
       </div>
 
       {/* ── Chat Drawer ── */}

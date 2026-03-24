@@ -196,6 +196,12 @@ class LayEngine:
         self._market_thread: Optional[threading.Thread] = None
         self._market_refresh_active: bool = False
 
+        # ── BSP Optimiser in-play monitor ──
+        # Registered when engine processes a market pre-race (if BSP optimiser enabled)
+        # {market_id: {selection_id, runner_name, bsp_proxy, target, venue, race_time, registered_at}}
+        self._bsp_candidates: dict = {}
+        self._bsp_monitor_thread: Optional[threading.Thread] = None
+
         # Try to reload state from disk (Cloud Run cold-start recovery)
         self._load_state()
         self._load_sessions()
@@ -744,6 +750,16 @@ class LayEngine:
             f"Engine running (DRY_RUN={self.dry_run}, POLL={POLL_INTERVAL}s)"
         )
 
+        # Start BSP Optimiser in-play monitor thread if enabled
+        bsp_cfg = self.settings.get("bsp_optimiser", {})
+        if bsp_cfg.get("enabled", False):
+            self._bsp_candidates = {}
+            self._bsp_monitor_thread = threading.Thread(
+                target=self._bsp_monitor_loop, daemon=True
+            )
+            self._bsp_monitor_thread.start()
+            logger.info("BSP Optimiser in-play monitor started")
+
         scan_count = 0
         while self.running:
             try:
@@ -1052,6 +1068,9 @@ class LayEngine:
             if runner.selection_id in name_map:
                 runner.runner_name = name_map[runner.selection_id]
 
+        # ── BSP Optimiser: register candidate for in-play monitoring ──
+        self._register_bsp_candidate(market, runners_with_prices)
+
         # ── Step 2: Apply rules (ALWAYS — even in dry run) ──
         result = apply_rules(
             market_id=market_id,
@@ -1267,6 +1286,191 @@ class LayEngine:
                 f"Bet failed on {instruction.runner_name}: "
                 f"{response.get('error_code', 'unknown')}"
             )
+
+    # ──────────────────────────────────────────────
+    #  BSP OPTIMISER — IN-PLAY MONITOR
+    # ──────────────────────────────────────────────
+
+    def _register_bsp_candidate(self, market: dict, runners_with_prices):
+        """Register the BSP favourite from a market for in-running monitoring.
+
+        Called from _process_market() when BSP Optimiser is enabled.
+        Uses the best-available-to-lay price as a pre-race BSP proxy.
+        """
+        bsp_cfg = self.settings.get("bsp_optimiser", {})
+        if not bsp_cfg.get("enabled", False):
+            return
+
+        pct = float(bsp_cfg.get("contraction_threshold_pct", 10.0))
+        threshold = 1.0 - pct / 100.0
+        max_bsp = bsp_cfg.get("max_bsp")
+
+        # Favourite = lowest best-available-to-lay price
+        active = [
+            r for r in runners_with_prices
+            if r.status == "ACTIVE" and r.best_available_to_lay is not None
+        ]
+        if not active:
+            return
+
+        favourite = min(active, key=lambda r: r.best_available_to_lay)
+        bsp_proxy = favourite.best_available_to_lay
+
+        if max_bsp and bsp_proxy > max_bsp:
+            return
+
+        target = round(bsp_proxy * threshold, 2)
+        self._bsp_candidates[market["market_id"]] = {
+            "selection_id": favourite.selection_id,
+            "runner_name": favourite.runner_name,
+            "bsp_proxy": bsp_proxy,
+            "target": target,
+            "threshold": threshold,
+            "venue": market.get("venue", ""),
+            "race_time": market.get("race_time", ""),
+            "country": market.get("country", ""),
+            "registered_at": time.time(),
+            "bet_placed": False,
+        }
+        logger.info(
+            f"BSP candidate registered: {favourite.runner_name} @ {market.get('venue')} "
+            f"proxy={bsp_proxy} target={target}"
+        )
+
+    def _bsp_monitor_loop(self):
+        """Background thread: poll in-play markets for BSP contraction targets.
+
+        Runs every 3 seconds while engine is running.
+        When a BSP favourite's in-play price ≤ BSP × threshold → places a lay bet.
+        """
+        BSP_MONITOR_INTERVAL = 3   # seconds between polls
+        BSP_MAX_INPLAY_SECS = 360  # give up after 6 minutes in-play
+
+        while self.running:
+            time.sleep(BSP_MONITOR_INTERVAL)
+            if not self._bsp_candidates:
+                continue
+
+            expired = []
+            for market_id, cand in list(self._bsp_candidates.items()):
+                if cand["bet_placed"]:
+                    expired.append(market_id)
+                    continue
+
+                # Drop candidates that have been waiting too long
+                if time.time() - cand["registered_at"] > 3600:
+                    expired.append(market_id)
+                    continue
+
+                try:
+                    book = self.client.get_inplay_ltp(market_id)
+                    if book is None:
+                        continue
+
+                    status = book.get("status", "")
+                    if status in ("CLOSED", "SUSPENDED") and not book.get("in_play"):
+                        expired.append(market_id)
+                        continue
+
+                    if not book.get("in_play"):
+                        continue   # Not yet in-play — keep waiting
+
+                    # Market is in-play — check actual BSP if now reconciled
+                    rid = cand["selection_id"]
+                    runner_data = book["runners"].get(rid, {})
+
+                    # Use actual SP if available, else proxy
+                    actual_sp = runner_data.get("actual_sp")
+                    if actual_sp and actual_sp != cand["bsp_proxy"]:
+                        bsp = actual_sp
+                        bsp_cfg_rt = self.settings.get("bsp_optimiser", {})
+                        pct_rt = float(bsp_cfg_rt.get("contraction_threshold_pct", 10.0))
+                        thr_rt = 1.0 - pct_rt / 100.0
+                        target = round(bsp * thr_rt, 2)
+                        cand["bsp_proxy"] = bsp
+                        cand["target"] = target
+
+                    ltp = runner_data.get("ltp")
+                    if ltp is None:
+                        continue
+
+                    target = cand["target"]
+                    if ltp > target:
+                        # Check max in-play time
+                        if time.time() - cand["registered_at"] > BSP_MAX_INPLAY_SECS:
+                            logger.info(
+                                f"BSP monitor: {cand['runner_name']} timed out "
+                                f"(ltp={ltp} target={target})"
+                            )
+                            expired.append(market_id)
+                        continue
+
+                    # Target hit — place in-running lay
+                    logger.info(
+                        f"BSP contraction HIT: {cand['runner_name']} @ {cand['venue']} "
+                        f"ltp={ltp} target={target} bsp={cand['bsp_proxy']}"
+                    )
+                    bsp_cfg = self.settings.get("bsp_optimiser", {})
+                    stake = float(bsp_cfg.get("stake_pts", bsp_cfg.get("stake", 2.0)))
+                    liability = round(stake * (ltp - 1), 2)
+
+                    if self.dry_run or bsp_cfg.get("dry_run", True):
+                        bet_record = {
+                            "market_id": market_id,
+                            "selection_id": rid,
+                            "runner_name": cand["runner_name"],
+                            "price": ltp,
+                            "size": stake,
+                            "liability": liability,
+                            "rule_applied": "BSP_OPTIMISER",
+                            "venue": cand["venue"],
+                            "country": cand["country"],
+                            "race_time": cand["race_time"],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "dry_run": True,
+                            "betfair_response": {"status": "DRY_RUN"},
+                            "bsp_proxy": cand["bsp_proxy"],
+                            "target": target,
+                        }
+                        self.bets_placed.append(bet_record)
+                        logger.info(
+                            f"[DRY RUN] BSP lay: {cand['runner_name']} @ {ltp} "
+                            f"(target was {target})"
+                        )
+                    else:
+                        response = self.client.place_lay_order(
+                            market_id=market_id,
+                            selection_id=rid,
+                            price=ltp,
+                            size=stake,
+                        )
+                        bet_record = {
+                            "market_id": market_id,
+                            "selection_id": rid,
+                            "runner_name": cand["runner_name"],
+                            "price": ltp,
+                            "size": stake,
+                            "liability": liability,
+                            "rule_applied": "BSP_OPTIMISER",
+                            "venue": cand["venue"],
+                            "country": cand["country"],
+                            "race_time": cand["race_time"],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "dry_run": False,
+                            "betfair_response": response,
+                            "bsp_proxy": cand["bsp_proxy"],
+                            "target": target,
+                        }
+                        self.bets_placed.append(bet_record)
+
+                    cand["bet_placed"] = True
+                    expired.append(market_id)
+
+                except Exception as exc:
+                    logger.warning(f"BSP monitor error for {market_id}: {exc}")
+
+            for mid in expired:
+                self._bsp_candidates.pop(mid, None)
 
     # ──────────────────────────────────────────────
     #  DRY RUN SETTLEMENT

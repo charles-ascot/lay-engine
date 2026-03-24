@@ -335,6 +335,38 @@ class BetfairClient:
             }
         return None
 
+    def get_inplay_ltp(self, market_id: str) -> Optional[dict]:
+        """Get in-play state and lastPriceTraded + actual SP for each runner.
+
+        Used by the BSP Optimiser monitor loop.
+        Returns None on API failure.
+        """
+        params = {
+            "marketIds": [market_id],
+            "priceProjection": {
+                "priceData": ["EX_BEST_OFFERS", "SP_TRADED"],
+            },
+        }
+        result = self._api_call("listMarketBook", params)
+        if not result:
+            return None
+        market = result[0]
+        runners = {}
+        for r in market.get("runners", []):
+            sp_data = r.get("sp", {})
+            runners[r["selectionId"]] = {
+                "ltp": r.get("lastPriceTraded"),
+                "status": r.get("status", "ACTIVE"),
+                "actual_sp": sp_data.get("actualSP"),   # set when bspReconciled
+                "near_price": sp_data.get("nearPrice"),  # projected SP pre-race
+            }
+        return {
+            "in_play": market.get("inPlay", False),
+            "status": market.get("status", ""),
+            "bsp_reconciled": market.get("bspReconciled", False),
+            "runners": runners,
+        }
+
     # ──────────────────────────────────────────────
     #  ORDER PLACEMENT
     # ──────────────────────────────────────────────
