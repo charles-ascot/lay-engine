@@ -2020,7 +2020,17 @@ TOOL USE GUIDELINES:
                             "content": json.dumps(result),
                         })
                 # Append assistant turn + tool results to messages for next iteration
-                messages.append({"role": "assistant", "content": response.content})
+                # Serialise content blocks to plain dicts — passing raw Pydantic SDK
+                # objects causes a Pydantic v2 by_alias=None error on re-serialisation.
+                serialised_content = []
+                for b in response.content:
+                    if b.type == "tool_use":
+                        serialised_content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
+                    elif b.type == "text":
+                        serialised_content.append({"type": "text", "text": b.text})
+                    else:
+                        serialised_content.append(b.model_dump() if hasattr(b, "model_dump") else {"type": b.type})
+                messages.append({"role": "assistant", "content": serialised_content})
                 messages.append({"role": "user", "content": tool_results})
                 continue
 
