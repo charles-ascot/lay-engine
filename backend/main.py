@@ -34,7 +34,7 @@ import time
 from engine import LayEngine
 from fsu_client import FSUClient
 from rules import apply_rules as apply_betting_rules
-from strategy_sandbox import RuleSandbox
+from strategy_sandbox import RuleSandbox, persist_sandbox, restore_sandbox
 
 # ── Async backtest job store ──────────────────────────────────────────────────
 # Backtests (especially with AI agents) can run for minutes — far beyond the
@@ -51,8 +51,13 @@ def _cleanup_old_jobs():
         for k in stale:
             del _backtest_jobs[k]
 
-# ── Strategy Rule Sandbox (in-memory, FSU-ready endpoint namespace) ──────────
+# ── Strategy Rule Sandbox (FSU9) — persisted to GCS ─────────────────────────
 _sandbox = RuleSandbox()
+# Restore state from GCS at startup (non-fatal if bucket unavailable locally)
+try:
+    restore_sandbox(_sandbox)
+except Exception as _se:
+    logging.warning(f"Sandbox GCS restore skipped: {_se}")
 
 # ── Anthropic client (lazy — only created when analysis is requested) ──
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -1551,6 +1556,7 @@ def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
             )
             if error:
                 return {"error": error}
+            persist_sandbox(_sandbox)
             return {"created": rule.to_dict()}
 
         # ── Sandbox: list rules ───────────────────────────────────────────────
@@ -1561,11 +1567,13 @@ def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
         elif tool_name == "delete_sandbox_rule":
             rule_id = tool_input.get("rule_id", "")
             removed = _sandbox.remove_rule(rule_id)
+            persist_sandbox(_sandbox)
             return {"deleted": removed, "rule_id": rule_id}
 
         # ── Sandbox: clear all rules ──────────────────────────────────────────
         elif tool_name == "clear_sandbox_rules":
             count = _sandbox.clear()
+            persist_sandbox(_sandbox)
             return {"cleared": count}
 
         # ── Sandbox trays: create ─────────────────────────────────────────────
@@ -1573,6 +1581,7 @@ def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
             tray, error = _sandbox.create_tray(tool_input)
             if error:
                 return {"error": error}
+            persist_sandbox(_sandbox)
             return {"created": tray.to_dict()}
 
         # ── Sandbox trays: update ─────────────────────────────────────────────
@@ -1581,6 +1590,7 @@ def _chat_execute_tool(tool_name: str, tool_input: dict) -> dict:
             tray, error = _sandbox.update_tray(tray_id, tool_input)
             if error:
                 return {"error": error}
+            persist_sandbox(_sandbox)
             return {"updated": tray.to_dict()}
 
         # ── Sandbox trays: list ───────────────────────────────────────────────
@@ -3755,6 +3765,7 @@ def sandbox_create_rule(req: SandboxRuleRequest):
     )
     if error:
         raise HTTPException(status_code=422, detail=error)
+    persist_sandbox(_sandbox)
     return {"rule": rule.to_dict()}
 
 
@@ -3764,6 +3775,7 @@ def sandbox_delete_rule(rule_id: str):
     removed = _sandbox.remove_rule(rule_id)
     if not removed:
         raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
+    persist_sandbox(_sandbox)
     return {"deleted": rule_id}
 
 
@@ -3771,6 +3783,7 @@ def sandbox_delete_rule(rule_id: str):
 def sandbox_clear_rules():
     """Clear all sandbox rules."""
     count = _sandbox.clear()
+    persist_sandbox(_sandbox)
     return {"cleared": count}
 
 
@@ -3799,6 +3812,7 @@ def sandbox_create_tray(req: dict):
     tray, error = _sandbox.create_tray(req)
     if error:
         raise HTTPException(status_code=422, detail=error)
+    persist_sandbox(_sandbox)
     return {"tray": tray.to_dict()}
 
 
@@ -3817,6 +3831,7 @@ def sandbox_update_tray(tray_id: str, req: dict):
     tray, error = _sandbox.update_tray(tray_id, req)
     if error:
         raise HTTPException(status_code=422, detail=error)
+    persist_sandbox(_sandbox)
     return {"tray": tray.to_dict()}
 
 
@@ -3826,6 +3841,7 @@ def sandbox_delete_tray(tray_id: str):
     removed = _sandbox.delete_tray(tray_id)
     if not removed:
         raise HTTPException(status_code=404, detail=f"Tray '{tray_id}' not found")
+    persist_sandbox(_sandbox)
     return {"deleted": tray_id}
 
 
@@ -3835,6 +3851,7 @@ def sandbox_promote_tray(tray_id: str):
     tray, error = _sandbox.update_tray(tray_id, {"status": "PROMOTED"})
     if error:
         raise HTTPException(status_code=422, detail=error)
+    persist_sandbox(_sandbox)
     return {"tray": tray.to_dict()}
 
 
@@ -3844,6 +3861,7 @@ def sandbox_discard_tray(tray_id: str):
     tray, error = _sandbox.update_tray(tray_id, {"status": "DISCARDED"})
     if error:
         raise HTTPException(status_code=422, detail=error)
+    persist_sandbox(_sandbox)
     return {"tray": tray.to_dict()}
 
 

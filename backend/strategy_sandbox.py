@@ -46,6 +46,7 @@ Tray fields mirror the standard rule spec format:
 
 from __future__ import annotations
 
+import json
 import uuid
 import logging
 from dataclasses import dataclass, field, asdict
@@ -521,3 +522,109 @@ def _extend_rule_sandbox_with_trays(cls):
 
 
 RuleSandbox = _extend_rule_sandbox_with_trays(RuleSandbox)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  GCS PERSISTENCE  (same bucket / pattern as engine.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_GCS_BLOB = "chimera_sandbox_state.json"
+
+
+def _sandbox_gcs_write(data: str) -> None:
+    """Write sandbox state JSON to GCS. Silent on error (same as engine.py pattern)."""
+    try:
+        import os
+        from google.cloud import storage as _gcs
+        bucket_name = os.environ.get("GCS_BUCKET", "")
+        if not bucket_name:
+            return
+        client = _gcs.Client()
+        client.bucket(bucket_name).blob(_GCS_BLOB).upload_from_string(
+            data, content_type="application/json"
+        )
+    except Exception as e:
+        logger.warning(f"Sandbox GCS write failed: {e}")
+
+
+def _sandbox_gcs_read() -> Optional[str]:
+    """Read sandbox state JSON from GCS. Returns None if not found or on error."""
+    try:
+        import os
+        from google.cloud import storage as _gcs
+        bucket_name = os.environ.get("GCS_BUCKET", "")
+        if not bucket_name:
+            return None
+        client = _gcs.Client()
+        blob = client.bucket(bucket_name).blob(_GCS_BLOB)
+        if not blob.exists():
+            return None
+        return blob.download_as_text()
+    except Exception as e:
+        logger.warning(f"Sandbox GCS read failed: {e}")
+        return None
+
+
+def persist_sandbox(sandbox: RuleSandbox) -> None:
+    """Serialise the full sandbox state (rules + trays) to GCS."""
+    state = {
+        "rules": sandbox.list_rules(),
+        "trays": sandbox.list_trays(),
+    }
+    _sandbox_gcs_write(json.dumps(state, default=str))
+    logger.info(
+        f"Sandbox persisted to GCS: {sandbox.size()} rules, {sandbox.tray_count()} trays"
+    )
+
+
+def restore_sandbox(sandbox: RuleSandbox) -> None:
+    """Load rules and trays from GCS into sandbox (called at startup)."""
+    raw = _sandbox_gcs_read()
+    if not raw:
+        logger.info("No sandbox state found in GCS — starting fresh")
+        return
+    try:
+        state = json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Sandbox GCS state corrupt — skipping restore: {e}")
+        return
+
+    # Restore rules
+    rules_loaded = 0
+    for r in state.get("rules", []):
+        rule, err = sandbox.add_rule(
+            name=r.get("name", ""),
+            description=r.get("description", ""),
+            rule_type=r.get("rule_type", "STAKE_MODIFIER"),
+            conditions=r.get("conditions", []),
+            effect=r.get("effect", {}),
+        )
+        if rule:
+            # Restore original ID so references stay valid
+            sandbox._rules[rule.id]  # confirm stored
+            old_id = r.get("id")
+            if old_id and old_id != rule.id:
+                sandbox._rules[old_id] = sandbox._rules.pop(rule.id)
+                sandbox._rules[old_id].id = old_id
+            rules_loaded += 1
+
+    # Restore trays
+    sandbox._init_trays(sandbox)  # ensure _trays dict exists
+    trays_loaded = 0
+    for t in state.get("trays", []):
+        tray, err = sandbox.create_tray(t)
+        if tray:
+            old_id = t.get("id")
+            if old_id and old_id != tray.id:
+                sandbox._trays[old_id] = sandbox._trays.pop(tray.id)
+                sandbox._trays[old_id].id = old_id
+            # Restore fields not in create_tray signature
+            for field in ("backtest_results", "agent_analysis", "completed_at",
+                          "backtest_job_id", "status"):
+                if t.get(field):
+                    setattr(sandbox._trays[old_id or tray.id], field, t[field])
+            trays_loaded += 1
+
+    logger.info(
+        f"Sandbox restored from GCS: {rules_loaded} rules, {trays_loaded} trays"
+    )

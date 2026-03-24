@@ -197,8 +197,13 @@ const renderChatMarkdown = (md) => {
 const chatHasTable = (text) => /\|.+\|\n\|[-| :]+\|/m.test(text)
 
 // ── Chat Drawer ──
+const CHAT_HISTORY_KEY = 'chimera-chat-history'
+const CHAT_HISTORY_MAX = 50
+
 function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || '[]') } catch { return [] }
+  })
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
@@ -214,6 +219,10 @@ function ChatDrawer({ isOpen, onClose, initialDate, initialMessage }) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    try { localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages.slice(-CHAT_HISTORY_MAX))) } catch {}
   }, [messages])
 
   useEffect(() => {
@@ -3273,7 +3282,7 @@ function TrayCard({ tray, onPromote, onDiscard, onDelete, onRefresh }) {
   )
 }
 
-function StrategyTab() {
+function StrategyTab({ openChat }) {
   const [trays, setTrays] = React.useState([])
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState(null)
@@ -3353,6 +3362,12 @@ function StrategyTab() {
               {count} {status}
             </span>
           ))}
+          {openChat && (
+            <button className="bt-run-btn" style={{ padding: '5px 14px', fontSize: 12, background: '#1d4ed8' }}
+              onClick={() => openChat(null, 'I want to test a new rule or strategy. Please ask me what I have in mind, then create a sandbox tray, define the rule logic, run a backtest, and summarise the results.')}>
+              + New Test
+            </button>
+          )}
           <button className="bt-run-btn" style={{ padding: '5px 14px', fontSize: 12 }}
             onClick={fetchTrays}>
             ↻ Refresh
@@ -3378,10 +3393,13 @@ function StrategyTab() {
               'Run a backtest with the Market Overlay Modifier on 2025-11-15',
               'What dates have backtest data available?',
             ].map(hint => (
-              <span key={hint} style={{
-                background: '#1f2937', border: '1px solid #374151', borderRadius: 4,
-                padding: '4px 10px', fontSize: 11, color: '#9ca3af', fontStyle: 'italic',
-              }}>
+              <span key={hint}
+                onClick={() => openChat && openChat(null, hint)}
+                style={{
+                  background: '#1f2937', border: '1px solid #374151', borderRadius: 4,
+                  padding: '4px 10px', fontSize: 11, color: '#9ca3af', fontStyle: 'italic',
+                  cursor: openChat ? 'pointer' : 'default',
+                }}>
                 "{hint}"
               </span>
             ))}
@@ -5699,7 +5717,7 @@ function Dashboard() {
           />
         )}
         {tab === 'backtest' && <BacktestTab />}
-        {tab === 'strategy' && <StrategyTab />}
+        {tab === 'strategy' && <StrategyTab openChat={openChat} />}
         {tab === 'history' && <HistoryTab openChat={openChat} />}
         {tab === 'bet-settings' && (
           <BetSettingsTab
