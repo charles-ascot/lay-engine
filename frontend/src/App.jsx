@@ -2555,6 +2555,7 @@ function BacktestTab() {
                     {entry.config.mark_ceiling_enabled && <span className="tag-on">Ceil</span>}
                     {entry.config.mark_floor_enabled && <span className="tag-on">Floor</span>}
                     {entry.config.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
+                    {entry.config.market_overlay_enabled && <span className="tag-on">MOM</span>}
                   </span>
                   <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
                 </div>
@@ -2789,6 +2790,7 @@ function BacktestTab() {
                     <span className="bt-hist-flags">
                       {entry.config?.jofs_enabled && <span className="tag-on">JOFS</span>}
                       {entry.config?.mark_uplift_enabled && <span className="tag-on">Uplift {entry.config.mark_uplift_stake || 3} pts</span>}
+                      {entry.config?.market_overlay_enabled && <span className="tag-on">MOM</span>}
                     </span>
                     <span className="collapsible-chevron">{isExpanded ? '−' : '+'}</span>
                   </div>
