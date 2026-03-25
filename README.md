@@ -3,7 +3,7 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last updated: 2026-03-22**
+**Last updated: 2026-03-25**
 
 ---
 
@@ -72,6 +72,7 @@ CHIMERA is a multi-service platform running on Google Cloud Platform (project: `
 - **Mark Rules** — Ceiling (no lays above 8.0), Floor (no lays below 1.5), and Uplift (boosted stake in 2.5–3.5 band) — each independently toggleable
 - **Kelly Criterion** — Optional Kelly-fraction stake sizing with bankroll, edge %, min/max stake controls
 - **Signal Filters** — Four independently switchable market intelligence signals that sit between rule evaluation and execution (see Signal Filters section below)
+- **TOP2_CONCENTRATION** — Market-structure protection layer that identifies two-horse race dynamics and suppresses or blocks lay bets when the top two runners dominate the win market — independently toggleable in both Backtest and Live modes (see TOP2_CONCENTRATION section below)
 - **Process Window** — Configurable minutes-before-off window (0.05–60 min) within which the engine will consider placing a bet
 - **Dry run mode** — Fetches real markets and prices, logs everything, skips actual bet placement
 - **Dry run snapshots** — Instant point-in-time dry-run snapshots for selected markets; archived to GCS
@@ -191,6 +192,125 @@ Tracks the 5-day win rate per odds band across all settled sessions. When a band
 
 ---
 
+## TOP2_CONCENTRATION Rule Family
+
+TOP2_CONCENTRATION is a market-structure protection and suppression layer that sits between the signal filters and the Market Overlay Modifier (MOM). It identifies races where the betting market is heavily concentrated in the top two runners, indicating a potential two-horse race dynamic where standard lay logic should be reduced or blocked entirely. It is not a replacement for the core lay engine — it is a guard layer applied before any bet is placed.
+
+**The key idea:** if the top two runners are very strongly priced relative to the third runner, the race may effectively be a two-horse race. In these cases, normal favourite-lay logic should be reduced or blocked.
+
+**Priority order in the engine:**
+
+| Position | Rule/Layer |
+|----------|-----------|
+| 1 | SHORT_PRICE_CONTROL |
+| 2 | BMEX_ODDSON_DISLOCATION |
+| **3** | **TOP2_CONCENTRATION** ← applied here |
+| 4 | Core lay engine |
+| 5 | JOFS / split logic |
+| 6 | RPR overlay rules |
+
+Module: `backend/top2_concentration.py`
+
+### Inputs and Derived Metrics
+
+At each evaluation the rule ranks all ACTIVE runners by exchange back odds (ascending — shortest price first), takes the top three, and derives:
+
+| Metric | Formula | Description |
+|--------|---------|-------------|
+| `p1`, `p2`, `p3` | `1 / odds_n` | Implied win probabilities for 1st, 2nd, 3rd favourite |
+| `top2_combined` | `p1 + p2` | Combined implied probability share held by top two runners |
+| `third_vs_second_ratio` | `p3 / p2` | Weakness of third runner relative to second — lower = larger gap |
+| `second_vs_first_ratio` | `p2 / p1` | Closeness of the top two — higher = more like co-leaders |
+
+Requires ADVANCED tier Betfair historic data (`batb` field present). Silently skips on BASIC data (2026+, no order book) — no false signals, no errors.
+
+### Checkpoints
+
+The rule is designed to run at T-30, T-15, T-5, and T-1 relative to race off time. The most operationally significant checkpoints are T-15, T-5, and T-1. T-30 is primarily for data collection and early detection.
+
+### Sub-Rules (Day-One Launch Set)
+
+| Rule | Runs at | Condition | Purpose |
+|------|---------|-----------|---------|
+| `TOP2_01_SCOPE` | T-30, T-15, T-5, T-1 | ≥ 3 runners with valid exchange back odds | Gate check — enables the family; skips silently if not met |
+| `TOP2_02_TOP2_COMBINED_CONCENTRATION` | T-30, T-15, T-5, T-1 | Compute and classify `top2_combined` | Measures how much of the win market sits in the top two |
+| `TOP2_03_THIRD_GAP_CONFIRMATION` | T-30, T-15, T-5, T-1 | Compute and classify `third_vs_second_ratio` | Confirms whether the third runner is materially weaker |
+| `TOP2_04_TOP2_CLOSE_TOGETHER` | T-30, T-15, T-5, T-1 | Compute and classify `second_vs_first_ratio` | Identifies when top two behave like co-leaders |
+| `TOP2_06_MEDIUM_SUPPRESSOR` | T-15, T-5, T-1 | See threshold logic below | Reduce lay stake to 60% of normal |
+| `TOP2_07_STRONG_SUPPRESSOR` | T-5, T-1 | See threshold logic below | Reduce lay stake to 25% of normal |
+| `TOP2_08_TWO_HORSE_RACE_BLOCK` | T-5, T-1 | See threshold logic below | Full block — no lay placed |
+
+### Threshold Bands
+
+**Top-two combined concentration (`top2_combined`):**
+
+| Band | Threshold | Reason Code |
+|------|-----------|-------------|
+| Mild | ≥ 0.60 | `TOP2_COMBINED_MILD` |
+| Medium | ≥ 0.65 | `TOP2_COMBINED_MEDIUM` |
+| Strong | ≥ 0.70 | `TOP2_COMBINED_STRONG` |
+| Extreme | ≥ 0.80 | `TOP2_COMBINED_EXTREME` |
+
+**Third-runner gap (`third_vs_second_ratio`):**
+
+| Band | Threshold | Reason Code |
+|------|-----------|-------------|
+| Mild gap | ≤ 0.60 | `THIRD_GAP_MILD` |
+| Medium gap | ≤ 0.50 | `THIRD_GAP_MEDIUM` |
+| Strong gap | ≤ 0.40 | `THIRD_GAP_STRONG` |
+| Extreme gap | ≤ 0.30 | `THIRD_GAP_EXTREME` |
+
+**Top-two closeness (`second_vs_first_ratio`):**
+
+| Band | Threshold | Reason Code |
+|------|-----------|-------------|
+| Close top two | ≥ 0.85 | `TOP2_CLOSE` |
+| Very close top two | ≥ 0.92 | `TOP2_VERY_CLOSE` |
+
+### Resolution States and Threshold Logic
+
+| State | Lay Multiplier | Trigger Condition |
+|-------|---------------|-------------------|
+| `NONE` | ×1.00 | No threshold combination breached — no action |
+| `WATCH` | ×1.00 | `top2_combined ≥ 0.60` AND `third_vs_second_ratio ≤ 0.60` — log only, no stake change |
+| `SUPPRESS_MEDIUM` | ×0.60 | `top2_combined ≥ 0.65` AND `third_vs_second_ratio ≤ 0.50` |
+| `SUPPRESS_STRONG` | ×0.25 | `top2_combined ≥ 0.70` AND `third_vs_second_ratio ≤ 0.40` |
+| `BLOCK` | ×0.00 | `top2_combined ≥ 0.80` AND `third_vs_second_ratio ≤ 0.30` AND `second_vs_first_ratio ≥ 0.85` |
+
+**Evaluation is cascading — the most severe matching state wins.** SUPPRESS states scale the computed lay stake by the multiplier (£2.00 minimum floor enforced when original stake ≥ £2.00). BLOCK clears all instructions — no bet is placed. WATCH produces a structured log entry only. RPR overlay rules must not override a BLOCK decision.
+
+**Example (extreme two-horse race):**
+- Runner 1: 2.10 → p1 = 0.4762
+- Runner 2: 2.20 → p2 = 0.4545
+- Runner 3: 11.00 → p3 = 0.0909
+- `top2_combined` = 0.9307, `third_vs_second_ratio` = 0.20, `second_vs_first_ratio` = 0.95 → **BLOCK**
+
+**Example (normal open race):**
+- Runner 1: 3.20 → p1 = 0.3125
+- Runner 2: 4.20 → p2 = 0.2381
+- Runner 3: 5.50 → p3 = 0.1818
+- `top2_combined` = 0.5506, `third_vs_second_ratio` = 0.76 → **NONE** — no action
+
+### Availability by Mode
+
+| Mode | Status | Toggle |
+|------|--------|--------|
+| Backtest — Single Run | ✅ Active | "TOP2 Concentration" in backtest settings panel |
+| Backtest — Cycle Run | ✅ Active | Carries through from single-run config |
+| Live engine | Pending — wiring in progress | Will appear in live Bet Settings panel |
+| Dry Run | Pending — follows live engine wiring | — |
+
+> **Data tier requirement:** TOP2_CONCENTRATION uses `best_available_to_back` extracted from the ADVANCED tier `batb` field via FSU1. BASIC tier data (2026+) does not contain this field — the rule silently returns `NONE` with `skipped=true` and has no effect on bet placement.
+
+### Deferred Sub-Rules (Post Day-One — pending threshold calibration)
+
+| Rule | Purpose |
+|------|---------|
+| `TOP2_09_SPLIT_EXPOSURE_CAP` | When joint/split-favourite logic is active in a concentrated market, cap total exposure across both top runners to 50% of normal split stake |
+| `TOP2_10_PERSISTENCE_CONFIRMATION` | Require suppressor state to be active at both the current and previous checkpoint before allowing a hard BLOCK — prevents transient spikes triggering full blocks |
+
+---
+
 ## Dashboard Tabs
 
 | Tab | Description |
@@ -229,6 +349,8 @@ chimera-lay-engine/
 │   ├── kelly.py                # Kelly Criterion stake sizing
 │   ├── ai_backtest_agent.py    # AI Research Agent (web search overlay for backtest)
 │   ├── ai_odds_agent.py        # AI Odds Movement Agent (price drift analysis for backtest)
+│   ├── market_overlay.py       # Market Overlay Modifier (MOM) — overround + concentration guard
+│   ├── top2_concentration.py   # TOP2_CONCENTRATION rule family — two-horse race suppression/block
 │   └── requirements.txt        # Python dependencies
 ├── frontend/
 │   ├── index.html              # HTML entry point
@@ -301,6 +423,7 @@ chimera-lay-engine/
 | `POST` | `/api/engine/signal/field-size` | — | `{signal_field_size_enabled: bool}` | Toggle Field Size signal |
 | `POST` | `/api/engine/signal/steam-gate` | — | `{signal_steam_gate_enabled: bool}` | Toggle Steam Gate signal |
 | `POST` | `/api/engine/signal/band-perf` | — | `{signal_band_perf_enabled: bool}` | Toggle Rolling Band Performance signal |
+| `POST` | `/api/engine/top2-concentration` | — | `{top2_concentration_enabled: bool}` | Toggle TOP2_CONCENTRATION suppression/block layer _(pending — live engine wiring in progress)_ |
 
 ---
 
@@ -447,6 +570,8 @@ chimera-lay-engine/
 | `signal_field_size_enabled` | bool | false | Field Size signal |
 | `signal_steam_gate_enabled` | bool | false | Steam Gate signal (samples FSU at −15 mins) |
 | `signal_band_perf_enabled` | bool | false | Rolling Band Performance signal |
+| `market_overlay_enabled` | bool | false | Market Overlay Modifier (MOM) — overround + concentration guard |
+| `top2_concentration_enabled` | bool | false | TOP2_CONCENTRATION — two-horse race suppression and block layer (requires ADVANCED data) |
 
 ---
 
@@ -456,11 +581,12 @@ chimera-lay-engine/
 1. Select a date from the dropdown (populated from FSU1 historic data).
 2. Configure rules (JOFS, Spread Control, Mark Ceiling/Floor/Uplift, Point Value, Process Window, Kelly).
 3. Optionally enable Signal Filters (Overround, Field Size, Steam Gate, Band Perf).
-4. Optionally enable AI agent overlays (Research Agent, Odds Movement Agent).
-5. Optionally filter the market browser to include only specific races.
-6. Click **Run Backtest** — the engine calls `/api/backtest/run` (async job) and polls `/api/backtest/job/{job_id}` until complete.
-7. Results appear as a settlement table with P&L per race.
-8. Each run is saved to **History** (browser localStorage, max 50 runs).
+4. Optionally enable **TOP2 Concentration** — suppresses or blocks lays in two-horse race markets (requires a pre-2026 ADVANCED date; silently skips on 2026+ BASIC data).
+5. Optionally enable AI agent overlays (Research Agent, Odds Movement Agent).
+6. Optionally filter the market browser to include only specific races.
+7. Click **Run Backtest** — the engine calls `/api/backtest/run` (async job) and polls `/api/backtest/job/{job_id}` until complete.
+8. Results appear as a settlement table with P&L per race.
+9. Each run is saved to **History** (browser localStorage, max 50 runs).
 
 > **Note on Steam Gate in Backtest:** FSU1 is queried at `target_iso − 15 minutes` per market to obtain earlier prices for shortening detection. A hard 8-second timeout is applied per market — if FSU is slow, the steam check is silently skipped and the bet proceeds normally.
 
@@ -661,6 +787,8 @@ gcloud scheduler jobs create http chimera-keepalive \
 | Issue | Status | Workaround |
 |-------|--------|------------|
 | Google Sheets export 403 PERMISSION_DENIED | Open — SA lacks Sheets API permission | Use local XLS download button |
+| TOP2_CONCENTRATION live engine wiring | In progress — backtest fully integrated; live engine wiring and live UI toggle pending | Use backtest mode to validate thresholds before enabling in live |
+| TOP2_CONCENTRATION per-race result in backtest output JSON | In progress — state logged to Python logger; structured result not yet returned in API response | Check Cloud Run logs for `[TOP2]` entries per race |
 
 ---
 
