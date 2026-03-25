@@ -476,6 +476,17 @@ def toggle_market_overlay():
     return {"market_overlay_enabled": engine.market_overlay_enabled}
 
 
+@app.post("/api/engine/top2-concentration")
+def toggle_top2_concentration():
+    """Toggle TOP2_CONCENTRATION rule family on/off.
+    Identifies two-horse race market structures and applies WATCH / SUPPRESS / BLOCK
+    to lay bets. Requires ADVANCED tier data (batb field). Silently skips on BASIC data.
+    Applied before signal filters and MOM, per spec priority order."""
+    engine.top2_concentration_enabled = not engine.top2_concentration_enabled
+    engine._save_state()
+    return {"top2_concentration_enabled": engine.top2_concentration_enabled}
+
+
 @app.post("/api/engine/point-value")
 def set_point_value(req: PointValueRequest):
     """Set the point value (£ per point). Multiplies all rule stakes."""
@@ -3655,9 +3666,11 @@ def _backtest_run_inner(req):
         # Runs before MOM per spec priority order (section 11).
         # BLOCK clears all instructions; SUPPRESS scales stakes down.
         # WATCH fires logging only — no stake change.
+        _top2_result = None
         if req.top2_concentration_enabled and not rule_result.skipped and rule_result.instructions:
             from top2_concentration import apply_top2_concentration as _apply_top2
             _top2 = _apply_top2(runners, enabled=True)
+            _top2_result = _top2
             if _top2.state == "BLOCK":
                 rule_result.instructions = []
                 rule_result.skipped = True
@@ -3799,6 +3812,8 @@ def _backtest_run_inner(req):
             rd["settled"] = False
             rd["winner_selection_id"] = None
             rd["pnl"] = 0.0
+            if _top2_result:
+                rd["top2_concentration"] = _top2_result.to_dict()
             results.append(rd)
             continue
 
@@ -3861,6 +3876,8 @@ def _backtest_run_inner(req):
         rd["winner_selection_id"] = winner_id
         rd["settled"] = settled
         rd["pnl"] = round(total_pnl, 2)
+        if _top2_result:
+            rd["top2_concentration"] = _top2_result.to_dict()
         # Count internet agent overrules for this market
         if _agent_decisions_map:
             rd["agent_overrules"] = sum(
@@ -3918,6 +3935,17 @@ def _backtest_run_inner(req):
         response_body["odds_agent_adjustments"] = sum(
             1 for i in all_instrs
             if i.get("odds_decision", {}).get("action") == "ADJUST"
+        )
+
+    if req.top2_concentration_enabled:
+        response_body["top2_concentration_enabled"] = True
+        response_body["top2_blocks"] = sum(
+            1 for r in results
+            if r.get("top2_concentration", {}).get("state") == "BLOCK"
+        )
+        response_body["top2_suppressions"] = sum(
+            1 for r in results
+            if r.get("top2_concentration", {}).get("state") in ("SUPPRESS_MEDIUM", "SUPPRESS_STRONG")
         )
 
     return response_body

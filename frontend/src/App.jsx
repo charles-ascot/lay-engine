@@ -1143,7 +1143,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf, onToggleMarketOverlay }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf, onToggleMarketOverlay, onToggleTop2Concentration }) {
   const s = state.summary || {}
   const [confirmed, setConfirmed] = useState(
     () => localStorage.getItem('betSettingsConfirmed') === 'true'
@@ -1379,6 +1379,35 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           </span>
           <span style={{ color: '#8a8a9a', fontSize: 13 }}>
             Overround &lt;1.00: ×0.80 stake (EFFICIENT_MARKET — edge already priced in, reduce aggression)
+          </span>
+        </div>
+      </div>
+
+      {/* TOP2_CONCENTRATION */}
+      <div className="engine-section">
+        <h3>TOP2 Concentration</h3>
+        <div className="engine-row">
+          <span className="engine-label">TOP2 Concentration:</span>
+          <button
+            className={`btn-toggle ${state.top2_concentration_enabled ? 'active' : ''}`}
+            onClick={onToggleTop2Concentration}
+            title="Suppresses or blocks lay bets when the market is heavily concentrated in the top two runners. SUPPRESS_MEDIUM ×0.60 · SUPPRESS_STRONG ×0.25 · BLOCK ×0.00. Requires ADVANCED tier data (pre-2026)."
+          >
+            {state.top2_concentration_enabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div className="engine-info" style={{ marginTop: 8 }}>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            WATCH: top2 ≥ 0.60 &amp; 3v2 ≤ 0.60 — log only, no stake change
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            SUPPRESS_MEDIUM: top2 ≥ 0.65 &amp; 3v2 ≤ 0.50 — stake ×0.60
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            SUPPRESS_STRONG: top2 ≥ 0.70 &amp; 3v2 ≤ 0.40 — stake ×0.25
+          </span>
+          <span style={{ color: '#8a8a9a', fontSize: 13 }}>
+            BLOCK: top2 ≥ 0.80 &amp; 3v2 ≤ 0.30 &amp; 2v1 ≥ 0.85 — no lay placed
           </span>
         </div>
       </div>
@@ -2381,6 +2410,16 @@ function BacktestTab() {
                   </span>
                 </>
               )}
+              {result.top2_concentration_enabled && (
+                <>
+                  <span className="stat" style={{ color: '#dc2626' }}>
+                    TOP2 Blocked <strong>{result.top2_blocks ?? 0}</strong>
+                  </span>
+                  <span className="stat" style={{ color: '#d97706' }}>
+                    TOP2 Suppressed <strong>{result.top2_suppressions ?? 0}</strong>
+                  </span>
+                </>
+              )}
             </div>
             <SnapshotButton tableId="bt-results-table" filename={`backtest_${selectedDate}`} />
           </div>
@@ -2400,6 +2439,7 @@ function BacktestTab() {
                     <th>P&amp;L</th>
                     {result.ai_agent_enabled && <th style={{ color: '#7c3aed' }}>Web</th>}
                     {result.odds_agent_enabled && <th style={{ color: '#0891b2' }}>Odds</th>}
+                    {result.top2_concentration_enabled && <th style={{ color: '#059669' }}>TOP2</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2437,6 +2477,13 @@ function BacktestTab() {
                       return `${d.action} (${Math.round((d.confidence || 0) * 100)}% conf)${trend}${prices}${delta}\n${d.reasoning}`
                     }).join('\n\n')
 
+                    // TOP2_CONCENTRATION state for this row
+                    const top2 = r.top2_concentration
+                    const top2State = top2?.state
+                    const top2Tooltip = top2
+                      ? `${top2.state}  ×${top2.lay_multiplier}\ntop2=${top2.top2_combined?.toFixed(4)}  3v2=${top2.third_vs_second_ratio?.toFixed(4)}  2v1=${top2.second_vs_first_ratio?.toFixed(4)}\n${top2.reason}`
+                      : ''
+
                     return (
                       <tr key={r.market_id} className={skipped ? 'bt-row-skipped' : ''}>
                         <td>{time}</td>
@@ -2473,6 +2520,15 @@ function BacktestTab() {
                               </span>
                             )}
                             {!oddsAction && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
+                          </td>
+                        )}
+                        {result.top2_concentration_enabled && (
+                          <td title={top2Tooltip} style={{ cursor: top2Tooltip ? 'help' : 'default', whiteSpace: 'nowrap' }}>
+                            {top2State === 'BLOCK' && <span style={{ color: '#dc2626', fontWeight: 700, fontSize: 11 }}>✗ BLK</span>}
+                            {top2State === 'SUPPRESS_STRONG' && <span style={{ color: '#ea580c', fontWeight: 600, fontSize: 11 }}>↓↓ ×.25</span>}
+                            {top2State === 'SUPPRESS_MEDIUM' && <span style={{ color: '#d97706', fontWeight: 600, fontSize: 11 }}>↓ ×.60</span>}
+                            {top2State === 'WATCH' && <span style={{ color: '#ca8a04', fontWeight: 600, fontSize: 11 }}>◉ WATCH</span>}
+                            {(top2State === 'NONE' || !top2State) && <span className="bt-muted" style={{ fontSize: 11 }}>—</span>}
                           </td>
                         )}
                       </tr>
@@ -6017,6 +6073,10 @@ function Dashboard() {
     await api('/api/engine/market-overlay', { method: 'POST' })
     fetchState()
   }
+  const handleToggleTop2Concentration = async () => {
+    await api('/api/engine/top2-concentration', { method: 'POST' })
+    fetchState()
+  }
   const handleToggleMarkCeiling = async () => {
     await api('/api/engine/mark-ceiling', { method: 'POST' })
     fetchState()
@@ -6218,6 +6278,7 @@ function Dashboard() {
             onToggleSignalSteamGate={handleToggleSignalSteamGate}
             onToggleSignalBandPerf={handleToggleSignalBandPerf}
             onToggleMarketOverlay={handleToggleMarketOverlay}
+            onToggleTop2Concentration={handleToggleTop2Concentration}
           />
         )}
         {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}

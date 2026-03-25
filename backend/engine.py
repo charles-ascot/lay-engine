@@ -145,6 +145,9 @@ class LayEngine:
         # ── Market Overlay Modifier ──
         self.market_overlay_enabled: bool = False  # Off by default
 
+        # ── TOP2_CONCENTRATION ──
+        self.top2_concentration_enabled: bool = False  # Off by default
+
         # ── Processing window ──
         self.process_window: float = PROCESS_WINDOW_MINUTES  # Configurable at runtime
         self.monitoring: dict = {}      # market_id → list of odds snapshots
@@ -248,6 +251,7 @@ class LayEngine:
                 "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
                 "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
                 "market_overlay_enabled": self.market_overlay_enabled,
+                "top2_concentration_enabled": self.top2_concentration_enabled,
                 "status": self.status,
                 "balance": self.balance,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -327,6 +331,7 @@ class LayEngine:
             self.signal_config.steam_gate_enabled = data.get("signal_steam_gate_enabled", False)
             self.signal_config.band_perf_enabled = data.get("signal_band_perf_enabled", False)
             self.market_overlay_enabled = data.get("market_overlay_enabled", False)
+            self.top2_concentration_enabled = data.get("top2_concentration_enabled", False)
 
             logger.info(
                 f"Restored state: {len(self.processed_markets)} processed markets, "
@@ -1105,6 +1110,36 @@ class LayEngine:
             logger.info(f"Skipped {market['venue']}: {result.skip_reason}")
             return
 
+        # ── TOP2_CONCENTRATION: market-level suppression/block ──
+        # Applied after rule evaluation, before signal filters and bet placement.
+        # Matches spec priority order: SHORT_PRICE_CONTROL → TOP2 → core engine.
+        if self.top2_concentration_enabled and result.instructions:
+            from top2_concentration import apply_top2_concentration as _apply_top2_live
+            _top2_live = _apply_top2_live(runners_with_prices, enabled=True)
+            if _top2_live.state == "BLOCK":
+                logger.info(
+                    f"[TOP2] BLOCK: {market['venue']} — {_top2_live.reason}"
+                )
+                return
+            elif _top2_live.state in ("SUPPRESS_MEDIUM", "SUPPRESS_STRONG"):
+                for _instr in result.instructions:
+                    _pre = _instr.size
+                    _instr.size = round(_instr.size * _top2_live.lay_multiplier, 2)
+                    if _pre >= 2.0:
+                        _instr.size = max(_instr.size, 2.0)
+                logger.info(
+                    f"[TOP2] {_top2_live.state}: {market['venue']} "
+                    f"top2={_top2_live.top2_combined:.4f} "
+                    f"3v2={_top2_live.third_vs_second_ratio:.4f} "
+                    f"×{_top2_live.lay_multiplier}"
+                )
+            elif _top2_live.state == "WATCH":
+                logger.info(
+                    f"[TOP2] WATCH: {market['venue']} "
+                    f"top2={_top2_live.top2_combined:.4f} "
+                    f"3v2={_top2_live.third_vs_second_ratio:.4f} — no change"
+                )
+
         # ── Step 2.5: Spread control validation (if enabled) ──
         # Build runner lookup for spread checks
         runner_lookup = {r.selection_id: r for r in runners_with_prices}
@@ -1652,6 +1687,7 @@ class LayEngine:
             "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
             "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
             "market_overlay_enabled": self.market_overlay_enabled,
+            "top2_concentration_enabled": self.top2_concentration_enabled,
             "date": self.day_started,
             "last_scan": self.last_scan,
             "balance": self.balance,
@@ -1929,6 +1965,7 @@ class LayEngine:
             "signal_steam_gate_enabled": self.signal_config.steam_gate_enabled,
             "signal_band_perf_enabled": self.signal_config.band_perf_enabled,
             "market_overlay_enabled": self.market_overlay_enabled,
+            "top2_concentration_enabled": self.top2_concentration_enabled,
             "results": per_market_results,
         }
 
