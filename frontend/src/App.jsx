@@ -3031,7 +3031,7 @@ function TrayStatusBadge({ status }) {
 }
 
 function TrayCard({ tray, onPromote, onDiscard, onDelete, onRefresh }) {
-  const [expanded, setExpanded] = React.useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const res = tray.backtest_results || {}
   const hasResults = res.markets_evaluated !== undefined
@@ -3349,14 +3349,14 @@ function TrayCard({ tray, onPromote, onDiscard, onDelete, onRefresh }) {
 }
 
 function StrategyTab({ openChat }) {
-  const [trays, setTrays] = React.useState([])
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState(null)
-  const pollRef = React.useRef(null)
+  const [trays, setTrays] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const pollRef = useRef(null)
 
   const API = window.API_BASE || ''
 
-  const fetchTrays = React.useCallback(async () => {
+  const fetchTrays = useCallback(async () => {
     try {
       const r = await fetch(`${API}/api/strategy/sandbox/trays`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -3370,7 +3370,7 @@ function StrategyTab({ openChat }) {
     }
   }, [API])
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchTrays()
     // Poll every 5s while any tray is RUNNING
     pollRef.current = setInterval(() => {
