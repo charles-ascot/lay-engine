@@ -101,6 +101,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+logger = logging.getLogger("chimera")
 
 app = FastAPI(title="CHIMERA Lay Engine", version="5.0.0")
 
