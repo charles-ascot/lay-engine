@@ -3,7 +3,7 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last updated: 2026-03-25**
+**Last updated: 2026-03-26**
 
 ---
 
@@ -787,8 +787,19 @@ gcloud scheduler jobs create http chimera-keepalive \
 | Issue | Status | Workaround |
 |-------|--------|------------|
 | Google Sheets export 403 PERMISSION_DENIED | Open — SA lacks Sheets API permission | Use local XLS download button |
-| TOP2_CONCENTRATION live engine wiring | In progress — backtest fully integrated; live engine wiring and live UI toggle pending | Use backtest mode to validate thresholds before enabling in live |
-| TOP2_CONCENTRATION per-race result in backtest output JSON | In progress — state logged to Python logger; structured result not yet returned in API response | Check Cloud Run logs for `[TOP2]` entries per race |
+| Spread Control → 0 bets in backtest | Under investigation — `best_available_to_back` returns `None` due to empty `batb` after MCM reconstruction in FSU1; ADVANCED data confirmed to contain `batb` fields | Disable Spread Control in backtest until resolved |
+| Mark Floor / Mark Uplift → 0 bets in backtest | Under investigation — root cause not yet identified | Disable Mark Floor and Mark Uplift in backtest until resolved |
+| Signal: Overround stuck in backtest | Intermittent — likely Cloud Run instance saturation from concurrent jobs | Wait for previous backtest cycle to complete before starting a new one |
+
+---
+
+## Recent Changes (2026-03-25 / 2026-03-26)
+
+| Commit | Description |
+|--------|-------------|
+| `af9b4ec` | Fix `React is not defined` ReferenceError in `StrategyTab` and `TrayCard` — `App.jsx` imports only destructured hooks (`useState`, `useEffect`, `useCallback`, `useRef`); replaced all `React.useState` / `React.useRef` / `React.useCallback` / `React.useEffect` usages with their destructured equivalents |
+| `a34df26` | TOP2_CONCENTRATION: added per-race result to backtest API output, wired live engine, added live UI toggle |
+| `b529262` | Updated README with TOP2_CONCENTRATION rule family documentation |
 
 ---
 
