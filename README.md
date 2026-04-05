@@ -3,7 +3,7 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last updated: 2026-03-26**
+**Last updated: 2026-04-05**
 
 ---
 
@@ -69,7 +69,7 @@ CHIMERA is a multi-service platform running on Google Cloud Platform (project: `
 - **Points Value** — Configurable stake multiplier (£0.50–£100 per point) applied to all rule stakes
 - **Dynamic Spread Control** — Validates back-lay spread against odds-based thresholds (toggleable)
 - **JOFS Control** — Close-odds split filter: splits stake across joint favourites when gap ≤ 0.2 (toggleable)
-- **Mark Rules** — Ceiling (no lays above 8.0), Floor (no lays below 1.5), and Uplift (boosted stake in 2.5–3.5 band) — each independently toggleable
+- **Mark Rules** — Ceiling (no lays above 8.0), Floor (no lays below 1.5), and Uplift (configurable boosted stake 1–20 pts in the 2.5–3.5 band) — each independently toggleable
 - **Kelly Criterion** — Optional Kelly-fraction stake sizing with bankroll, edge %, min/max stake controls
 - **Signal Filters** — Four independently switchable market intelligence signals that sit between rule evaluation and execution (see Signal Filters section below)
 - **TOP2_CONCENTRATION** — Market-structure protection layer that identifies two-horse race dynamics and suppresses or blocks lay bets when the top two runners dominate the win market — independently toggleable in both Backtest and Live modes (see TOP2_CONCENTRATION section below)
@@ -121,7 +121,7 @@ When the gap between 1st and 2nd favourite is ≤ 0.2, the market is treated as 
 - **Spread Control** (optional) — rejects bets where back-lay spread exceeds odds-based thresholds
 - **Mark Ceiling** (optional) — rejects any lay where odds > 8.0
 - **Mark Floor** (optional) — rejects any lay where odds < 1.5
-- **Mark Uplift** (optional) — applies a configurable uplift stake (2–10 pts) to bets in the 2.5–3.5 odds band
+- **Mark Uplift** (optional) — applies a configurable uplift stake (1–20 pts) to bets in the 2.5–3.5 odds band
 
 ### Spread Control Thresholds
 
@@ -297,8 +297,8 @@ The rule is designed to run at T-30, T-15, T-5, and T-1 relative to race off tim
 |------|--------|--------|
 | Backtest — Single Run | ✅ Active | "TOP2 Concentration" in backtest settings panel |
 | Backtest — Cycle Run | ✅ Active | Carries through from single-run config |
-| Live engine | Pending — wiring in progress | Will appear in live Bet Settings panel |
-| Dry Run | Pending — follows live engine wiring | — |
+| Live engine | ✅ Active | "TOP2 Concentration" in live Bet Settings panel |
+| Dry Run | ✅ Active | Follows live engine settings |
 
 > **Data tier requirement:** TOP2_CONCENTRATION uses `best_available_to_back` extracted from the ADVANCED tier `batb` field via FSU1. BASIC tier data (2026+) does not contain this field — the rule silently returns `NONE` with `skipped=true` and has no effect on bet placement.
 
@@ -308,6 +308,63 @@ The rule is designed to run at T-30, T-15, T-5, and T-1 relative to race off tim
 |------|---------|
 | `TOP2_09_SPLIT_EXPOSURE_CAP` | When joint/split-favourite logic is active in a concentrated market, cap total exposure across both top runners to 50% of normal split stake |
 | `TOP2_10_PERSISTENCE_CONFIRMATION` | Require suppressor state to be active at both the current and previous checkpoint before allowing a hard BLOCK — prevents transient spikes triggering full blocks |
+
+---
+
+## Market Overlay Modifier (MOM)
+
+The Market Overlay Modifier is a post-signal-filter stake scaling layer that adjusts the computed lay stake based on overall market efficiency. It never blocks or creates bets — it only scales an existing stake up or down. Independently toggleable in both Live and Backtest modes.
+
+Module: `backend/market_overlay.py`
+
+MOM computes the **market overround** — the sum of implied win probabilities from all active runners' best available back prices. A perfectly efficient market scores 1.00. Real markets are typically slightly above 1.00. A high overround indicates the market is inefficient (more bookmaker margin); a sub-1.00 reading indicates sharp money dominance.
+
+| Overround | Multiplier | Reason Code | Rationale |
+|-----------|-----------|-------------|-----------|
+| > 1.02 | ×1.15 | `HIGH_OVERROUND` | Inefficient market — signals are more informative, amplify stake |
+| 1.00 – 1.02 | ×1.00 | `NEUTRAL` | Normal market — no adjustment |
+| < 1.00 | ×0.80 | `EFFICIENT_MARKET` | Sharp market — edge is largely priced in, reduce exposure |
+
+### Directional Exception Flag
+
+MOM also logs a structured flag (no stake effect) when all of the following are simultaneously true:
+- Overround > 1.02 (HIGH_OVERROUND state)
+- Gap between 1st and 2nd favourite back prices ≤ 0.30
+- Gap between 2nd and 3rd favourite back prices ≥ 1.50
+
+This combination identifies a high-overround market where the top two runners are unusually close whilst the third is materially weaker — effectively a concentrated market with an overlay. The flag feeds the future `TOP_OF_MARKET_CONCENTRATION` rule family.
+
+### Availability by Mode
+
+| Mode | Status | Toggle |
+|------|--------|--------|
+| Backtest — Single Run | ✅ Active | "Market Overlay (MOM)" in backtest settings panel |
+| Backtest — Cycle Run | ✅ Active | Carries through from single-run config |
+| Live engine | ✅ Active | Available in live Bet Settings panel |
+| Dry Run | ✅ Active | Follows live engine settings |
+
+---
+
+## Strategy Pipeline
+
+The full order in which layers are applied to every candidate bet. Each layer can modify, reduce, or block the instruction generated by the core rules. Layers marked **toggleable** are skipped entirely when disabled.
+
+| Step | Layer | Module | Effect | Toggleable |
+|------|-------|--------|--------|------------|
+| 1 | Market scan & deduplication | `engine.py` | Discover WIN markets; skip duplicates, in-play, and odds > 50 | — |
+| 2 | **Core lay rules** (Rules 1 / 2 / 3A / 3B) | `rules.py` | Generate base lay instruction and stake | — |
+| 3 | **JOFS split** | `rules.py` | Split stake across joint/close favourites when gap ≤ 0.2 | ✅ |
+| 4 | **Mark rules** (Ceiling / Floor / Uplift) | `rules.py` | Reject odds > 8.0 or < 1.5; boost stake in 2.5–3.5 band | ✅ each |
+| 5 | **Spread Control** | `rules.py` | Reject bet if back-lay spread exceeds odds-based threshold | ✅ |
+| 6 | **TOP2_CONCENTRATION** | `top2_concentration.py` | Suppress stake (×0.60 or ×0.25) or block entirely in two-horse race markets | ✅ |
+| 7 | **Signal Filters** (×4) | `signal_filters.py` | SKIP / HALVE_STAKE / CAP_STAKE based on overround, field size, steam, band performance | ✅ each |
+| 8 | **Market Overlay Modifier (MOM)** | `market_overlay.py` | Scale stake ×1.15 / ×1.00 / ×0.80 based on market overround efficiency | ✅ |
+| 9 | **Kelly Criterion** | `kelly.py` | Replace computed stake with bankroll-fraction Kelly sizing | ✅ |
+| 10 | **FSU9 Strategy Sandbox** | `strategy_sandbox.py` | User-defined rule overlays; can further adjust or block bets | ✅ |
+| 11 | **AI agents** (Research + Odds Movement) | `ai_backtest_agent.py`, `ai_odds_agent.py` | CONFIRM / OVERRULE / ADJUST per instruction (backtest only) | ✅ each |
+| 12 | **Bet placement / settlement** | `engine.py`, `betfair_client.py` | Place lay order on Betfair (Live/Dry Run) or resolve against FSU1 result (Backtest) | — |
+
+**Minimum stake floor:** £2.00 is enforced throughout the pipeline whenever the original computed stake was ≥ £2.00. No suppression or scaling layer can push a qualifying bet below this floor.
 
 ---
 
@@ -423,7 +480,7 @@ chimera-lay-engine/
 | `POST` | `/api/engine/signal/field-size` | — | `{signal_field_size_enabled: bool}` | Toggle Field Size signal |
 | `POST` | `/api/engine/signal/steam-gate` | — | `{signal_steam_gate_enabled: bool}` | Toggle Steam Gate signal |
 | `POST` | `/api/engine/signal/band-perf` | — | `{signal_band_perf_enabled: bool}` | Toggle Rolling Band Performance signal |
-| `POST` | `/api/engine/top2-concentration` | — | `{top2_concentration_enabled: bool}` | Toggle TOP2_CONCENTRATION suppression/block layer _(pending — live engine wiring in progress)_ |
+| `POST` | `/api/engine/top2-concentration` | — | `{top2_concentration_enabled: bool}` | Toggle TOP2_CONCENTRATION suppression/block layer |
 
 ---
 
@@ -793,13 +850,15 @@ gcloud scheduler jobs create http chimera-keepalive \
 
 ---
 
-## Recent Changes (2026-03-25 / 2026-03-26)
+## Recent Changes (2026-03-25 / 2026-04-05)
 
 | Commit | Description |
 |--------|-------------|
-| `af9b4ec` | Fix `React is not defined` ReferenceError in `StrategyTab` and `TrayCard` — `App.jsx` imports only destructured hooks (`useState`, `useEffect`, `useCallback`, `useRef`); replaced all `React.useState` / `React.useRef` / `React.useCallback` / `React.useEffect` usages with their destructured equivalents |
-| `a34df26` | TOP2_CONCENTRATION: added per-race result to backtest API output, wired live engine, added live UI toggle |
-| `b529262` | Updated README with TOP2_CONCENTRATION rule family documentation |
+| `9f06b09` | Fix critical integrity issues: OOM, NameError, sandbox restore, snapshot stake |
+| `bf7f208` | Fix NameError: logger not defined in backtest thread |
+| `f3685d1` | Update README: known issues, recent changes (2026-03-25/26) |
+| `af9b4ec` | Fix `React is not defined` ReferenceError in `StrategyTab` and `TrayCard` |
+| `a34df26` | TOP2_CONCENTRATION: per-race result in backtest output, live engine wiring, live UI toggle |
 
 ---
 
