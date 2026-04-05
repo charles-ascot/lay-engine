@@ -31,7 +31,7 @@ import threading
 import uuid
 import time
 
-from engine import LayEngine
+from engine import LayEngine, _gcs_read
 from fsu_client import FSUClient
 from rules import apply_rules as apply_betting_rules
 from strategy_sandbox import RuleSandbox, persist_sandbox, restore_sandbox
@@ -3138,6 +3138,7 @@ def backtest_run(req: BacktestRunRequest):
 @app.get("/api/backtest/job/{job_id}")
 def backtest_job_status(job_id: str):
     """Poll for backtest job status.  Returns {status, result?, error?}."""
+    _cleanup_old_jobs()
     with _backtest_jobs_lock:
         job = _backtest_jobs.get(job_id)
     if job is None:

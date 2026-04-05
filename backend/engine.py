@@ -354,6 +354,9 @@ class LayEngine:
                 self.sessions = json.loads(SESSIONS_FILE.read_text())
             else:
                 return
+            # Cap to last 200 sessions to prevent unbounded memory growth
+            if len(self.sessions) > 200:
+                self.sessions = self.sessions[-200:]
             # If last session was RUNNING, it crashed (e.g. Cloud Run restart)
             if self.sessions and self.sessions[-1].get("status") == "RUNNING":
                 crashed = self.sessions[-1]
@@ -1500,6 +1503,7 @@ class LayEngine:
 
                     cand["bet_placed"] = True
                     expired.append(market_id)
+                    self._save_state()  # persist BSP bet immediately
 
                 except Exception as exc:
                     logger.warning(f"BSP monitor error for {market_id}: {exc}")
@@ -1723,8 +1727,8 @@ class LayEngine:
                 "strike_rate": strike_rate,
             },
             "upcoming": upcoming[:10],
-            "recent_bets": list(reversed(self.bets_placed)),
-            "recent_results": list(reversed(self.results)),
+            "recent_bets": list(reversed(self.bets_placed[-200:])),
+            "recent_results": list(reversed(self.results[-200:])),
             "spread_rejections": list(reversed(self.spread_rejections[-20:])),
             "errors": self.errors[-10:],
         }
@@ -1867,6 +1871,7 @@ class LayEngine:
                 mark_ceiling_enabled=self.mark_ceiling_enabled,
                 mark_floor_enabled=self.mark_floor_enabled,
                 mark_uplift_enabled=self.mark_uplift_enabled,
+                mark_uplift_stake=self.mark_uplift_stake,
             )
 
             # Apply point value multiplier

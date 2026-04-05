@@ -3,6 +3,13 @@ __pycache__/
 node_modules/
 frontend/dist/
 .env
+.env.*
 *.egg-info/
 .vscode/
 fsu/
+.claude/
+.DS_Store
+firebase-debug.log
+*.pdf
+*.csv
+Diagrams/

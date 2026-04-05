@@ -609,7 +609,8 @@ def restore_sandbox(sandbox: RuleSandbox) -> None:
             rules_loaded += 1
 
     # Restore trays
-    sandbox._init_trays(sandbox)  # ensure _trays dict exists
+    if not hasattr(sandbox, '_trays'):
+        sandbox._trays = {}  # ensure _trays dict exists
     trays_loaded = 0
     for t in state.get("trays", []):
         tray, err = sandbox.create_tray(t)

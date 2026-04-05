@@ -1,0 +1,16 @@
+frontend/
+docs/
+update/
+Diagrams/
+.claude/
+.git/
+*.pdf
+*.csv
+*.md
+__pycache__/
+*.pyc
+*.egg-info/
+node_modules/
+.env
+.DS_Store
+firebase-debug.log
