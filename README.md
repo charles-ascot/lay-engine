@@ -3,7 +3,7 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last updated: 2026-04-05**
+**Last updated: 2026-04-10**
 
 ---
 
@@ -850,12 +850,13 @@ gcloud scheduler jobs create http chimera-keepalive \
 
 ---
 
-## Recent Changes (2026-03-25 / 2026-04-05)
+## Recent Changes (2026-03-25 / 2026-04-10)
 
 | Commit | Description |
 |--------|-------------|
-| `9f06b09` | Fix critical integrity issues: OOM, NameError, sandbox restore, snapshot stake |
-| `bf7f208` | Fix NameError: logger not defined in backtest thread |
+| `d60a471` | Update README: add MOM section, Strategy Pipeline table, fix TOP2 live status, correct Mark Uplift stake range |
+| `9f06b09` | Fix critical integrity issues: OOM (unbounded state poll), NameError (Betfair history), sandbox trays lost on cold start, snapshot using wrong uplift stake, BSP state persistence, session cap |
+| `bf7f208` | Fix NameError: logger not defined in backtest thread (root cause of 0-bets backtest) |
 | `f3685d1` | Update README: known issues, recent changes (2026-03-25/26) |
 | `af9b4ec` | Fix `React is not defined` ReferenceError in `StrategyTab` and `TrayCard` |
 | `a34df26` | TOP2_CONCENTRATION: per-race result in backtest output, live engine wiring, live UI toggle |
