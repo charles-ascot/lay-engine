@@ -69,13 +69,57 @@ function downloadTableAsExcelRaw(html, filename) {
   URL.revokeObjectURL(url)
 }
 
+// Build XLS HTML for a single backtest: summary header + data rows
+function buildBacktestExportHtml(summary, results, config) {
+  const sm = summary || {}
+  const cfg = config || {}
+  let html = ''
+  html += '<table border="1" cellpadding="4" cellspacing="0">'
+  html += '<tr><td colspan="8" style="font-weight:bold;font-size:14px">CHIMERA Backtest Export</td></tr>'
+  html += `<tr><td colspan="8">${cfg.date || ''} · ${(cfg.countries || []).join('/')} · Window: ${cfg.process_window_mins || '?'}min</td></tr>`
+  html += `<tr><td>Markets</td><td><b>${sm.markets_evaluated || 0}</b></td>`
+  html += `<td>Placed</td><td><b>${sm.markets_placed ?? sm.bets_placed ?? 0}</b></td>`
+  html += `<td>Bets (instr)</td><td><b>${sm.bets_placed || 0}</b></td>`
+  html += `<td>Skipped</td><td><b>${sm.markets_skipped || 0}</b></td></tr>`
+  html += `<tr><td>Stake</td><td><b>&pound;${(sm.total_stake || 0).toFixed(2)}</b></td>`
+  html += `<td>Liability</td><td><b>&pound;${(sm.total_liability || 0).toFixed(2)}</b></td>`
+  html += `<td>P&amp;L</td><td><b>&pound;${(sm.total_pnl || 0).toFixed(2)}</b></td>`
+  html += `<td>ROI</td><td><b>${sm.roi || 0}%</b></td></tr>`
+  html += '<tr><td colspan="8"></td></tr>'
+  html += '<tr><th>Time</th><th>Venue</th><th>Favourite</th><th>Odds</th><th>Rule</th><th>Stake</th><th>Liability</th><th>Result</th><th>P&amp;L</th></tr>'
+  for (const r of (results || [])) {
+    const instrs = r.instructions || []
+    const totalStake = instrs.reduce((s, i) => s + (i.size || 0), 0)
+    const totalLiab = instrs.reduce((s, i) => s + (i.liability || 0), 0)
+    const outcomes = [...new Set(instrs.map(i => i.outcome).filter(Boolean))]
+    const fav = r.favourite || {}
+    html += '<tr>'
+    html += `<td>${(r.race_time || '').slice(11, 16)}</td>`
+    html += `<td>${r.venue || ''}</td>`
+    html += `<td>${fav.name || ''}</td>`
+    html += `<td>${fav.odds || ''}</td>`
+    html += `<td>${r.skipped ? (r.skip_reason || 'SKIPPED') : (r.rule_applied || '')}</td>`
+    html += `<td>${r.skipped ? '' : '&pound;' + totalStake.toFixed(2)}</td>`
+    html += `<td>${r.skipped ? '' : '&pound;' + totalLiab.toFixed(2)}</td>`
+    html += `<td>${r.skipped ? 'SKIPPED' : (outcomes.join('/') || '\u2014')}</td>`
+    html += `<td>${r.skipped ? '' : '&pound;' + (r.pnl || 0).toFixed(2)}</td>`
+    html += '</tr>'
+  }
+  html += '</table>'
+  return html
+}
+
 // ── Snapshot Button ──
-function SnapshotButton({ tableId, filename }) {
+function SnapshotButton({ tableId, filename, summary, results, config }) {
+  const handleExport = () => {
+    if (summary && results) {
+      downloadTableAsExcelRaw(buildBacktestExportHtml(summary, results, config), filename || 'chimera_export')
+    } else {
+      downloadTableAsExcel(tableId, filename || 'chimera_export')
+    }
+  }
   return (
-    <button
-      className="btn btn-secondary"
-      onClick={() => downloadTableAsExcel(tableId, filename || 'chimera_export')}
-    >
+    <button className="btn btn-secondary" onClick={handleExport}>
       Export
     </button>
   )
@@ -1541,6 +1585,28 @@ function btHistSave(entries) {
   try { localStorage.setItem(BT_HISTORY_KEY, JSON.stringify(entries.slice(0, BT_HISTORY_MAX))) } catch {}
 }
 
+// Recompute summary stats from the results array so card and table always agree.
+function computeSummaryFromResults(results, fallback = {}) {
+  if (!results || !results.length) return fallback
+  const active = results.filter(r => !r.skipped)
+  const totalStake = active.reduce((s, r) => s + (r.instructions || []).reduce((ss, i) => ss + (i.size || 0), 0), 0)
+  const totalLiab = active.reduce((s, r) => s + (r.instructions || []).reduce((ss, i) => ss + (i.liability || 0), 0), 0)
+  const totalPnl = results.reduce((s, r) => s + (r.pnl || 0), 0)
+  const betsPlaced = active.reduce((s, r) => s + (r.instructions || []).length, 0)
+  const marketsPlaced = active.length
+  const marketsSkipped = results.filter(r => r.skipped).length
+  return {
+    markets_evaluated: results.length,
+    markets_placed: marketsPlaced,
+    bets_placed: betsPlaced,
+    markets_skipped: marketsSkipped,
+    total_stake: Math.round(totalStake * 100) / 100,
+    total_liability: Math.round(totalLiab * 100) / 100,
+    total_pnl: Math.round(totalPnl * 100) / 100,
+    roi: totalStake > 0 ? Math.round((totalPnl / totalStake) * 1000) / 10 : 0,
+  }
+}
+
 // ── Cycle Run History helpers ──
 const BT_CYCLE_KEY = 'chimera_backtest_cycle_history'
 const BT_CYCLE_MAX = 20
@@ -1716,7 +1782,20 @@ function BacktestTab() {
         if (pollData.status === 'error') throw new Error(pollData.error || 'Backtest failed')
       }
 
-      setResult(data)
+      // Recompute summary from results to guarantee card/export consistency
+      const recomputed = computeSummaryFromResults(data.results, {
+        markets_evaluated: data.markets_evaluated,
+        markets_placed: data.markets_placed || 0,
+        bets_placed: data.bets_placed,
+        markets_skipped: data.markets_skipped,
+        total_stake: data.total_stake,
+        total_liability: data.total_liability,
+        total_pnl: data.total_pnl,
+        roi: data.roi,
+      })
+      // Patch live result with recomputed values
+      const patched = { ...data, ...recomputed }
+      setResult(patched)
       // Persist to history
       const entry = {
         id: Date.now().toString(),
@@ -1750,15 +1829,7 @@ function BacktestTab() {
           market_overlay_enabled: sigMarketOverlay,
           top2_concentration_enabled: top2Enabled,
         },
-        summary: {
-          markets_evaluated: data.markets_evaluated,
-          bets_placed: data.bets_placed,
-          markets_skipped: data.markets_skipped,
-          total_stake: data.total_stake,
-          total_liability: data.total_liability,
-          total_pnl: data.total_pnl,
-          roi: data.roi,
-        },
+        summary: recomputed,
         results: data.results,
       }
       const next = [entry, ...btHistLoad()]
@@ -1795,33 +1866,14 @@ function BacktestTab() {
     if (selectedHistIds.size === 0) return
     const entries = history.filter(h => selectedHistIds.has(h.id))
 
-    // Build one HTML table per entry
     let html = ''
     for (const entry of entries) {
-      const cfg = entry.config || {}
-      const sm = entry.summary || {}
-      html += `<h3>${entry.date} — ${(cfg.countries || []).join(',')} — Window: ${cfg.process_window_mins || '?'}min</h3>`
-      html += `<p>Markets: ${sm.markets_evaluated || 0} | Bets: ${sm.bets_placed || 0} | P&amp;L: £${(sm.total_pnl || 0).toFixed(2)} | ROI: ${sm.roi || 0}%</p>`
-      html += '<table border="1" cellpadding="4" cellspacing="0"><tr><th>Time</th><th>Venue</th><th>Favourite</th><th>Odds</th><th>Rule</th><th>Stake</th><th>Liability</th><th>Result</th><th>P&amp;L</th></tr>'
-      for (const r of (entry.results || [])) {
-        const instrs = r.instructions || []
-        const totalStake = instrs.reduce((s, i) => s + (i.size || 0), 0)
-        const totalLiab = instrs.reduce((s, i) => s + (i.liability || 0), 0)
-        const outcomes = [...new Set(instrs.map(i => i.outcome).filter(Boolean))]
-        const fav = r.favourite || {}
-        html += '<tr>'
-        html += `<td>${(r.race_time || '').slice(0, 16)}</td>`
-        html += `<td>${r.venue || ''}</td>`
-        html += `<td>${fav.name || ''}</td>`
-        html += `<td>${fav.odds || ''}</td>`
-        html += `<td>${r.skipped ? (r.skip_reason || 'SKIPPED') : (r.rule_applied || '')}</td>`
-        html += `<td>${r.skipped ? '' : '£' + totalStake.toFixed(2)}</td>`
-        html += `<td>${r.skipped ? '' : '£' + totalLiab.toFixed(2)}</td>`
-        html += `<td>${r.skipped ? 'SKIPPED' : (outcomes.join('/') || '—')}</td>`
-        html += `<td>${r.skipped ? '' : '£' + (r.pnl || 0).toFixed(2)}</td>`
-        html += '</tr>'
-      }
-      html += '</table><br/>'
+      html += buildBacktestExportHtml(
+        entry.summary,
+        entry.results,
+        { date: entry.date, countries: (entry.config || {}).countries, process_window_mins: (entry.config || {}).process_window_mins }
+      )
+      html += '<br/>'
     }
 
     const dateLabel = entries.length === 1 ? entries[0].date : `${entries.length}_runs`
@@ -1935,6 +1987,7 @@ function BacktestTab() {
       total_days: sortedDates.length,
       days_completed: days.filter(d => !d.error).length,
       markets_evaluated: days.reduce((s, d) => s + (d.markets_evaluated || 0), 0),
+      markets_placed: days.reduce((s, d) => s + (d.markets_placed || 0), 0),
       bets_placed: days.reduce((s, d) => s + (d.bets_placed || 0), 0),
       markets_skipped: days.reduce((s, d) => s + (d.markets_skipped || 0), 0),
       total_stake: totStake,
@@ -2380,6 +2433,7 @@ function BacktestTab() {
           <div className="stats-ribbon" style={{ marginBottom: 12 }}>
             <div className="stats-ribbon-left">
               <span className="stat">Markets <strong>{result.markets_evaluated}</strong></span>
+              <span className="stat">Placed <strong>{result.markets_placed ?? result.bets_placed}</strong></span>
               <span className="stat">Bets <strong>{result.bets_placed}</strong></span>
               <span className="stat">Skipped <strong>{result.markets_skipped}</strong></span>
               <span className="stat">Stake <strong>£{result.total_stake.toFixed(2)}</strong></span>
@@ -2421,7 +2475,13 @@ function BacktestTab() {
                 </>
               )}
             </div>
-            <SnapshotButton tableId="bt-results-table" filename={`backtest_${selectedDate}`} />
+            <SnapshotButton
+              tableId="bt-results-table"
+              filename={`backtest_${selectedDate}`}
+              summary={result}
+              results={result.results}
+              config={{ date: selectedDate, countries, process_window_mins: processWindow }}
+            />
           </div>
 
           <div className="card">
@@ -2628,12 +2688,20 @@ function BacktestTab() {
                     <div className="bt-hist-card-meta">
                       <span className="bt-muted">
                         {entry.config.countries.join('/')} · {fmtWindow(entry.config.process_window_mins)} window ·{' '}
-                        {entry.summary.markets_evaluated} markets · {entry.summary.markets_skipped} skipped
+                        {entry.summary.markets_evaluated} markets · {entry.summary.markets_placed ?? entry.summary.bets_placed} placed · {entry.summary.markets_skipped} skipped
                       </span>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button
                           className="btn btn-secondary btn-sm"
-                          onClick={e => { e.stopPropagation(); downloadTableAsExcel(tableId, `backtest_${entry.date}_${entry.id}`) }}
+                          onClick={e => {
+                            e.stopPropagation()
+                            const html = buildBacktestExportHtml(
+                              entry.summary,
+                              entry.results,
+                              { date: entry.date, countries: entry.config.countries, process_window_mins: entry.config.process_window_mins }
+                            )
+                            downloadTableAsExcelRaw(html, `backtest_${entry.date}_${entry.id}`)
+                          }}
                         >
                           Export XLS
                         </button>

@@ -3808,6 +3808,12 @@ def _backtest_run_inner(req):
                 except Exception:
                     pass
 
+        # If all instructions were removed by signal filters / AI agents
+        # but skipped was never set, mark as skipped now.
+        if not rule_result.skipped and not rule_result.instructions:
+            rule_result.skipped = True
+            rule_result.skip_reason = "All bets filtered (signal/agent)"
+
         if rule_result.skipped:
             rd = rule_result.to_dict()
             rd["evaluated_at"] = target_iso
@@ -3903,11 +3909,14 @@ def _backtest_run_inner(req):
     total_pnl = round(sum(r.get("pnl", 0) for r in results), 2)
     bets_placed = sum(len(r.get("instructions", [])) for r in active_results)
 
+    markets_placed = len(active_results)
+
     response_body = {
         "date": req.date,
         "countries": req.countries,
         "process_window_mins": req.process_window_mins,
         "markets_evaluated": len(markets),
+        "markets_placed": markets_placed,
         "bets_placed": bets_placed,
         "markets_skipped": sum(1 for r in results if r.get("skipped")),
         "total_stake": total_stake,
