@@ -3,7 +3,7 @@
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
 **Current version: v5.0.0**
-**Last updated: 2026-04-10**
+**Last updated: 2026-04-12**
 
 ---
 
@@ -365,6 +365,8 @@ The full order in which layers are applied to every candidate bet. Each layer ca
 | 12 | **Bet placement / settlement** | `engine.py`, `betfair_client.py` | Place lay order on Betfair (Live/Dry Run) or resolve against FSU1 result (Backtest) | — |
 
 **Minimum stake floor:** £2.00 is enforced throughout the pipeline whenever the original computed stake was ≥ £2.00. No suppression or scaling layer can push a qualifying bet below this floor.
+
+> **FSU migration note (v5.3.2):** Steps 7–11 (signal filters, MOM, sandbox, AI agents) can each independently remove all instructions from a market. When extracting these layers into standalone FSUs, each service must return an explicit `VETOED` / `SKIPPED` status when it removes all bets — not just an empty instruction list — so the orchestrator can correctly classify the market and keep summary stats consistent with row-level data. See CHANGELOG [5.3.2] for the ghost-row reconciliation fix that established this contract.
 
 ---
 
@@ -850,10 +852,11 @@ gcloud scheduler jobs create http chimera-keepalive \
 
 ---
 
-## Recent Changes (2026-03-25 / 2026-04-10)
+## Recent Changes (2026-03-25 / 2026-04-12)
 
 | Commit | Description |
 |--------|-------------|
+| `5d92400` | Fix backtest card vs XLS export reconciliation failure: ghost rows, `markets_placed` metric, summary header in exports |
 | `d60a471` | Update README: add MOM section, Strategy Pipeline table, fix TOP2 live status, correct Mark Uplift stake range |
 | `9f06b09` | Fix critical integrity issues: OOM (unbounded state poll), NameError (Betfair history), sandbox trays lost on cold start, snapshot using wrong uplift stake, BSP state persistence, session cap |
 | `bf7f208` | Fix NameError: logger not defined in backtest thread (root cause of 0-bets backtest) |

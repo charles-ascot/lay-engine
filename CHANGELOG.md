@@ -2,6 +2,30 @@
 
 All notable changes to the CHIMERA Lay Engine.
 
+## [5.3.2] — 2026-04-12
+
+### Fixed
+- **Backtest card vs XLS export reconciliation failure** — The UI card summary (Bets / Stake / P&L / ROI) could diverge from the row-level data in the XLS export. Three compounding issues:
+  1. **Ghost rows** — Signal filters, AI Research Agent (OVERRULE), and Odds Movement Agent (OVERRULE) could remove *all* instructions from a market without marking it as `skipped`. These "ghost" markets appeared as non-skipped rows with £0 stake in the table but were not counted in the card's Skipped total, causing row-count and stake mismatches.
+  2. **`bets_placed` counted instructions, not markets** — With joint rules (RULE_3_JOINT) a single market produces two lay instructions. The card showed "Bets 29" (instructions) while the table had fewer non-skipped rows (markets). Manual reconciliation could never balance.
+  3. **No summary block in XLS export** — The exported file contained only data rows with no card-level totals, forcing error-prone sum-and-compare.
+
+### Added
+- **`markets_placed` metric** — New field in backtest response and UI card counting non-skipped markets (distinct from `bets_placed` which counts instructions). Displayed as "Placed" on both the live results ribbon and history cards.
+- **Summary header in all XLS exports** — Every backtest XLS export (live SnapshotButton, per-entry history Export XLS, and bulk Download XLS) now includes a header block at the top of the file showing Markets, Placed, Bets (instructions), Skipped, Stake, Liability, P&L, and ROI. Reconciliation is now a single-glance check.
+- **`computeSummaryFromResults()` frontend guard** — Summary stats are recomputed from the results array on the frontend before display and storage. This guarantees the card and table always agree, regardless of any future backend edge cases.
+
+### Changed
+- Backtest pipeline now marks markets as `skipped` with reason `"All bets filtered (signal/agent)"` when all instructions are removed by signal filters, AI agents, or odds agents — eliminating ghost rows.
+- Per-entry "Export XLS" button on history cards switched from DOM-capture (`downloadTableAsExcel`) to data-driven HTML (`buildBacktestExportHtml` + `downloadTableAsExcelRaw`) for consistency with the summary header.
+- Bulk "Download XLS" button refactored to use the shared `buildBacktestExportHtml` builder.
+
+### Notes
+- No betting rule logic was modified. This is a reporting and aggregation fix only.
+- Existing history entries in `localStorage` will have their summaries recomputed on next export using the frontend guard. Re-running the backtest is recommended for full accuracy.
+
+---
+
 ## [5.3.1] — 2026-03-15
 
 ### Fixed
