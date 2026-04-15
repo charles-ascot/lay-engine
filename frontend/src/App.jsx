@@ -562,6 +562,7 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
   checkedMarkets = EMPTY_SET, setCheckedMarkets = NOOP, snapshotLoading = false, setSnapshotLoading = NOOP,
   snapshotResult = null, setSnapshotResult = NOOP, snapshotHistory = [], setSnapshotHistory = NOOP,
   expandedSnapshotId = null, setExpandedSnapshotId = NOOP, snapshotDetail = null, setSnapshotDetail = NOOP,
+  settingsConfirmed = false,
 }) {
   const [markets, setMarkets] = useState([])
   const [selectedMarketId, setSelectedMarketId] = useState(null)
@@ -569,9 +570,6 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
   const [loadingBook, setLoadingBook] = useState(false)
   const [countryFilter, setCountryFilter] = useState('all')
   const [expandedMonths, setExpandedMonths] = useState(new Set())
-  const [settingsConfirmed] = useState(
-    () => localStorage.getItem('betSettingsConfirmed') === 'true'
-  )
 
   const isDryRunMode = mode === 'dryrun'
   const isRunning = state.status === 'RUNNING'
@@ -1187,21 +1185,15 @@ function LiveTab({ state, onStart, onStop, mode = 'live',
 }
 
 // ── Bet Settings Tab ──
-function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf, onToggleMarketOverlay, onToggleTop2Concentration }) {
+function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, onToggleMarkCeiling, onToggleMarkFloor, onToggleMarkUplift, onSetMarkUpliftStake, onSetProcessWindow, onSetPointValue, onSetKelly, onToggleSignalOverround, onToggleSignalFieldSize, onToggleSignalSteamGate, onToggleSignalBandPerf, onToggleMarketOverlay, onToggleTop2Concentration, confirmed, onConfirm, onSettingsChanged }) {
   const s = state.summary || {}
-  const [confirmed, setConfirmed] = useState(
-    () => localStorage.getItem('betSettingsConfirmed') === 'true'
-  )
 
-  const handleConfirm = () => {
-    localStorage.setItem('betSettingsConfirmed', 'true')
-    setConfirmed(true)
-  }
+  // Wrap every setting callback to mark dirty + unconfirmed
+  const guard = (fn) => (...args) => { onSettingsChanged(); return fn(...args) }
 
-  const handleReset = () => {
-    localStorage.removeItem('betSettingsConfirmed')
-    setConfirmed(false)
-  }
+  const handleConfirm = () => onConfirm()
+
+  const handleReset = () => onSettingsChanged()
   return (
     <div className="engine-tab">
 
@@ -1215,7 +1207,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
             Bet time before off:
             <select
               value={state.process_window || 12}
-              onChange={e => onSetProcessWindow(+e.target.value)}
+              onChange={guard(e => onSetProcessWindow(+e.target.value))}
             >
               {[
                 { v: 0.5, label: '30 sec before off' },
@@ -1237,7 +1229,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
             Stake point value (£):
             <select
               value={state.point_value || 1}
-              onChange={e => onSetPointValue(e.target.value)}
+              onChange={guard(e => onSetPointValue(e.target.value))}
             >
               {[1, 2, 5, 10, 20, 50].map(v => (
                 <option key={v} value={v}>£{v} per point</option>
@@ -1256,7 +1248,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
               <button
                 key={c}
                 className={`btn-toggle ${(state.countries || ['GB', 'IE']).includes(c) ? 'active' : ''}`}
-                onClick={() => onToggleCountry(c)}
+                onClick={guard(() => onToggleCountry(c))}
               >
                 {COUNTRY_LABELS[c] || c}
               </button>
@@ -1271,7 +1263,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">JOFS (Joint Favourite Split):</span>
           <button
             className={`btn-toggle ${state.jofs_control ? 'active' : ''}`}
-            onClick={onToggleJofs}
+            onClick={guard(onToggleJofs)}
             title="When gap between 1st and 2nd favourite is ≤ 0.2, stake is split evenly across both"
           >
             {state.jofs_control ? 'ON' : 'OFF'}
@@ -1279,7 +1271,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>Spread Control:</span>
           <button
             className={`btn-toggle ${state.spread_control ? 'active' : ''}`}
-            onClick={onToggleSpread}
+            onClick={guard(onToggleSpread)}
             title="Validates back-lay spreads to reject bets in illiquid markets"
           >
             {state.spread_control ? 'ON' : 'OFF'}
@@ -1308,7 +1300,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">Hard Ceiling (&gt;8.0 skip):</span>
           <button
             className={`btn-toggle ${state.mark_ceiling_enabled ? 'active' : ''}`}
-            onClick={onToggleMarkCeiling}
+            onClick={guard(onToggleMarkCeiling)}
             title="No lays above 8.0 odds — skip market entirely"
           >
             {state.mark_ceiling_enabled ? 'ON' : 'OFF'}
@@ -1316,7 +1308,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>Hard Floor (&lt;1.5 skip):</span>
           <button
             className={`btn-toggle ${state.mark_floor_enabled ? 'active' : ''}`}
-            onClick={onToggleMarkFloor}
+            onClick={guard(onToggleMarkFloor)}
             title="No lays below 1.5 odds — skip market entirely"
           >
             {state.mark_floor_enabled ? 'ON' : 'OFF'}
@@ -1324,7 +1316,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>2.5–3.5 Uplift:</span>
           <button
             className={`btn-toggle ${state.mark_uplift_enabled ? 'active' : ''}`}
-            onClick={onToggleMarkUplift}
+            onClick={guard(onToggleMarkUplift)}
             title="When favourite odds are 2.5–3.5, increase stake"
           >
             {state.mark_uplift_enabled ? 'ON' : 'OFF'}
@@ -1333,7 +1325,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
             <select
               className="select-small"
               value={state.mark_uplift_stake || 3}
-              onChange={e => onSetMarkUpliftStake(Number(e.target.value))}
+              onChange={guard(e => onSetMarkUpliftStake(Number(e.target.value)))}
               style={{ marginLeft: 8, width: 70 }}
               title="Uplift stake (pts) for 2.5–3.5 band"
             >
@@ -1352,7 +1344,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">Overround:</span>
           <button
             className={`btn-toggle ${state.signal_overround_enabled ? 'active' : ''}`}
-            onClick={onToggleSignalOverround}
+            onClick={guard(onToggleSignalOverround)}
             title="Halve stake when book >115%, skip when >120% — filters illiquid markets"
           >
             {state.signal_overround_enabled ? 'ON' : 'OFF'}
@@ -1360,7 +1352,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>Field Size:</span>
           <button
             className={`btn-toggle ${state.signal_field_size_enabled ? 'active' : ''}`}
-            onClick={onToggleSignalFieldSize}
+            onClick={guard(onToggleSignalFieldSize)}
             title="Cap stake at £10 when field >10 runners and fav odds ≥3.0 — large NH field filter"
           >
             {state.signal_field_size_enabled ? 'ON' : 'OFF'}
@@ -1368,7 +1360,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>Steam Gate:</span>
           <button
             className={`btn-toggle ${state.signal_steam_gate_enabled ? 'active' : ''}`}
-            onClick={onToggleSignalSteamGate}
+            onClick={guard(onToggleSignalSteamGate)}
             title="Skip bet when favourite has shortened ≥3% since first monitoring snapshot (live only)"
           >
             {state.signal_steam_gate_enabled ? 'ON' : 'OFF'}
@@ -1376,7 +1368,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label" style={{ marginLeft: 16 }}>Band Perf:</span>
           <button
             className={`btn-toggle ${state.signal_band_perf_enabled ? 'active' : ''}`}
-            onClick={onToggleSignalBandPerf}
+            onClick={guard(onToggleSignalBandPerf)}
             title="Cap stake at £10 when 5-day win rate for this odds band falls below 50%"
           >
             {state.signal_band_perf_enabled ? 'ON' : 'OFF'}
@@ -1408,7 +1400,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">Market Overlay:</span>
           <button
             className={`btn-toggle ${state.market_overlay_enabled ? 'active' : ''}`}
-            onClick={onToggleMarketOverlay}
+            onClick={guard(onToggleMarketOverlay)}
             title="Scales stakes by exchange overround: >1.02 ×1.15 · 1.00–1.02 ×1.00 · <1.00 ×0.80"
           >
             {state.market_overlay_enabled ? 'ON' : 'OFF'}
@@ -1434,7 +1426,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">TOP2 Concentration:</span>
           <button
             className={`btn-toggle ${state.top2_concentration_enabled ? 'active' : ''}`}
-            onClick={onToggleTop2Concentration}
+            onClick={guard(onToggleTop2Concentration)}
             title="Suppresses or blocks lay bets when the market is heavily concentrated in the top two runners. SUPPRESS_MEDIUM ×0.60 · SUPPRESS_STRONG ×0.25 · BLOCK ×0.00. Requires ADVANCED tier data (pre-2026)."
           >
             {state.top2_concentration_enabled ? 'ON' : 'OFF'}
@@ -1463,7 +1455,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
           <span className="engine-label">Kelly Criterion:</span>
           <button
             className={`btn-toggle ${state.kelly_enabled ? 'active' : ''}`}
-            onClick={() => onSetKelly({ enabled: !state.kelly_enabled })}
+            onClick={guard(() => onSetKelly({ enabled: !state.kelly_enabled }))}
             title="Size stakes using the Kelly Criterion — mathematically optimal bankroll allocation"
           >
             {state.kelly_enabled ? 'ON' : 'OFF'}
@@ -1476,7 +1468,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
               <select
                 className="select-small"
                 value={state.kelly_fraction || 0.25}
-                onChange={e => onSetKelly({ fraction: parseFloat(e.target.value) })}
+                onChange={guard(e => onSetKelly({ fraction: parseFloat(e.target.value) }))}
                 title="Quarter Kelly is strongly recommended to reduce variance"
               >
                 <option value={0.25}>¼ Kelly (recommended)</option>
@@ -1494,7 +1486,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
                 min={10}
                 max={1000000}
                 step={100}
-                onChange={e => onSetKelly({ bankroll: parseFloat(e.target.value) })}
+                onChange={guard(e => onSetKelly({ bankroll: parseFloat(e.target.value) }))}
                 title="Your total betting bankroll in £"
               />
             </label>
@@ -1508,7 +1500,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
                 min={0}
                 max={50}
                 step={0.5}
-                onChange={e => onSetKelly({ edge_pct: parseFloat(e.target.value) })}
+                onChange={guard(e => onSetKelly({ edge_pct: parseFloat(e.target.value) }))}
                 title="Your estimated edge over the market-implied probability (5% is a reasonable starting point)"
               />
             </label>
@@ -1522,7 +1514,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
                 min={0.1}
                 max={100}
                 step={0.1}
-                onChange={e => onSetKelly({ min_stake: parseFloat(e.target.value) })}
+                onChange={guard(e => onSetKelly({ min_stake: parseFloat(e.target.value) }))}
                 title="Kelly stake will never go below this floor"
               />
             </label>
@@ -1536,7 +1528,7 @@ function BetSettingsTab({ state, onToggleCountry, onToggleJofs, onToggleSpread, 
                 min={1}
                 max={10000}
                 step={1}
-                onChange={e => onSetKelly({ max_stake: parseFloat(e.target.value) })}
+                onChange={guard(e => onSetKelly({ max_stake: parseFloat(e.target.value) }))}
                 title="Kelly stake will never exceed this ceiling"
               />
             </label>
@@ -6030,6 +6022,10 @@ const TAB_CONFIG = [
 function Dashboard() {
   const [state, setState] = useState(null)
   const [tab, setTab] = useState('live')
+  const [settingsConfirmed, setSettingsConfirmed] = useState(
+    () => localStorage.getItem('betSettingsConfirmed') === 'true'
+  )
+  const [settingsDirty, setSettingsDirty] = useState(false)
   const intervalRef = useRef(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInitialDate, setChatInitialDate] = useState(null)
@@ -6205,6 +6201,17 @@ function Dashboard() {
     })
     fetchState()
   }
+  const handleSettingsChanged = () => {
+    setSettingsDirty(true)
+    setSettingsConfirmed(false)
+    localStorage.removeItem('betSettingsConfirmed')
+  }
+  const handleSettingsConfirm = () => {
+    setSettingsDirty(false)
+    setSettingsConfirmed(true)
+    localStorage.setItem('betSettingsConfirmed', 'true')
+  }
+
   const handleLogout = async () => {
     await api('/api/logout', { method: 'POST' })
     window.location.reload()
@@ -6294,7 +6301,12 @@ function Dashboard() {
           <button
             key={t.id}
             className={tab === t.id ? 'active' : ''}
-            onClick={() => setTab(t.id)}
+            onClick={() => {
+              if (tab === 'bet-settings' && settingsDirty && t.id !== 'bet-settings') {
+                if (!window.confirm('You have unconfirmed Bet Settings changes. Leave without confirming?')) return
+              }
+              setTab(t.id)
+            }}
           >
             {t.label}
             {(t.id === 'live' || t.id === 'dryrun') && hasErrors && <span className="tab-dot red" />}
@@ -6309,6 +6321,7 @@ function Dashboard() {
             state={state}
             onStart={handleStart}
             onStop={handleStop}
+            settingsConfirmed={settingsConfirmed}
           />
         )}
         {tab === 'dryrun' && (
@@ -6316,6 +6329,7 @@ function Dashboard() {
             state={state}
             onStart={handleStart}
             onStop={handleStop}
+            settingsConfirmed={settingsConfirmed}
             mode="dryrun"
             checkedMarkets={checkedMarkets} setCheckedMarkets={setCheckedMarkets}
             snapshotLoading={snapshotLoading} setSnapshotLoading={setSnapshotLoading}
@@ -6347,6 +6361,9 @@ function Dashboard() {
             onToggleSignalBandPerf={handleToggleSignalBandPerf}
             onToggleMarketOverlay={handleToggleMarketOverlay}
             onToggleTop2Concentration={handleToggleTop2Concentration}
+            confirmed={settingsConfirmed}
+            onConfirm={handleSettingsConfirm}
+            onSettingsChanged={handleSettingsChanged}
           />
         )}
         {tab === 'settings' && <SettingsTab theme={theme} setTheme={setTheme} />}
