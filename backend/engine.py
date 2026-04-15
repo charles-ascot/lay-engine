@@ -40,7 +40,7 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 
 # Processing window: only place bets within this many minutes of race start.
 # Prevents placing bets hours early with meaningless early-morning prices.
-PROCESS_WINDOW_MINUTES = int(os.environ.get("PROCESS_WINDOW_MINUTES", "12"))
+PROCESS_WINDOW_MINUTES = float(os.environ.get("PROCESS_WINDOW_MINUTES", "12"))
 
 # State file for Cloud Run cold-start recovery
 STATE_FILE = Path(os.environ.get("STATE_FILE", "/tmp/chimera_engine_state.json"))
@@ -297,22 +297,7 @@ class LayEngine:
             else:
                 return
 
-            # Only reload if same day
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            if data.get("day_started") != today:
-                logger.info("State file is from a different day — starting fresh")
-                STATE_FILE.unlink(missing_ok=True)
-                return
-
-            self.day_started = data["day_started"]
-            self.processed_markets = set(data.get("processed_markets", []))
-            self.processed_runners = set(
-                tuple(x) for x in data.get("processed_runners", [])
-            )
-            self.results = data.get("results", [])
-            self.bets_placed = data.get("bets_placed", [])
-            self.errors = data.get("errors", [])
-            self.last_scan = data.get("last_scan")
+            # Always restore user settings — these persist across days
             self.dry_run = data.get("dry_run", DRY_RUN)
             self.countries = data.get("countries", ["GB", "IE"])
             self.spread_control = data.get("spread_control", False)
@@ -332,6 +317,31 @@ class LayEngine:
             self.signal_config.band_perf_enabled = data.get("signal_band_perf_enabled", False)
             self.market_overlay_enabled = data.get("market_overlay_enabled", False)
             self.top2_concentration_enabled = data.get("top2_concentration_enabled", False)
+            logger.info(
+                f"Settings restored: window={self.process_window}m, "
+                f"JOFS={'ON' if self.jofs_control else 'OFF'}, "
+                f"spread={'ON' if self.spread_control else 'OFF'}, "
+                f"ceil={'ON' if self.mark_ceiling_enabled else 'OFF'}, "
+                f"floor={'ON' if self.mark_floor_enabled else 'OFF'}, "
+                f"uplift={'ON' if self.mark_uplift_enabled else 'OFF'} ({self.mark_uplift_stake}pts), "
+                f"point_value={self.point_value}"
+            )
+
+            # Only reload operational state (markets, bets, results) if same day
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if data.get("day_started") != today:
+                logger.info("State file is from a different day — clearing operational data, settings preserved")
+                return
+
+            self.day_started = data["day_started"]
+            self.processed_markets = set(data.get("processed_markets", []))
+            self.processed_runners = set(
+                tuple(x) for x in data.get("processed_runners", [])
+            )
+            self.results = data.get("results", [])
+            self.bets_placed = data.get("bets_placed", [])
+            self.errors = data.get("errors", [])
+            self.last_scan = data.get("last_scan")
 
             logger.info(
                 f"Restored state: {len(self.processed_markets)} processed markets, "
