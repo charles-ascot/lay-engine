@@ -3067,6 +3067,14 @@ class BacktestRunRequest(BaseModel):
     market_overlay_enabled: bool = False
     top2_concentration_enabled: bool = False  # TOP2_CONCENTRATION rule family
     sandbox_enabled: bool = False   # apply strategy sandbox rules during this backtest
+    # Per-rule toggles and configurable stakes (backtest only — live engine always uses defaults)
+    rule1_enabled: bool = True
+    rule2_enabled: bool = True
+    rule3a_enabled: bool = True
+    rule3b_enabled: bool = True
+    rule1_stake: float = 3.0
+    rule2_stake: float = 2.0
+    rule3_stake: float = 1.0
 
 
 @app.get("/api/backtest/dates")
@@ -3593,6 +3601,13 @@ def _backtest_run_inner(req):
             mark_floor_enabled=req.mark_floor_enabled,
             mark_uplift_enabled=req.mark_uplift_enabled,
             mark_uplift_stake=req.mark_uplift_stake,
+            rule1_enabled=req.rule1_enabled,
+            rule2_enabled=req.rule2_enabled,
+            rule3a_enabled=req.rule3a_enabled,
+            rule3b_enabled=req.rule3b_enabled,
+            rule1_stake=req.rule1_stake,
+            rule2_stake=req.rule2_stake,
+            rule3_stake=req.rule3_stake,
         )
 
         # Apply point value multiplier

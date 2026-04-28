@@ -1641,6 +1641,15 @@ function BacktestTab() {
   const [sigMarketOverlay, setSigMarketOverlay] = useState(false)
   const [top2Enabled, setTop2Enabled] = useState(false)
 
+  // Per-rule toggles and configurable stakes (backtest only)
+  const [rule1Enabled, setRule1Enabled] = useState(true)
+  const [rule2Enabled, setRule2Enabled] = useState(true)
+  const [rule3aEnabled, setRule3aEnabled] = useState(true)
+  const [rule3bEnabled, setRule3bEnabled] = useState(true)
+  const [rule1Stake, setRule1Stake] = useState(3.0)
+  const [rule2Stake, setRule2Stake] = useState(2.0)
+  const [rule3Stake, setRule3Stake] = useState(1.0)
+
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
   const [selectedMarketIds, setSelectedMarketIds] = useState(new Set())
@@ -1742,6 +1751,13 @@ function BacktestTab() {
           mark_uplift_stake: markUpliftStake,
           point_value: pointValue,
           market_ids: [...selectedMarketIds],
+          rule1_enabled: rule1Enabled,
+          rule2_enabled: rule2Enabled,
+          rule3a_enabled: rule3aEnabled,
+          rule3b_enabled: rule3bEnabled,
+          rule1_stake: rule1Stake,
+          rule2_stake: rule2Stake,
+          rule3_stake: rule3Stake,
           ai_agent_enabled: aiAgentEnabled,
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
@@ -1804,6 +1820,13 @@ function BacktestTab() {
           mark_uplift_stake: markUpliftStake,
           point_value: pointValue,
           market_count: selectedMarketIds.size,
+          rule1_enabled: rule1Enabled,
+          rule2_enabled: rule2Enabled,
+          rule3a_enabled: rule3aEnabled,
+          rule3b_enabled: rule3bEnabled,
+          rule1_stake: rule1Stake,
+          rule2_stake: rule2Stake,
+          rule3_stake: rule3Stake,
           ai_agent_enabled: aiAgentEnabled,
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
@@ -1942,6 +1965,13 @@ function BacktestTab() {
             mark_uplift_stake: markUpliftStake,
             point_value: pointValue,
             market_ids: [],
+            rule1_enabled: rule1Enabled,
+            rule2_enabled: rule2Enabled,
+            rule3a_enabled: rule3aEnabled,
+            rule3b_enabled: rule3bEnabled,
+            rule1_stake: rule1Stake,
+            rule2_stake: rule2Stake,
+            rule3_stake: rule3Stake,
             kelly_enabled: kellyEnabled,
             kelly_fraction: kellyFraction,
             kelly_bankroll: kellyBankroll,
@@ -2007,6 +2037,13 @@ function BacktestTab() {
         signal_band_perf_enabled: sigBandPerf,
         market_overlay_enabled: sigMarketOverlay,
         top2_concentration_enabled: top2Enabled,
+        rule1_enabled: rule1Enabled,
+        rule2_enabled: rule2Enabled,
+        rule3a_enabled: rule3aEnabled,
+        rule3b_enabled: rule3bEnabled,
+        rule1_stake: rule1Stake,
+        rule2_stake: rule2Stake,
+        rule3_stake: rule3Stake,
       },
       summary,
       days,
@@ -2186,6 +2223,47 @@ function BacktestTab() {
             >
               {running ? 'Running…' : `Run Backtest${selectedMarketIds.size > 0 ? ` (${selectedMarketIds.size})` : ''}`}
             </button>
+          </div>
+
+          {/* Base Rules — per-rule toggles and configurable stakes */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#8a8a9a', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+              Base Rules
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {[
+                { key: 'r1', enabled: rule1Enabled, setEnabled: setRule1Enabled, label: 'Rule 1', desc: 'Fav < 2.0', stake: rule1Stake, setStake: setRule1Stake },
+                { key: 'r2', enabled: rule2Enabled, setEnabled: setRule2Enabled, label: 'Rule 2', desc: 'Fav 2.0–5.0', stake: rule2Stake, setStake: setRule2Stake },
+                { key: 'r3a', enabled: rule3aEnabled, setEnabled: setRule3aEnabled, label: 'Rule 3A', desc: 'Fav > 5.0, gap < 2 (split)', stake: rule3Stake, setStake: setRule3Stake },
+                { key: 'r3b', enabled: rule3bEnabled, setEnabled: setRule3bEnabled, label: 'Rule 3B', desc: 'Fav > 5.0, gap ≥ 2 (single)', stake: null, setStake: null },
+              ].map(({ key, enabled, setEnabled, label, desc, stake, setStake }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', minWidth: 0 }}>
+                    <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+                    <span style={{ fontWeight: 600, fontSize: 12, opacity: enabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>{label}</span>
+                    <span style={{ fontSize: 11, color: '#8a8a9a', opacity: enabled ? 1 : 0.45 }}>{desc}</span>
+                  </label>
+                  {stake !== null ? (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a', marginLeft: 4 }}>
+                      Stake
+                      <input
+                        type="number"
+                        className="select-small"
+                        style={{ width: 58, marginLeft: 2 }}
+                        value={stake}
+                        min={0.5} max={100} step={0.5}
+                        disabled={!enabled}
+                        onChange={e => setStake(parseFloat(e.target.value) || stake)}
+                      />
+                      pts
+                      {key === 'r3a' && <span style={{ marginLeft: 6, opacity: 0.55 }}>(shared with 3B)</span>}
+                    </label>
+                  ) : (
+                    <span style={{ fontSize: 11, color: '#8a8a9a', opacity: 0.55, marginLeft: 4 }}>↑ uses Rule 3A stake</span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="bt-toggles">
