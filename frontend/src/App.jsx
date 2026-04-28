@@ -1643,12 +1643,20 @@ function BacktestTab() {
 
   // Per-rule toggles and configurable stakes (backtest only)
   const [rule1Enabled, setRule1Enabled] = useState(true)
-  const [rule2Enabled, setRule2Enabled] = useState(true)
   const [rule3aEnabled, setRule3aEnabled] = useState(true)
   const [rule3bEnabled, setRule3bEnabled] = useState(true)
   const [rule1Stake, setRule1Stake] = useState(3.0)
-  const [rule2Stake, setRule2Stake] = useState(2.0)
   const [rule3Stake, setRule3Stake] = useState(1.0)
+  const [rule3GapThreshold, setRule3GapThreshold] = useState(2.0)
+  // Rule 2 sub-bands
+  const [rule2aEnabled, setRule2aEnabled] = useState(true)
+  const [rule2bEnabled, setRule2bEnabled] = useState(true)
+  const [rule2cEnabled, setRule2cEnabled] = useState(true)
+  const [rule2aStake, setRule2aStake] = useState(0.0)
+  const [rule2bStake, setRule2bStake] = useState(1.0)
+  const [rule2cStake, setRule2cStake] = useState(2.0)
+  const [rule2Split1, setRule2Split1] = useState(3.0)
+  const [rule2Split2, setRule2Split2] = useState(4.0)
 
   const [marketsLoading, setMarketsLoading] = useState(false)
   const [markets, setMarkets] = useState([])
@@ -1752,12 +1760,19 @@ function BacktestTab() {
           point_value: pointValue,
           market_ids: [...selectedMarketIds],
           rule1_enabled: rule1Enabled,
-          rule2_enabled: rule2Enabled,
           rule3a_enabled: rule3aEnabled,
           rule3b_enabled: rule3bEnabled,
           rule1_stake: rule1Stake,
-          rule2_stake: rule2Stake,
           rule3_stake: rule3Stake,
+          rule3_gap_threshold: rule3GapThreshold,
+          rule2a_enabled: rule2aEnabled,
+          rule2b_enabled: rule2bEnabled,
+          rule2c_enabled: rule2cEnabled,
+          rule2a_stake: rule2aStake,
+          rule2b_stake: rule2bStake,
+          rule2c_stake: rule2cStake,
+          rule2_split1: rule2Split1,
+          rule2_split2: rule2Split2,
           ai_agent_enabled: aiAgentEnabled,
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
@@ -1821,12 +1836,19 @@ function BacktestTab() {
           point_value: pointValue,
           market_count: selectedMarketIds.size,
           rule1_enabled: rule1Enabled,
-          rule2_enabled: rule2Enabled,
           rule3a_enabled: rule3aEnabled,
           rule3b_enabled: rule3bEnabled,
           rule1_stake: rule1Stake,
-          rule2_stake: rule2Stake,
           rule3_stake: rule3Stake,
+          rule3_gap_threshold: rule3GapThreshold,
+          rule2a_enabled: rule2aEnabled,
+          rule2b_enabled: rule2bEnabled,
+          rule2c_enabled: rule2cEnabled,
+          rule2a_stake: rule2aStake,
+          rule2b_stake: rule2bStake,
+          rule2c_stake: rule2cStake,
+          rule2_split1: rule2Split1,
+          rule2_split2: rule2Split2,
           ai_agent_enabled: aiAgentEnabled,
           odds_agent_enabled: oddsAgentEnabled,
           odds_agent_interval_mins: oddsAgentInterval,
@@ -1966,12 +1988,19 @@ function BacktestTab() {
             point_value: pointValue,
             market_ids: [],
             rule1_enabled: rule1Enabled,
-            rule2_enabled: rule2Enabled,
             rule3a_enabled: rule3aEnabled,
             rule3b_enabled: rule3bEnabled,
             rule1_stake: rule1Stake,
-            rule2_stake: rule2Stake,
             rule3_stake: rule3Stake,
+            rule3_gap_threshold: rule3GapThreshold,
+            rule2a_enabled: rule2aEnabled,
+            rule2b_enabled: rule2bEnabled,
+            rule2c_enabled: rule2cEnabled,
+            rule2a_stake: rule2aStake,
+            rule2b_stake: rule2bStake,
+            rule2c_stake: rule2cStake,
+            rule2_split1: rule2Split1,
+            rule2_split2: rule2Split2,
             kelly_enabled: kellyEnabled,
             kelly_fraction: kellyFraction,
             kelly_bankroll: kellyBankroll,
@@ -2038,12 +2067,19 @@ function BacktestTab() {
         market_overlay_enabled: sigMarketOverlay,
         top2_concentration_enabled: top2Enabled,
         rule1_enabled: rule1Enabled,
-        rule2_enabled: rule2Enabled,
         rule3a_enabled: rule3aEnabled,
         rule3b_enabled: rule3bEnabled,
         rule1_stake: rule1Stake,
-        rule2_stake: rule2Stake,
         rule3_stake: rule3Stake,
+        rule3_gap_threshold: rule3GapThreshold,
+        rule2a_enabled: rule2aEnabled,
+        rule2b_enabled: rule2bEnabled,
+        rule2c_enabled: rule2cEnabled,
+        rule2a_stake: rule2aStake,
+        rule2b_stake: rule2bStake,
+        rule2c_stake: rule2cStake,
+        rule2_split1: rule2Split1,
+        rule2_split2: rule2Split2,
       },
       summary,
       days,
@@ -2225,44 +2261,124 @@ function BacktestTab() {
             </button>
           </div>
 
-          {/* Base Rules — per-rule toggles and configurable stakes */}
+          {/* Base Rules — per-rule toggles and configurable stakes/thresholds */}
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#8a8a9a', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               Base Rules
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {[
-                { key: 'r1', enabled: rule1Enabled, setEnabled: setRule1Enabled, label: 'Rule 1', desc: 'Fav < 2.0', stake: rule1Stake, setStake: setRule1Stake },
-                { key: 'r2', enabled: rule2Enabled, setEnabled: setRule2Enabled, label: 'Rule 2', desc: 'Fav 2.0–5.0', stake: rule2Stake, setStake: setRule2Stake },
-                { key: 'r3a', enabled: rule3aEnabled, setEnabled: setRule3aEnabled, label: 'Rule 3A', desc: 'Fav > 5.0, gap < 2 (split)', stake: rule3Stake, setStake: setRule3Stake },
-                { key: 'r3b', enabled: rule3bEnabled, setEnabled: setRule3bEnabled, label: 'Rule 3B', desc: 'Fav > 5.0, gap ≥ 2 (single)', stake: null, setStake: null },
-              ].map(({ key, enabled, setEnabled, label, desc, stake, setStake }) => (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', minWidth: 0 }}>
-                    <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-                    <span style={{ fontWeight: 600, fontSize: 12, opacity: enabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>{label}</span>
-                    <span style={{ fontSize: 11, color: '#8a8a9a', opacity: enabled ? 1 : 0.45 }}>{desc}</span>
-                  </label>
-                  {stake !== null ? (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a', marginLeft: 4 }}>
-                      Stake
-                      <input
-                        type="number"
-                        className="select-small"
-                        style={{ width: 58, marginLeft: 2 }}
-                        value={stake}
-                        min={0.5} max={100} step={0.5}
-                        disabled={!enabled}
-                        onChange={e => setStake(parseFloat(e.target.value) || stake)}
-                      />
-                      pts
-                      {key === 'r3a' && <span style={{ marginLeft: 6, opacity: 0.55 }}>(shared with 3B)</span>}
-                    </label>
-                  ) : (
-                    <span style={{ fontSize: 11, color: '#8a8a9a', opacity: 0.55, marginLeft: 4 }}>↑ uses Rule 3A stake</span>
-                  )}
-                </div>
-              ))}
+
+              {/* Rule 1 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule1Enabled} onChange={e => setRule1Enabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule1Enabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 1</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule1Enabled ? 1 : 0.45 }}>Fav &lt; 2.0</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a' }}>
+                  Stake
+                  <input type="number" className="select-small" style={{ width: 58, marginLeft: 2 }}
+                    value={rule1Stake} min={0.5} max={100} step={0.5} disabled={!rule1Enabled}
+                    onChange={e => setRule1Stake(parseFloat(e.target.value) || rule1Stake)} />
+                  pts
+                </label>
+              </div>
+
+              {/* Rule 2a */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule2aEnabled} onChange={e => setRule2aEnabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule2aEnabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 2a</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule2aEnabled ? 1 : 0.45 }}>
+                    2.0 –
+                    <input type="number" className="select-small" style={{ width: 52, margin: '0 3px' }}
+                      value={rule2Split1} min={2.1} max={4.9} step={0.1}
+                      onChange={e => { const v = parseFloat(e.target.value); if (v > 2.0 && v < rule2Split2) setRule2Split1(v) }}
+                      onClick={e => e.stopPropagation()} />
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a' }}>
+                  Stake
+                  <input type="number" className="select-small" style={{ width: 58, marginLeft: 2 }}
+                    value={rule2aStake} min={0} max={100} step={0.5} disabled={!rule2aEnabled}
+                    onChange={e => setRule2aStake(parseFloat(e.target.value) ?? 0)} />
+                  pts
+                  <span style={{ marginLeft: 4, opacity: 0.55 }}>(0 = skip)</span>
+                </label>
+              </div>
+
+              {/* Rule 2b */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule2bEnabled} onChange={e => setRule2bEnabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule2bEnabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 2b</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule2bEnabled ? 1 : 0.45 }}>
+                    {rule2Split1} –
+                    <input type="number" className="select-small" style={{ width: 52, margin: '0 3px' }}
+                      value={rule2Split2} min={2.2} max={4.9} step={0.1}
+                      onChange={e => { const v = parseFloat(e.target.value); if (v > rule2Split1 && v < 5.0) setRule2Split2(v) }}
+                      onClick={e => e.stopPropagation()} />
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a' }}>
+                  Stake
+                  <input type="number" className="select-small" style={{ width: 58, marginLeft: 2 }}
+                    value={rule2bStake} min={0} max={100} step={0.5} disabled={!rule2bEnabled}
+                    onChange={e => setRule2bStake(parseFloat(e.target.value) ?? 0)} />
+                  pts
+                </label>
+              </div>
+
+              {/* Rule 2c */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule2cEnabled} onChange={e => setRule2cEnabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule2cEnabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 2c</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule2cEnabled ? 1 : 0.45 }}>{rule2Split2} – 5.0</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a' }}>
+                  Stake
+                  <input type="number" className="select-small" style={{ width: 58, marginLeft: 2 }}
+                    value={rule2cStake} min={0} max={100} step={0.5} disabled={!rule2cEnabled}
+                    onChange={e => setRule2cStake(parseFloat(e.target.value) ?? 0)} />
+                  pts
+                </label>
+              </div>
+
+              {/* Rule 3A */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule3aEnabled} onChange={e => setRule3aEnabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule3aEnabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 3A</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule3aEnabled ? 1 : 0.45 }}>
+                    Fav &gt; 5.0, gap &lt;
+                    <input type="number" className="select-small" style={{ width: 52, margin: '0 3px' }}
+                      value={rule3GapThreshold} min={0.5} max={10} step={0.5}
+                      onChange={e => setRule3GapThreshold(parseFloat(e.target.value) || 2.0)}
+                      onClick={e => e.stopPropagation()} />
+                    (split)
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8a8a9a' }}>
+                  Stake
+                  <input type="number" className="select-small" style={{ width: 58, marginLeft: 2 }}
+                    value={rule3Stake} min={0.5} max={100} step={0.5} disabled={!rule3aEnabled && !rule3bEnabled}
+                    onChange={e => setRule3Stake(parseFloat(e.target.value) || rule3Stake)} />
+                  pts
+                  <span style={{ marginLeft: 4, opacity: 0.55 }}>(shared with 3B)</span>
+                </label>
+              </div>
+
+              {/* Rule 3B */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={rule3bEnabled} onChange={e => setRule3bEnabled(e.target.checked)} />
+                  <span style={{ fontWeight: 600, fontSize: 12, opacity: rule3bEnabled ? 1 : 0.45, whiteSpace: 'nowrap' }}>Rule 3B</span>
+                  <span style={{ fontSize: 11, color: '#8a8a9a', opacity: rule3bEnabled ? 1 : 0.45 }}>Fav &gt; 5.0, gap ≥ {rule3GapThreshold} (single)</span>
+                </label>
+                <span style={{ fontSize: 11, color: '#8a8a9a', opacity: 0.55 }}>↑ uses Rule 3A stake</span>
+              </div>
+
             </div>
           </div>
 

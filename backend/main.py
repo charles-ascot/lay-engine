@@ -1685,9 +1685,16 @@ _CHAT_TOOLS = [
                     "description": "Minutes before race time to evaluate (default 5)",
                 },
                 "rule1_enabled": {"type": "boolean"},
-                "rule2_enabled": {"type": "boolean"},
-                "rule3_enabled": {"type": "boolean"},
-                "rule4_enabled": {"type": "boolean"},
+                "rule2a_enabled": {"type": "boolean"},
+                "rule2b_enabled": {"type": "boolean"},
+                "rule2c_enabled": {"type": "boolean"},
+                "rule3a_enabled": {"type": "boolean"},
+                "rule3b_enabled": {"type": "boolean"},
+                "rule2a_stake": {"type": "number"},
+                "rule2b_stake": {"type": "number"},
+                "rule2c_stake": {"type": "number"},
+                "rule2_split1": {"type": "number"},
+                "rule2_split2": {"type": "number"},
                 "mark_rules_enabled": {"type": "boolean"},
                 "jofs_enabled": {"type": "boolean"},
                 "market_overlay_enabled": {"type": "boolean"},
@@ -3069,12 +3076,21 @@ class BacktestRunRequest(BaseModel):
     sandbox_enabled: bool = False   # apply strategy sandbox rules during this backtest
     # Per-rule toggles and configurable stakes (backtest only — live engine always uses defaults)
     rule1_enabled: bool = True
-    rule2_enabled: bool = True
     rule3a_enabled: bool = True
     rule3b_enabled: bool = True
     rule1_stake: float = 3.0
-    rule2_stake: float = 2.0
     rule3_stake: float = 1.0
+    # Rule 2 sub-bands
+    rule2a_enabled: bool = True
+    rule2b_enabled: bool = True
+    rule2c_enabled: bool = True
+    rule2a_stake: float = 0.0      # £0 = skip band by default (recommended)
+    rule2b_stake: float = 1.0
+    rule2c_stake: float = 2.0
+    rule2_split1: float = 3.0      # boundary between 2a and 2b
+    rule2_split2: float = 4.0      # boundary between 2b and 2c
+    # Rule 3 gap threshold
+    rule3_gap_threshold: float = 2.0
 
 
 @app.get("/api/backtest/dates")
@@ -3602,12 +3618,19 @@ def _backtest_run_inner(req):
             mark_uplift_enabled=req.mark_uplift_enabled,
             mark_uplift_stake=req.mark_uplift_stake,
             rule1_enabled=req.rule1_enabled,
-            rule2_enabled=req.rule2_enabled,
             rule3a_enabled=req.rule3a_enabled,
             rule3b_enabled=req.rule3b_enabled,
             rule1_stake=req.rule1_stake,
-            rule2_stake=req.rule2_stake,
             rule3_stake=req.rule3_stake,
+            rule2a_enabled=req.rule2a_enabled,
+            rule2b_enabled=req.rule2b_enabled,
+            rule2c_enabled=req.rule2c_enabled,
+            rule2a_stake=req.rule2a_stake,
+            rule2b_stake=req.rule2b_stake,
+            rule2c_stake=req.rule2c_stake,
+            rule2_split1=req.rule2_split1,
+            rule2_split2=req.rule2_split2,
+            rule3_gap_threshold=req.rule3_gap_threshold,
         )
 
         # Apply point value multiplier
