@@ -23,6 +23,7 @@ market evolution through a race day.
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -364,18 +365,22 @@ class FSUClient:
     #  INTERNALS
     # ──────────────────────────────────────────────
 
-    def _get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
+    def _get(self, path: str, params: Optional[dict] = None, retries: int = 3) -> Optional[dict]:
         url = f"{self.base_url}{path}"
-        try:
-            resp = self._session.get(url, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"FSU HTTP error {e.response.status_code} for {url}: {e.response.text[:200]}")
-            return None
-        except Exception as e:
-            logger.error(f"FSU request failed for {url}: {e}")
-            return None
+        for attempt in range(1, retries + 1):
+            try:
+                resp = self._session.get(url, params=params, timeout=self.timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"FSU HTTP {e.response.status_code} for {url}: {e.response.text[:200]}")
+                return None
+            except Exception as e:
+                logger.warning(f"FSU attempt {attempt}/{retries} failed for {url}: {e}")
+                if attempt < retries:
+                    time.sleep(2 ** (attempt - 1))  # 1s, 2s
+        logger.error(f"FSU all {retries} attempts failed for {url}")
+        return None
 
     @staticmethod
     def _parse_ts(iso: str) -> int:

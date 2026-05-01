@@ -3518,7 +3518,7 @@ def _backtest_run_inner(req):
     ])
     _band_stats = engine._compute_band_stats(_sig_config.band_perf_lookback_days) if _any_signal else {}
 
-    client = FSUClient(base_url=FSU_URL, date=req.date, timeout=15)
+    client = FSUClient(base_url=FSU_URL, date=req.date, timeout=45)
     client.login()  # fetches GCP identity token on Cloud Run
     markets = client.get_todays_win_markets(countries=req.countries)
     if req.market_ids:
