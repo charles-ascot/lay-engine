@@ -5069,7 +5069,26 @@ function ReportsTab() {
     setLoadingSessions(true)
     api('/api/sessions')
       .then(data => {
-        const filtered = (data.sessions || []).filter(s => s.date === selectedDate)
+        // A session is relevant to a date when its [start, stop] interval
+        // overlaps that date. Old code matched only on s.date, which
+        // silently hid sessions that ran across midnight — the engine
+        // kept trading but the session record stayed labelled with
+        // yesterday's date, so the report panel said "no session data
+        // for yesterday's trading" even though bets had been placed.
+        // /api/sessions returns summaries (no bets array) so we work off
+        // start_time / stop_time / status here, not bet timestamps.
+        const datePart = ts => (typeof ts === 'string' ? ts.slice(0, 10) : '')
+        const overlaps = s => {
+          if (!s) return false
+          if (s.date === selectedDate) return true
+          const start = datePart(s.start_time)
+          if (!start) return false
+          const stop = datePart(s.stop_time) || (s.status === 'RUNNING'
+            ? new Date().toISOString().slice(0, 10)
+            : start)
+          return start <= selectedDate && stop >= selectedDate
+        }
+        const filtered = (data.sessions || []).filter(overlaps)
         setDaySessions(filtered)
         setSelectedSessionIds(filtered.map(s => s.session_id))
         setLoadingSessions(false)

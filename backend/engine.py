@@ -796,7 +796,16 @@ class LayEngine:
             time.sleep(POLL_INTERVAL)
 
     def _check_day_rollover(self):
-        """Reset state at midnight UTC."""
+        """Reset state at midnight UTC and roll the trading session.
+
+        Without rolling the session, all bets placed across midnight stay
+        attached to the previous day's session record. The daily-report
+        path queries by ``session.date == YYYY-MM-DD`` and finds nothing
+        for the new day, even though the engine is still trading. The
+        previous behaviour was to reset per-day counters without touching
+        ``current_session`` — fixed here by closing the old session and
+        opening a fresh one with today's date.
+        """
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self.day_started:
             logger.info(f"Day rollover: {self.day_started} → {today}")
@@ -812,6 +821,50 @@ class LayEngine:
             self.signal_rejections = []
             self.day_started = today
             self._session_bets_start_index = 0
+            self._roll_session_for_new_day(today)
+
+    def _roll_session_for_new_day(self, today: str) -> None:
+        """Finalise the previous day's session and open today's.
+
+        Called from :meth:`_check_day_rollover`. Idempotent — if there is
+        no current session (engine just started up) or the current session
+        already carries today's date, nothing is done.
+        """
+        if not self.current_session:
+            return
+        if self.current_session.get("date") == today:
+            return
+
+        try:
+            self._finalize_session("COMPLETED")
+        except Exception:
+            logger.exception("rolling: _finalize_session raised")
+
+        now = datetime.now(timezone.utc)
+        session_id = f"ses_{now.strftime('%Y%m%d_%H%M%S')}"
+        self.current_session = {
+            "session_id": session_id,
+            "mode": "DRY_RUN" if self.dry_run else "LIVE",
+            "date": today,
+            "start_time": now.isoformat(),
+            "stop_time": None,
+            "status": "RUNNING",
+            "bets": [],
+            "results": [],
+            "summary": {
+                "total_bets": 0,
+                "total_stake": 0,
+                "total_liability": 0,
+                "markets_processed": 0,
+            },
+        }
+        self._session_bets_start_index = len(self.bets_placed)
+        self.sessions.append(self.current_session)
+        try:
+            self._save_sessions()
+        except Exception:
+            logger.exception("rolling: _save_sessions raised")
+        logger.info(f"Day rollover: opened new session {session_id} for {today}")
 
     # ──────────────────────────────────────────────
     #  CORE LOGIC

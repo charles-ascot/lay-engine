@@ -958,10 +958,96 @@ class AnalyseRequest(BaseModel):
     date: str  # YYYY-MM-DD
 
 
-def _compact_session_data(sessions: list[dict]) -> list[dict]:
-    """Build compact session summaries for AI prompts."""
+def _ts_to_date(ts: str | None) -> str | None:
+    """Return the YYYY-MM-DD prefix of a UTC ISO timestamp, or None."""
+    if not ts or not isinstance(ts, str):
+        return None
+    return ts[:10]
+
+
+def _session_overlaps_date(session: dict, date: str) -> bool:
+    """True if ``session`` is relevant to ``date``.
+
+    A session is relevant to a date if any of:
+      * ``session.date`` equals the requested date (the historic intent), OR
+      * any bet inside the session was placed on that date (so a session
+        whose engine.start() crossed midnight still surfaces correctly), OR
+      * any result inside the session was recorded on that date, OR
+      * the session is still RUNNING and its start_time is on/before the
+        requested date (covers a session that just opened today).
+    """
+    if not date:
+        return False
+    if session.get("date") == date:
+        return True
+    for b in session.get("bets", []) or []:
+        if _ts_to_date(b.get("timestamp")) == date:
+            return True
+    for r in session.get("results", []) or []:
+        if _ts_to_date(r.get("timestamp") or r.get("race_time")) == date:
+            return True
+    if session.get("status") == "RUNNING":
+        start = _ts_to_date(session.get("start_time"))
+        if start and start <= date:
+            return True
+    return False
+
+
+def _sessions_for_date(sessions: list[dict], date: str) -> list[dict]:
+    """All sessions that contain or overlap the requested date."""
+    return [s for s in sessions if _session_overlaps_date(s, date)]
+
+
+def _bet_belongs_to_date(bet: dict, date: str | None) -> bool:
+    """True when the bet was placed on the supplied date (or no filter)."""
+    if not date:
+        return True
+    return _ts_to_date(bet.get("timestamp")) == date
+
+
+def _result_belongs_to_date(result: dict, date: str | None) -> bool:
+    """True when the result is on the supplied date (or no filter)."""
+    if not date:
+        return True
+    rd = _ts_to_date(result.get("timestamp") or result.get("race_time"))
+    return rd == date
+
+
+def _compact_session_data(sessions: list[dict], date: str | None = None) -> list[dict]:
+    """Build compact session summaries for AI prompts.
+
+    When ``date`` is supplied, bets and results are filtered to those that
+    actually occurred on that date. This is what the daily report path
+    needs when a session spans midnight: yesterday's report should not
+    include bets placed two days ago even if both came from the same
+    session record.
+
+    The session's headline fields (``date``, ``start_time``, ``stop_time``)
+    are preserved verbatim so the AI sees the underlying session shape;
+    only the per-bet / per-result lists are sliced. ``summary`` is
+    recomputed from the sliced bets when a date filter is applied so
+    counts and totals align with the displayed bets.
+    """
     data = []
     for s in sessions:
+        bets_full = s.get("bets", []) or []
+        results_full = s.get("results", []) or []
+        bets_in = [b for b in bets_full if _bet_belongs_to_date(b, date)]
+        results_in = [r for r in results_full if _result_belongs_to_date(r, date)]
+
+        if date is not None:
+            stake_total = sum(float(b.get("size") or 0) for b in bets_in)
+            liability_total = sum(float(b.get("liability") or 0) for b in bets_in)
+            summary = {
+                "total_bets": len(bets_in),
+                "total_stake": stake_total,
+                "total_liability": liability_total,
+                "markets_processed": len(results_in),
+                "filtered_to_date": date,
+            }
+        else:
+            summary = s.get("summary", {})
+
         data.append({
             "session_id": s["session_id"],
             "mode": s["mode"],
@@ -969,7 +1055,7 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
             "start_time": s.get("start_time"),
             "stop_time": s.get("stop_time"),
             "status": s.get("status"),
-            "summary": s.get("summary", {}),
+            "summary": summary,
             "bets": [
                 {
                     "runner": b.get("runner_name"),
@@ -985,7 +1071,7 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
                     "country": b.get("country"),
                     "market_id": b.get("market_id"),
                 }
-                for b in s.get("bets", [])
+                for b in bets_in
             ],
             "results": [
                 {
@@ -1001,7 +1087,7 @@ def _compact_session_data(sessions: list[dict]) -> list[dict]:
                     "skipped": r.get("skipped"),
                     "skip_reason": r.get("skip_reason"),
                 }
-                for r in s.get("results", [])
+                for r in results_in
             ],
         })
     return data
@@ -1398,16 +1484,14 @@ def analyse_sessions(req: AnalyseRequest):
             content={"status": "error", "message": "ANTHROPIC_API_KEY not configured"},
         )
 
-    day_sessions = [
-        s for s in engine.sessions if s.get("date") == req.date
-    ]
+    day_sessions = _sessions_for_date(engine.sessions, req.date)
     if not day_sessions:
         return JSONResponse(
             status_code=404,
             content={"status": "error", "message": f"No sessions found for {req.date}"},
         )
 
-    session_data = _compact_session_data(day_sessions)
+    session_data = _compact_session_data(day_sessions, date=req.date)
     settled_data = _get_settled_for_date(req.date)
 
     prompt = f"""You are an expert horse racing betting analyst. Analyse the following lay betting session data from {req.date}.
@@ -1908,8 +1992,8 @@ def chat(req: ChatRequest):
     session_data = []
     if ds.get("session_data", True):
         if req.date:
-            context_sessions = [s for s in engine.sessions if s.get("date") == req.date]
-            session_data = _compact_session_data(context_sessions)
+            context_sessions = _sessions_for_date(engine.sessions, req.date)
+            session_data = _compact_session_data(context_sessions, date=req.date)
         else:
             session_data = [
                 {
@@ -2344,8 +2428,11 @@ def generate_report(req: GenerateReportRequest):
     try:
         ds = engine.settings.get("ai_data_sources", {})
 
-        # 1. Compact session data (enriched with venue, country, market_id)
-        session_data = _compact_session_data(selected_sessions) if ds.get("session_data", True) else []
+        # 1. Compact session data (enriched with venue, country, market_id).
+        #    Slice each session's bets/results to the requested date so a
+        #    session that spans midnight only contributes the day's data
+        #    actually under report.
+        session_data = _compact_session_data(selected_sessions, date=req.date) if ds.get("session_data", True) else []
 
         # 2. Settled bet data from Betfair (actual WIN/LOSS outcomes)
         settled_data = _get_settled_for_date(req.date) if ds.get("settled_bets", True) else None
@@ -2884,10 +2971,15 @@ def data_sessions(
     mode: str = Query(None, description="Filter by mode (LIVE or DRY_RUN)"),
     _key: str = Depends(require_api_key),
 ):
-    """All sessions with full detail. Optionally filter by date or mode."""
+    """All sessions with full detail. Optionally filter by date or mode.
+
+    The date filter matches any session that produced bets/results on the
+    requested date — including sessions whose ``session.date`` is a
+    different day because the engine ran across midnight without rolling.
+    """
     sessions = engine.sessions
     if date:
-        sessions = [s for s in sessions if s.get("date") == date]
+        sessions = _sessions_for_date(sessions, date)
     if mode:
         sessions = [s for s in sessions if s.get("mode") == mode.upper()]
     # Strip internal fields
@@ -2969,14 +3061,21 @@ def data_summary(
     date: str = Query(None, description="Filter by date (YYYY-MM-DD)"),
     _key: str = Depends(require_api_key),
 ):
-    """Aggregated statistics across all sessions."""
+    """Aggregated statistics across all sessions.
+
+    When a date filter is supplied, it matches sessions that contributed
+    bets on that date (handles sessions spanning midnight) and slices
+    each session's bet list to only those placed on the requested date.
+    """
     sessions = engine.sessions
     if date:
-        sessions = [s for s in sessions if s.get("date") == date]
+        sessions = _sessions_for_date(sessions, date)
 
     all_bets = []
     for s in sessions:
-        all_bets.extend(s.get("bets", []))
+        for b in s.get("bets", []):
+            if _bet_belongs_to_date(b, date):
+                all_bets.append(b)
 
     total_stake = sum(b.get("size", 0) for b in all_bets)
     total_liability = sum(b.get("liability", 0) for b in all_bets)
