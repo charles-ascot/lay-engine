@@ -171,9 +171,9 @@ def apply_rules(
     rule2a_enabled: bool = True,   # 2.0 – split1
     rule2b_enabled: bool = True,   # split1 – split2
     rule2c_enabled: bool = True,   # split2 – 5.0
-    rule2a_stake: float = 0.0,     # £0 = skip band
-    rule2b_stake: float = 1.0,
-    rule2c_stake: float = 2.0,
+    rule2a_stake: float = 2.0,     # £2 lay — matches historical Rule 2 across 2.0–5.0
+    rule2b_stake: float = 2.0,     # £2 lay — matches historical Rule 2 across 2.0–5.0
+    rule2c_stake: float = 2.0,     # £2 lay — matches historical Rule 2 across 2.0–5.0
     rule2_split1: float = 3.0,     # boundary between 2a and 2b
     rule2_split2: float = 4.0,     # boundary between 2b and 2c
     # Rule 3 gap threshold (splits 3A from 3B)
