@@ -798,17 +798,21 @@ class LayEngine:
     def _check_day_rollover(self):
         """Reset state at midnight UTC and roll the trading session.
 
-        Without rolling the session, all bets placed across midnight stay
-        attached to the previous day's session record. The daily-report
-        path queries by ``session.date == YYYY-MM-DD`` and finds nothing
-        for the new day, even though the engine is still trading. The
-        previous behaviour was to reset per-day counters without touching
-        ``current_session`` — fixed here by closing the old session and
-        opening a fresh one with today's date.
+        Order matters: the previous-day's session has to be finalised
+        BEFORE per-day state is wiped, because finalisation reads
+        ``self.bets_placed[self._session_bets_start_index:]`` to populate
+        the session's ``bets`` array. The earlier version wiped
+        ``bets_placed`` first, so every midnight-rolled session had an
+        empty bets array — daily reports for those days then rendered
+        as "no session data" even though the engine had traded.
         """
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self.day_started:
             logger.info(f"Day rollover: {self.day_started} → {today}")
+            # 1. Finalise yesterday's session FIRST, so its bets array is
+            #    populated from the still-intact bets_placed list.
+            self._roll_session_for_new_day(today)
+            # 2. Now safe to wipe per-day operational state.
             self.markets = []
             self.results = []
             self.bets_placed = []
@@ -821,7 +825,6 @@ class LayEngine:
             self.signal_rejections = []
             self.day_started = today
             self._session_bets_start_index = 0
-            self._roll_session_for_new_day(today)
 
     def _roll_session_for_new_day(self, today: str) -> None:
         """Finalise the previous day's session and open today's.

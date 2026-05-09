@@ -2,8 +2,8 @@
 
 Automated lay betting engine for Betfair horse racing. Discovers WIN markets, identifies favourites, applies a fixed rule set, and places lay bets — all running unattended on Google Cloud Run with a React dashboard on Cloudflare Pages.
 
-**Current version: v5.0.0**
-**Last updated: 2026-04-12**
+**Current version: v5.3.2**
+**Last updated: 2026-04-23**
 
 ---
 
@@ -96,6 +96,7 @@ CHIMERA is a multi-service platform running on Google Cloud Platform (project: `
 - **AI capability toggles** — Control what actions the AI agent can perform
 - **Excel export** — Snapshot any table to `.xls` for offline analysis
 - **Balance auto-refresh** — Account balance updates every 30 seconds
+- **Bet Settings confirm/save gate** — Explicit confirmation required before Auto Live Bet can be enabled; any setting change resets confirmed status and a nav-away prompt warns of unsaved changes
 - **Glassmorphism dark UI** — Three-theme dashboard (Classic / Dark Glass / Light Glass) with hero image background
 
 ---
@@ -849,13 +850,103 @@ gcloud scheduler jobs create http chimera-keepalive \
 | Spread Control → 0 bets in backtest | Under investigation — `best_available_to_back` returns `None` due to empty `batb` after MCM reconstruction in FSU1; ADVANCED data confirmed to contain `batb` fields | Disable Spread Control in backtest until resolved |
 | Mark Floor / Mark Uplift → 0 bets in backtest | Under investigation — root cause not yet identified | Disable Mark Floor and Mark Uplift in backtest until resolved |
 | Signal: Overround stuck in backtest | Intermittent — likely Cloud Run instance saturation from concurrent jobs | Wait for previous backtest cycle to complete before starting a new one |
+| Betfair API connection drops cause missed races | Confirmed — see incident log and FSU build guidance below | None currently; retry logic required (see FSU Build Notes) |
 
 ---
 
-## Recent Changes (2026-03-25 / 2026-04-12)
+## Betfair API Reliability — Incident Log & FSU Build Guidance
+
+### Incident: 22 April 2026
+
+**Summary:** During a live session on 22 April 2026, a number of races on the GB/IE card were not processed by the engine despite the engine running correctly throughout the day. Investigation of Cloud Run logs confirmed the root cause was intermittent Betfair API connection drops, not operator error, engine failure, or late start.
+
+**What the logs showed:**
+
+The following errors occurred across the session (all times UTC):
+
+| Time (UTC) | Error | Type |
+|---|---|---|
+| 09:47 | `listMarketBook` failed | `RemoteDisconnected` |
+| 10:16 | `listMarketBook` failed | `RemoteDisconnected` |
+| 11:02 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+| 12:52 | `listMarketBook` failed | `RemoteDisconnected` |
+| 13:22 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+| 14:12 | GCS write failed | `BrokenPipeError` |
+| 15:33 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+| 16:35 | `listMarketCatalogue` failed | `SSLEOFError` |
+| 17:23 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+| 18:20 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+| 18:21 | `listMarketCatalogue` failed | `RemoteDisconnected` |
+
+**Root cause:** Betfair's API (`api.betfair.com`) closed connections without response on multiple occasions throughout the day (`RemoteDisconnected`, `SSLEOFError`). When `listMarketCatalogue` fails, the engine receives an empty or stale market list for that poll cycle. If a race's betting window opened during one of those failed polls, the engine never detected it entering the window and the race was silently missed. No retry logic existed at the time of the incident.
+
+**What worked correctly:** Every race the engine did successfully detect in its window was processed without error. The engine's rule logic, bet placement, Mark Rules, and JOFS all functioned as designed. The operator was not at fault — the engine was armed and running from 07:13 BST, well before the first race at 13:39 BST. No bet settings were changed during the session.
+
+---
+
+### FSU Build Notes — Betfair API Resilience (Required)
+
+When building any FSU that interacts with the Betfair Exchange API, the following resilience patterns **must** be implemented. This is not optional — the 22 April incident demonstrates that Betfair drops connections throughout a normal racing day.
+
+**1. Retry with exponential backoff on all API calls**
+
+Every `listMarketCatalogue` and `listMarketBook` call must be wrapped in retry logic. A `RemoteDisconnected` or `SSLEOFError` from Betfair is a transient fault, not a fatal error.
+
+```python
+# Minimum viable pattern
+for attempt in range(3):
+    try:
+        result = betfair_api_call()
+        break
+    except (RemoteDisconnected, SSLError, ConnectionError) as e:
+        if attempt == 2:
+            log.error(f"API call failed after 3 attempts: {e}")
+            return cached_result  # fall back to stale cache
+        time.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
+```
+
+**2. Stale-cache fallback for market catalogue**
+
+The engine must maintain the last successful `listMarketCatalogue` response in memory. If a catalogue call fails, use the cached list rather than returning an empty set. Markets do not appear and disappear between polls — a 30-second-old catalogue is always better than an empty one.
+
+```python
+_catalogue_cache = []
+
+def get_markets():
+    global _catalogue_cache
+    try:
+        markets = betfair.list_market_catalogue(...)
+        _catalogue_cache = markets  # update cache on success
+        return markets
+    except Exception as e:
+        log.warning(f"Catalogue call failed, using stale cache ({len(_catalogue_cache)} markets): {e}")
+        return _catalogue_cache  # never return empty on transient failure
+```
+
+**3. Persistent market watchlist — never evict on a single failed poll**
+
+Once a market is known (first seen in the catalogue), it must remain on the internal watchlist until it is confirmed closed or settled. A single failed poll must never remove a market from the watchlist. Only remove a market when it has been explicitly absent from the catalogue for N consecutive successful polls.
+
+**4. Error rate alerting during racing hours**
+
+If more than 3 API errors occur within any 10-minute window during racing hours (12:00–20:00 UTC), log a `CRITICAL` entry and trigger a notification. Isolated drops are normal; clusters indicate a wider connectivity issue that may require intervention.
+
+**5. Separate retry budgets for catalogue vs book calls**
+
+`listMarketCatalogue` (finds markets) and `listMarketBook` (fetches prices) have different criticality. A failed book call affects one market's price data. A failed catalogue call can cause an entire race to be missed. Apply more aggressive retries (3×) to catalogue calls and lighter retries (2×) to book calls.
+
+**6. Log all retries explicitly**
+
+Every retry attempt must be logged at WARNING level with the error type, the affected call, and the attempt number. Silent retries make post-incident analysis impossible — the 22 April investigation took significantly longer than necessary because the errors were logged once without retry context.
+
+---
+
+## Recent Changes (2026-03-25 / 2026-04-23)
 
 | Commit | Description |
 |--------|-------------|
+| `1a6d0a0` | Add Bet Settings confirm/save gate for Auto Live Bet — explicit confirmation required before enabling; any setting change resets confirmed status; unsaved changes prompt on tab exit |
+| `83a2681` | Fix process window resetting to 12min on daily cold start — settings now persist across day boundaries; only operational data cleared at day rollover; `PROCESS_WINDOW_MINUTES` env var now accepts floats |
 | `5d92400` | Fix backtest card vs XLS export reconciliation failure: ghost rows, `markets_placed` metric, summary header in exports |
 | `d60a471` | Update README: add MOM section, Strategy Pipeline table, fix TOP2 live status, correct Mark Uplift stake range |
 | `9f06b09` | Fix critical integrity issues: OOM (unbounded state poll), NameError (Betfair history), sandbox trays lost on cold start, snapshot using wrong uplift stake, BSP state persistence, session cap |
